@@ -3,6 +3,7 @@ import type { Alert, AlertStatus, Fingerprint, Severity } from "./types";
 import { ackAlert, fetchAlerts, fetchFingerprints, resolveAlert, subscribe } from "./api";
 
 type Tab = "alerts" | "fingerprints";
+type Tone = "critical" | "warning" | "good" | "accent" | "neutral";
 type IconName =
   | "activity"
   | "alert"
@@ -35,6 +36,14 @@ const SEVERITY_LABELS: Record<Severity, string> = {
   CRITICAL: "Critical",
   WARN: "Warning",
   INFO: "Info",
+};
+
+const TONE_LABELS: Record<Tone, string> = {
+  critical: "Critical",
+  warning: "Warning",
+  good: "Healthy",
+  accent: "Observed",
+  neutral: "Neutral",
 };
 
 function Icon({ name }: { name: IconName }) {
@@ -81,6 +90,11 @@ function versionShift(a: Alert) {
   return `${a.old_version || "previous"} -> ${a.new_version || "unknown"}`;
 }
 
+function pct(value: number, total: number): number {
+  if (total <= 0) return 0;
+  return Math.round((value / total) * 100);
+}
+
 function Behavior({ text, kind }: { text: string; kind: "add" | "base" }) {
   const sensitive = SENSITIVE.test(text);
   return (
@@ -117,6 +131,61 @@ function MetricCard({
         {detail && <div className="metric-detail">{detail}</div>}
       </div>
     </div>
+  );
+}
+
+function StatusMeter({
+  label,
+  value,
+  total,
+  tone,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  tone: Tone;
+}) {
+  const width = total > 0 && value > 0 ? Math.max(4, (value / total) * 100) : 0;
+  return (
+    <div className="status-meter">
+      <div className="status-meter-head">
+        <span>{label}</span>
+        <b>{value}</b>
+      </div>
+      <div className="status-track" aria-label={`${label}: ${value}`}>
+        <i className={tone} style={{ width: `${width}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function InsightPanel({
+  eyebrow,
+  title,
+  value,
+  tone,
+  children,
+}: {
+  eyebrow: string;
+  title: string;
+  value: string;
+  tone: Tone;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className={`insight-panel ${tone}`}>
+      <div className="panel-kicker">
+        <span>{eyebrow}</span>
+        <b>{TONE_LABELS[tone]}</b>
+      </div>
+      <div className="panel-main">
+        <div>
+          <h3>{title}</h3>
+          <p>{children}</p>
+        </div>
+        <strong>{value}</strong>
+      </div>
+    </section>
   );
 }
 
@@ -270,12 +339,29 @@ function AlertsView() {
   const counts = useMemo(
     () => ({
       critical: alerts.filter((alert) => alert.severity === "CRITICAL" && alert.status !== "resolved").length,
+      warning: alerts.filter((alert) => alert.severity === "WARN" && alert.status !== "resolved").length,
+      info: alerts.filter((alert) => alert.severity === "INFO" && alert.status !== "resolved").length,
       open: alerts.filter((alert) => alert.status === "open").length,
       acknowledged: alerts.filter((alert) => alert.status === "acknowledged").length,
       resolved: alerts.filter((alert) => alert.status === "resolved").length,
     }),
     [alerts],
   );
+  const activeCount = alerts.filter((alert) => alert.status !== "resolved").length;
+  const progressScore = alerts.length ? Math.round(((counts.resolved + counts.acknowledged * 0.65) / alerts.length) * 100) : 100;
+  const newestAlert = alerts.reduce<Alert | undefined>(
+    (latest, alert) => (!latest || alert.detected_at > latest.detected_at ? alert : latest),
+    undefined,
+  );
+  const topService =
+    alerts
+      .filter((alert) => alert.status !== "resolved")
+      .reduce<Record<string, number>>((acc, alert) => {
+        acc[alert.service] = (acc[alert.service] ?? 0) + 1;
+        return acc;
+      }, {});
+  const busiestService =
+    Object.entries(topService).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "No active service";
 
   return (
     <section className="view">
@@ -286,6 +372,40 @@ function AlertsView() {
         <MetricCard label="Open alerts" value={counts.open} tone={counts.open ? "warning" : "good"} icon="activity" detail="Untriaged drift" />
         <MetricCard label="Acknowledged" value={counts.acknowledged} icon="archive" detail="Owned by team" />
         <MetricCard label="Resolved" value={counts.resolved} tone="good" icon="check" detail="Closed loop" />
+      </div>
+
+      <div className="overview-grid">
+        <InsightPanel
+          eyebrow="Review posture"
+          title={progressScore >= 80 ? "Queue is under control" : "Triage queue needs focus"}
+          value={`${progressScore}%`}
+          tone={progressScore >= 80 ? "good" : counts.critical ? "critical" : "warning"}
+        >
+          {alerts.length === 0
+            ? "No dependency drift has been reported by the live collector."
+            : `${counts.resolved + counts.acknowledged} of ${alerts.length} alerts have an owner or resolution.`}
+        </InsightPanel>
+
+        <section className="distribution-panel">
+          <div className="panel-kicker">
+            <span>Active severity</span>
+            <b>{activeCount} active</b>
+          </div>
+          <StatusMeter label="Critical" value={counts.critical} total={activeCount} tone="critical" />
+          <StatusMeter label="Warning" value={counts.warning} total={activeCount} tone="warning" />
+          <StatusMeter label="Info" value={counts.info} total={activeCount} tone="accent" />
+        </section>
+
+        <InsightPanel
+          eyebrow="Runtime signal"
+          title={newestAlert ? `Latest drift in ${newestAlert.service}` : "No drift detected"}
+          value={newestAlert ? relTime(newestAlert.detected_at) : "Live"}
+          tone={counts.critical ? "critical" : counts.open ? "warning" : "accent"}
+        >
+          {activeCount > 0
+            ? `${busiestService} has the highest active alert concentration.`
+            : "SSE monitoring is connected and the review queue is clear."}
+        </InsightPanel>
       </div>
 
       <div className="toolbar">
@@ -386,6 +506,14 @@ function FingerprintsView() {
   }, [fingerprints, mode, query]);
 
   const behaviorCount = fingerprints.reduce((sum, fp) => sum + Object.keys(fp.behaviors).length, 0);
+  const baselineCount = fingerprints.filter((fp) => fp.is_baseline).length;
+  const learningCount = fingerprints.length - baselineCount;
+  const baselineCoverage = pct(baselineCount, fingerprints.length);
+  const observationCount = fingerprints.reduce((sum, fp) => sum + fp.obs_count, 0);
+  const latestFingerprint = fingerprints.reduce<Fingerprint | undefined>(
+    (latest, fp) => (!latest || fp.last_seen > latest.last_seen ? fp : latest),
+    undefined,
+  );
 
   return (
     <section className="view">
@@ -393,9 +521,43 @@ function FingerprintsView() {
 
       <div className="metrics-grid">
         <MetricCard label="Packages learned" value={fingerprints.length} icon="cube" detail="Across services" />
-        <MetricCard label="Baselines" value={fingerprints.filter((fp) => fp.is_baseline).length} tone="good" icon="shield" detail="Promoted" />
-        <MetricCard label="Learning" value={fingerprints.filter((fp) => !fp.is_baseline).length} tone="warning" icon="activity" detail="Still observing" />
+        <MetricCard label="Baselines" value={baselineCount} tone="good" icon="shield" detail="Promoted" />
+        <MetricCard label="Learning" value={learningCount} tone="warning" icon="activity" detail="Still observing" />
         <MetricCard label="Behaviors" value={behaviorCount} tone="accent" icon="grid" detail="Canonical signals" />
+      </div>
+
+      <div className="overview-grid fingerprint-overview">
+        <InsightPanel
+          eyebrow="Library quality"
+          title={baselineCoverage >= 70 ? "Baseline coverage is strong" : "Promote stable fingerprints"}
+          value={`${baselineCoverage}%`}
+          tone={baselineCoverage >= 70 ? "good" : "warning"}
+        >
+          {fingerprints.length === 0
+            ? "Run monitored workloads to populate package behavior fingerprints."
+            : `${baselineCount} of ${fingerprints.length} fingerprints are promoted baselines.`}
+        </InsightPanel>
+
+        <section className="distribution-panel">
+          <div className="panel-kicker">
+            <span>Fingerprint state</span>
+            <b>{filtered.length} visible</b>
+          </div>
+          <StatusMeter label="Baseline" value={baselineCount} total={fingerprints.length} tone="good" />
+          <StatusMeter label="Learning" value={learningCount} total={fingerprints.length} tone="warning" />
+          <StatusMeter label="Filtered" value={filtered.length} total={fingerprints.length} tone="accent" />
+        </section>
+
+        <InsightPanel
+          eyebrow="Signal volume"
+          title={latestFingerprint ? `Freshest package: ${latestFingerprint.package}` : "Awaiting observations"}
+          value={observationCount.toLocaleString()}
+          tone={observationCount > 0 ? "accent" : "neutral"}
+        >
+          {latestFingerprint
+            ? `${latestFingerprint.service} updated ${relTime(latestFingerprint.last_seen)} with ${Object.keys(latestFingerprint.behaviors).length} behaviors.`
+            : "Collector observations will appear here as eBPF events are attributed."}
+        </InsightPanel>
       </div>
 
       <div className="toolbar">
@@ -486,6 +648,9 @@ export function App() {
           </div>
           <strong>{openCount === 0 ? "Healthy" : `${openCount} open`}</strong>
           <p>{knownPackages} learned package fingerprints</p>
+          <div className="side-meter" aria-hidden="true">
+            <i style={{ width: `${Math.min(100, knownPackages * 8)}%` }} />
+          </div>
         </div>
       </aside>
 
