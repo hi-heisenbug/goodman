@@ -1,0 +1,8 @@
+bin/
+dashboard/node_modules/
+dashboard/dist/
+test/workload/node_modules/
+*.db
+*.db-*
+*.log
+.git/

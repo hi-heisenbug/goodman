@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ .Release.Name }}-sensor
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goodman
+      app.kubernetes.io/component: sensor
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goodman
+        app.kubernetes.io/component: sensor
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.sensor.metricsPort | quote }}
+    spec:
+      serviceAccountName: {{ .Release.Name }}-sensor
+      hostPID: true
+      containers:
+        - name: sensor
+          image: {{ .Values.sensor.image | quote }}
+          imagePullPolicy: {{ .Values.sensor.imagePullPolicy }}
+          args:
+            - -collector=http://{{ .Release.Name }}-collector:{{ .Values.collector.service.port }}
+            - -proc-root=/host/proc
+            - -metrics-addr=:{{ .Values.sensor.metricsPort }}
+          env:
+            - name: NODE_NAME
+              valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
+            - name: GOODMAN_EXTRA_COMMS
+              value: {{ .Values.sensor.extraComms | quote }}
+          securityContext:
+            privileged: true   # simplest; v2 can drop to SYS_ADMIN,BPF,PERFMON,SYS_PTRACE
+            runAsNonRoot: false
+          ports:
+            - name: metrics
+              containerPort: {{ .Values.sensor.metricsPort }}
+          resources: {{- toYaml .Values.sensor.resources | nindent 12 }}
+          volumeMounts:
+            - { name: sys, mountPath: /sys, readOnly: true }
+            - { name: proc, mountPath: /host/proc }
+            - { name: bpffs, mountPath: /sys/fs/bpf }
+      volumes:
+        - { name: sys, hostPath: { path: /sys } }
+        - { name: proc, hostPath: { path: /proc } }
+        - { name: bpffs, hostPath: { path: /sys/fs/bpf } }
+      tolerations:
+        - operator: Exists   # run on every node incl. control-plane

@@ -1,0 +1,27 @@
+# build artifacts
+/bin/
+*.bpf.o
+internal/loader/goodman.bpf.o
+
+# datastore
+*.db
+*.db-shm
+*.db-wal
+goodman.db*
+
+# dashboard
+dashboard/node_modules/
+dashboard/dist/
+# NOTE: internal/api/ui/dist IS committed (the built dashboard) so `go build`
+# and `//go:embed all:dist` work on a fresh clone without running `make dashboard`.
+
+# node
+node_modules/
+test/workload/node_modules/
+
+# misc
+*.log
+.DS_Store
+
+# TS build cache
+dashboard/tsconfig.tsbuildinfo

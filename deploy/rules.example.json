@@ -1,0 +1,6 @@
+[
+  { "name": "secret-read", "pattern": "^READ .*(secret|token|credential|password|shadow|\\.pem|\\.key|\\.aws|\\.ssh|\\.npmrc|\\.env|id_rsa)" },
+  { "name": "cloud-metadata", "pattern": "^CONNECT 169\\.254\\.169\\.254:" },
+  { "name": "new-outbound-connect", "pattern": "^CONNECT " },
+  { "name": "new-exec", "pattern": "^EXEC " }
+]

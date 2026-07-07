@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-collector
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.collector.replicas }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: goodman
+      app.kubernetes.io/component: collector
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: goodman
+        app.kubernetes.io/component: collector
+    spec:
+      containers:
+        - name: collector
+          image: {{ .Values.collector.image | quote }}
+          imagePullPolicy: {{ .Values.collector.imagePullPolicy }}
+          args:
+            - -listen=:{{ .Values.collector.service.port }}
+            - -dsn=$(GOODMAN_DSN)
+            - -learn-obs=$(GOODMAN_LEARN_OBS)
+            - -learn-min-age=$(GOODMAN_LEARN_MIN_AGE)
+{{- if .Values.rules }}
+            - -rules=/etc/goodman/rules.json
+{{- end }}
+          env:
+            - name: GOODMAN_DSN
+              value: {{ include "goodman.collectorDSN" . | quote }}
+            - name: GOODMAN_LEARN_OBS
+              valueFrom: { configMapKeyRef: { name: {{ .Release.Name }}-config, key: learn_obs } }
+            - name: GOODMAN_LEARN_MIN_AGE
+              valueFrom: { configMapKeyRef: { name: {{ .Release.Name }}-config, key: learn_min_age } }
+          ports:
+            - name: http
+              containerPort: {{ .Values.collector.service.port }}
+          readinessProbe:
+            httpGet: { path: /v1/healthz, port: http }
+            initialDelaySeconds: 2
+          livenessProbe:
+            httpGet: { path: /v1/healthz, port: http }
+            initialDelaySeconds: 5
+          resources: {{- toYaml .Values.collector.resources | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+{{- if .Values.rules }}
+            - name: config
+              mountPath: /etc/goodman
+{{- end }}
+      volumes:
+        - name: data
+          emptyDir: {}
+{{- if .Values.rules }}
+        - name: config
+          configMap:
+            name: {{ .Release.Name }}-config
+            items:
+              - key: rules.json
+                path: rules.json
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-collector
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.collector.service.type }}
+  selector:
+    app.kubernetes.io/name: goodman
+    app.kubernetes.io/component: collector
+  ports:
+    - name: http
+      port: {{ .Values.collector.service.port }}
+      targetPort: http

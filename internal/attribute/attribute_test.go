@@ -1,0 +1,152 @@
+package attribute
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/goodman-sec/goodman/internal/model"
+)
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPathToPackage(t *testing.T) {
+	root := t.TempDir()
+	writeFile(t, filepath.Join(root, "app/node_modules/express/package.json"), `{"name":"express","version":"4.19.2"}`)
+	writeFile(t, filepath.Join(root, "app/node_modules/@scope/pkg/package.json"), `{"version":"2.0.1"}`)
+	writeFile(t, filepath.Join(root, "app/node_modules/a/node_modules/b/package.json"), `{"version":"9.9.9"}`)
+
+	cases := []struct {
+		path        string
+		wantPkg     string
+		wantVersion string
+		wantOK      bool
+	}{
+		{"/app/node_modules/express/lib/router/index.js", "express", "4.19.2", true},
+		{"/app/node_modules/@scope/pkg/dist/x.mjs", "@scope/pkg", "2.0.1", true},
+		{"/app/node_modules/a/node_modules/b/index.js", "b", "9.9.9", true}, // deepest wins
+		{"/app/src/server.js", "", "", false},
+		{"/app/node_modules/missing/index.js", "missing", "", false}, // no package.json -> not ok
+	}
+	for _, c := range cases {
+		pkg, ver, ok := PathToPackage(root, c.path)
+		if ok != c.wantOK || (ok && (pkg != c.wantPkg || ver != c.wantVersion)) || (!ok && pkg != "" && c.wantPkg == "") {
+			t.Errorf("PathToPackage(%q) = (%q,%q,%v), want (%q,%q,%v)", c.path, pkg, ver, ok, c.wantPkg, c.wantVersion, c.wantOK)
+		}
+	}
+}
+
+func TestCanonicalize(t *testing.T) {
+	cases := []struct {
+		t    model.EventType
+		arg  string
+		want string
+	}{
+		{model.EventFileOpen, "/app/src/routes/user-42.js", "READ /app/src/routes/**"},
+		{model.EventFileOpen, "/var/run/secrets/kubernetes.io/serviceaccount/token", "READ /var/run/secrets/kubernetes.io/serviceaccount/token"},
+		{model.EventFileOpen, "/home/u/.aws/credentials", "READ /home/u/.aws/credentials"},
+		{model.EventFileOpen, "/app/certs/server.pem", "READ /app/certs/server.pem"},
+		{model.EventFileOpen, "/app/node_modules/express/lib/view.js", "READ /app/node_modules/express/**"},
+		{model.EventFileOpen, "/etc/hosts", "READ /etc/hosts"},
+		{model.EventNetConnect, "140.82.113.6:443", "CONNECT 140.82.113.6:443"},
+		{model.EventProcExec, "/usr/bin/curl", "EXEC curl"},
+	}
+	for _, c := range cases {
+		if got := Canonicalize(c.t, c.arg); got != c.want {
+			t.Errorf("Canonicalize(%v,%q) = %q, want %q", c.t, c.arg, got, c.want)
+		}
+	}
+}
+
+func TestPerfMapLookup(t *testing.T) {
+	dir := t.TempDir()
+	pm := filepath.Join(dir, "perf-1.map")
+	writeFile(t, pm, ""+
+		"3ca9f8c04a20 1e0 LazyCompile:*handleRequest /app/node_modules/@tanstack/react-router/dist/esm/router.js:412:19\n"+
+		"3ca9f8c05000 100 LazyCompile:~anon /app/src/server.js:10:3\n"+
+		"badline\n"+
+		"3ca9f8c06000 80 RegExp:^foo$\n")
+
+	p := NewPerfMap(pm)
+	sym, ok := p.Lookup(0x3ca9f8c04a20 + 0x10)
+	if !ok {
+		t.Fatal("expected hit inside first interval")
+	}
+	src, ok := sourcePathOf(sym)
+	if !ok || src != "/app/node_modules/@tanstack/react-router/dist/esm/router.js" {
+		t.Fatalf("sourcePathOf(%q) = %q,%v", sym, src, ok)
+	}
+	if _, ok := p.Lookup(0x3ca9f8c04a20 + 0x1e0); ok {
+		t.Fatal("end of interval is exclusive")
+	}
+	if _, ok := p.Lookup(0x1000); ok {
+		t.Fatal("miss expected below all intervals")
+	}
+	if sym, ok := p.Lookup(0x3ca9f8c06000 + 1); !ok {
+		t.Fatal("RegExp interval should resolve")
+	} else if _, ok := sourcePathOf(sym); ok {
+		t.Fatal("RegExp symbol has no source path")
+	}
+}
+
+// TestAttributeEndToEnd simulates a full pid environment under a fake /proc.
+func TestAttributeEndToEnd(t *testing.T) {
+	proc := t.TempDir()
+	pid := 4242
+	pidDir := fmt.Sprintf("%s/%d", proc, pid)
+	// fake rootfs of the target
+	writeFile(t, pidDir+"/root/app/node_modules/good-pkg/package.json", `{"version":"1.0.1"}`)
+	writeFile(t, pidDir+"/root/app/package.json", `{"version":"0.1.0"}`)
+	writeFile(t, pidDir+"/root/tmp/perf-4242.map", ""+
+		"5000 100 LazyCompile:*exfil /app/node_modules/good-pkg/index.js:5:10\n"+
+		"6000 100 LazyCompile:*main /app/src/server.js:1:1\n")
+	writeFile(t, pidDir+"/status", "Name:\tnode\nNSpid:\t4242\n")
+	writeFile(t, pidDir+"/maps", "00400000-00500000 r-xp 00000000 08:01 1 /usr/bin/node\n")
+	writeFile(t, pidDir+"/cgroup", "0::/user.slice\n")
+	os.Symlink("/work/myservice", pidDir+"/cwd")
+
+	r := NewResolver(proc)
+
+	ev := &model.RawEvent{PID: uint32(pid), Type: uint8(model.EventNetConnect), StackLen: 3}
+	copy(ev.Arg[:], "127.0.0.1:9999")
+	ev.Stack[0] = 0x420000 // native node frame
+	ev.Stack[1] = 0x5010   // good-pkg JIT frame  <- deepest node_modules actor
+	ev.Stack[2] = 0x6010   // app frame above it
+
+	got := r.Attribute(ev, 0)
+	if got.Package != "good-pkg" || got.Version != "1.0.1" {
+		t.Fatalf("attributed %q@%q, want good-pkg@1.0.1", got.Package, got.Version)
+	}
+	if got.Behavior != "CONNECT 127.0.0.1:9999" {
+		t.Fatalf("behavior = %q", got.Behavior)
+	}
+	if got.Service != "myservice" {
+		t.Fatalf("service = %q, want myservice (cwd basename)", got.Service)
+	}
+
+	// App-only stack attributes to <app>, never a wrong package.
+	ev2 := &model.RawEvent{PID: uint32(pid), Type: uint8(model.EventFileOpen), StackLen: 1}
+	copy(ev2.Arg[:], "/app/data/x.txt")
+	ev2.Stack[0] = 0x6010
+	got2 := r.Attribute(ev2, 0)
+	if got2.Package != "<app>" || got2.Version != "0.1.0" {
+		t.Fatalf("attributed %q@%q, want <app>@0.1.0", got2.Package, got2.Version)
+	}
+
+	// Fully unresolvable stack -> <unknown>, honest over wrong.
+	ev3 := &model.RawEvent{PID: uint32(pid), Type: uint8(model.EventFileOpen), StackLen: 1}
+	copy(ev3.Arg[:], "/etc/hosts")
+	ev3.Stack[0] = 0xdeadbeef
+	if got3 := r.Attribute(ev3, 0); got3.Package != "<unknown>" {
+		t.Fatalf("attributed %q, want <unknown>", got3.Package)
+	}
+}

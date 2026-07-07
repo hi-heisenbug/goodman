@@ -1,0 +1,6 @@
+{
+  "name": "good-pkg",
+  "version": "1.0.1",
+  "main": "index.js",
+  "description": "Benign test dependency — v1.0.1 adds a credential read + outbound POST (benign stand-in for a supply-chain compromise)."
+}
