@@ -79,11 +79,11 @@ make dashboard   # builds and copies dist/ into internal/api/ui/dist
 The built `dist/` is **committed** so `go build` works without Node. If you
 changed `dashboard/src`, rebuild and commit the new `dist/` in the same PR.
 
-The production dashboard is the HEISENBUG UI, not a demo shell. Keep the React
-views wired to `/v1/alerts`, `/v1/fingerprints`, `/v1/stream`, and the alert
-action endpoints. Use local `@fontsource` DM Sans/Inter assets and the brand
-palette documented in [`AGENTS.md`](../AGENTS.md#conventions); do not add CDN
-fonts or hard-coded mock data.
+The production dashboard is the Goodman UI by Heisenbug, not a demo shell. Keep
+the React views wired to `/v1/alerts`, `/v1/fingerprints`, `/v1/stream`, and the
+alert action endpoints. Use local `@fontsource` DM Sans/Inter assets and the
+brand palette documented in [`AGENTS.md`](../AGENTS.md#conventions); do not add
+CDN fonts or hard-coded mock data.
 
 For UI changes, verify:
 
