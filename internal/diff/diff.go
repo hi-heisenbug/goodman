@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"sort"
 	"time"
 
 	"github.com/goodman-sec/goodman/internal/fingerprint"
@@ -91,7 +92,8 @@ func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Ale
 	// Trigger 2: baseline version doing something it never did before.
 	// (JustPromoted means the fresh behaviors were learned, not drift.)
 	if fp.IsBaseline && !up.JustPromoted && len(up.FreshBehaviors) > 0 {
-		return eng.emit(ctx, fp.Service, fp.Package, fp.Version, fp.Version, up.FreshBehaviors)
+		return eng.emit(ctx, fp.Service, fp.Package, fp.Version, fp.Version,
+			baselineBehaviors(fp.Behaviors, up.FreshBehaviors), up.FreshBehaviors)
 	}
 
 	// Trigger 1: new (not yet baseline) version vs previous version's baseline.
@@ -109,12 +111,13 @@ func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Ale
 		if len(novel) == 0 {
 			return nil, nil // version bump with identical behavior: NO alert
 		}
-		return eng.emit(ctx, fp.Service, fp.Package, base.Version, fp.Version, novel)
+		return eng.emit(ctx, fp.Service, fp.Package, base.Version, fp.Version,
+			behaviorKeys(base.Behaviors), novel)
 	}
 	return nil, nil
 }
 
-func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, newBehaviors []string) (*model.Alert, error) {
+func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, baselineBehaviors, newBehaviors []string) (*model.Alert, error) {
 	severity := model.SeverityWarn
 	for _, b := range newBehaviors {
 		for _, r := range eng.rules {
@@ -124,18 +127,43 @@ func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, ne
 		}
 	}
 	a := &model.Alert{
-		ID:           alertID(service, pkg, oldV, newV),
-		Service:      service,
-		Package:      pkg,
-		OldVersion:   oldV,
-		NewVersion:   newV,
-		Severity:     severity,
-		NewBehaviors: newBehaviors,
-		DetectedAt:   uint64(time.Now().UnixNano()),
-		Status:       model.AlertOpen,
+		ID:                alertID(service, pkg, oldV, newV),
+		Service:           service,
+		Package:           pkg,
+		OldVersion:        oldV,
+		NewVersion:        newV,
+		Severity:          severity,
+		BaselineBehaviors: baselineBehaviors,
+		NewBehaviors:      newBehaviors,
+		DetectedAt:        uint64(time.Now().UnixNano()),
+		Status:            model.AlertOpen,
 	}
 	if _, err := eng.store.UpsertAlert(ctx, a); err != nil {
 		return nil, err
 	}
 	return a, nil
+}
+
+func behaviorKeys(behaviors map[string]model.BehaviorStat) []string {
+	keys := make([]string, 0, len(behaviors))
+	for b := range behaviors {
+		keys = append(keys, b)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+func baselineBehaviors(behaviors map[string]model.BehaviorStat, fresh []string) []string {
+	skip := make(map[string]bool, len(fresh))
+	for _, b := range fresh {
+		skip[b] = true
+	}
+	keys := make([]string, 0, len(behaviors))
+	for b := range behaviors {
+		if !skip[b] {
+			keys = append(keys, b)
+		}
+	}
+	sort.Strings(keys)
+	return keys
 }

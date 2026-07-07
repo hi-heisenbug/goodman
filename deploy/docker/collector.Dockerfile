@@ -1,5 +1,5 @@
 # Collector image: builds the dashboard, embeds it, ships the Go binary.
-FROM node:20-bookworm AS ui
+FROM node:22-bookworm AS ui
 WORKDIR /ui
 COPY dashboard/package.json dashboard/package-lock.json* ./
 RUN npm install --no-audit --no-fund
@@ -19,6 +19,7 @@ RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/collector ./cmd/collector
 
 FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 COPY --from=build /out/collector /usr/local/bin/collector
+ENV GOODMAN_DSN=/tmp/goodman.db
 EXPOSE 8844
 USER nonroot
 ENTRYPOINT ["/usr/local/bin/collector"]

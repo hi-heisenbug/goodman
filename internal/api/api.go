@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -145,10 +146,40 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if err := s.enrichAlerts(r.Context(), alerts); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 	if alerts == nil {
 		alerts = []model.Alert{}
 	}
 	writeJSON(w, http.StatusOK, alerts)
+}
+
+func (s *Server) enrichAlerts(ctx context.Context, alerts []model.Alert) error {
+	for i := range alerts {
+		if alerts[i].OldVersion == "" || len(alerts[i].BaselineBehaviors) > 0 {
+			continue
+		}
+		fp, err := s.store.GetFingerprint(ctx, alerts[i].Service, alerts[i].Package, alerts[i].OldVersion)
+		if err != nil {
+			return err
+		}
+		if fp == nil {
+			continue
+		}
+		alerts[i].BaselineBehaviors = behaviorKeys(fp.Behaviors)
+	}
+	return nil
+}
+
+func behaviorKeys(behaviors map[string]model.BehaviorStat) []string {
+	keys := make([]string, 0, len(behaviors))
+	for b := range behaviors {
+		keys = append(keys, b)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func (s *Server) alertStatusHandler(status string) http.HandlerFunc {

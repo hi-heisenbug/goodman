@@ -1,5 +1,5 @@
 # Goodman Helm values. Install:
-#   helm install goodman goodman/goodman --set cluster=prod --set registries=npm,pypi
+#   helm install goodman goodman/goodman --set cluster=prod --set-string registries='npm\,pypi'
 
 # Free-form deployment identity (shown in the UI / used for multi-cluster later).
 cluster: dev

@@ -29,10 +29,14 @@ export async function resolveAlert(id: string): Promise<void> {
 
 // subscribe opens the SSE stream and invokes handlers on each event frame.
 export function subscribe(handlers: {
+  onOpen?: () => void;
+  onError?: () => void;
   onAlerts?: (a: Alert[]) => void;
   onEvents?: (e: unknown[]) => void;
 }): () => void {
   const es = new EventSource("/v1/stream");
+  if (handlers.onOpen) es.addEventListener("open", handlers.onOpen);
+  if (handlers.onError) es.addEventListener("error", handlers.onError);
   if (handlers.onAlerts) {
     es.addEventListener("alerts", (ev) => {
       try {

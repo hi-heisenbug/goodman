@@ -15,10 +15,21 @@ spec:
         app.kubernetes.io/name: goodman
         app.kubernetes.io/component: collector
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        fsGroupChangePolicy: OnRootMismatch
       containers:
         - name: collector
           image: {{ .Values.collector.image | quote }}
           imagePullPolicy: {{ .Values.collector.imagePullPolicy }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           args:
             - -listen=:{{ .Values.collector.service.port }}
             - -dsn=$(GOODMAN_DSN)
