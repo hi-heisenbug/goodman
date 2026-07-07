@@ -1,0 +1,21 @@
+Goodman is installed in namespace {{ .Release.Namespace }} (cluster: {{ .Values.cluster }}).
+
+  Sensor:    DaemonSet {{ .Release.Name }}-sensor (privileged, hostPID)
+  Collector: Deployment {{ .Release.Name }}-collector
+
+Open the dashboard:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-collector {{ .Values.collector.service.port }}:{{ .Values.collector.service.port }}
+  open http://127.0.0.1:{{ .Values.collector.service.port }}
+
+{{- if .Values.attribution.requireNodeOptions }}
+
+ACTION REQUIRED (Tier-1 attribution): add this to each Node workload you want
+attributed — one env var, no code change:
+
+  env:
+    - name: NODE_OPTIONS
+      value: "--perf-basic-prof --interpreted-frames-native-stack"
+{{- end }}
+
+Datastore: {{ if .Values.postgres.dsn }}PostgreSQL{{ else }}embedded SQLite at {{ .Values.postgres.sqlitePath }} (pilot mode){{ end }}
+Learning window: {{ .Values.learningWindow.obsCount }} observations / {{ .Values.learningWindow.minAgeHours }}h

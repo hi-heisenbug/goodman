@@ -1,0 +1,32 @@
+{{- if .Values.rbac.create }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ .Release.Name }}-sensor
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Release.Name }}-sensor
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+rules:
+  # The sensor reads pod metadata to map cgroups -> service names.
+  - apiGroups: [""]
+    resources: ["pods", "nodes"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ .Release.Name }}-sensor
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ .Release.Name }}-sensor
+subjects:
+  - kind: ServiceAccount
+    name: {{ .Release.Name }}-sensor
+    namespace: {{ .Release.Namespace }}
+{{- end }}

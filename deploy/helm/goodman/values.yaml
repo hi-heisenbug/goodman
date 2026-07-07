@@ -1,0 +1,56 @@
+# Goodman Helm values. Install:
+#   helm install goodman goodman/goodman --set cluster=prod --set registries=npm,pypi
+
+# Free-form deployment identity (shown in the UI / used for multi-cluster later).
+cluster: dev
+# Comma-separated registries this deployment watches (informational in v1).
+registries: npm
+
+sensor:
+  image: goodman/sensor:dev
+  imagePullPolicy: IfNotPresent
+  # Extra process comm names to watch beyond the built-in node/python defaults.
+  extraComms: ""
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: 500m, memory: 512Mi }
+  # metrics port for Prometheus scraping
+  metricsPort: 9478
+
+collector:
+  image: goodman/collector:dev
+  imagePullPolicy: IfNotPresent
+  replicas: 1
+  service:
+    type: ClusterIP
+    port: 8844
+  resources:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# Datastore. Provide a Postgres DSN in production; the default embedded SQLite
+# file is fine for a pilot / kind cluster (data lives on the collector pod).
+postgres:
+  dsn: ""                       # e.g. postgres://user:pass@host:5432/goodman?sslmode=require
+  # When dsn is empty the collector uses this SQLite path on an emptyDir.
+  sqlitePath: /data/goodman.db
+
+# Learning window before a fingerprint is promoted to a baseline.
+learningWindow:
+  obsCount: 500
+  minAgeHours: 24
+
+# Attribution tier: "perfmap" (Tier 1, needs NODE_OPTIONS below) or
+# "v8native" (Tier 2, not built in v1).
+attribution:
+  tier: perfmap
+  # If true, document that workloads need NODE_OPTIONS injected. A mutating
+  # webhook to auto-inject is a v1.1 item (deploy/helm placeholder only).
+  requireNodeOptions: true
+
+# High-risk rules override (JSON). Empty = built-in defaults (secret read,
+# cloud-metadata, new outbound connect, new exec).
+rules: ""
+
+rbac:
+  create: true

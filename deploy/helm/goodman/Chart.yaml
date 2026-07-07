@@ -1,0 +1,12 @@
+apiVersion: v2
+name: goodman
+description: Runtime dependency-behavior security sensor — attributes syscalls to npm/PyPI packages and alerts on behavioral drift.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - security
+  - ebpf
+  - supply-chain
+  - runtime
+home: https://github.com/goodman-sec/goodman

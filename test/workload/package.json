@@ -1,0 +1,10 @@
+{
+  "name": "goodman-test-workload",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Victim service: an HTTP server that require()s good-pkg and calls it per request.",
+  "main": "server.js",
+  "dependencies": {
+    "good-pkg": "file:node_modules/good-pkg"
+  }
+}

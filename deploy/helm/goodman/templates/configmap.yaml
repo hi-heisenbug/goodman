@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+data:
+  cluster: {{ .Values.cluster | quote }}
+  registries: {{ .Values.registries | quote }}
+  attribution_tier: {{ .Values.attribution.tier | quote }}
+  learn_obs: {{ .Values.learningWindow.obsCount | quote }}
+  learn_min_age: {{ printf "%dh" (int .Values.learningWindow.minAgeHours) | quote }}
+{{- if .Values.rules }}
+  rules.json: |
+{{ .Values.rules | indent 4 }}
+{{- end }}
