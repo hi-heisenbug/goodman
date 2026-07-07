@@ -323,6 +323,9 @@ function AlertsView() {
 
   useEffect(() => {
     load();
+    if (window.location.search.includes("static")) {
+      return;
+    }
     const unsub = subscribe({ onAlerts: () => load(), onEvents: () => load() });
     const timer = setInterval(load, 5000);
     return () => {
@@ -489,6 +492,9 @@ function FingerprintsView() {
 
   useEffect(() => {
     load();
+    if (window.location.search.includes("static")) {
+      return;
+    }
     const unsub = subscribe({ onEvents: () => load() });
     const timer = setInterval(load, 8000);
     return () => {
@@ -594,10 +600,22 @@ function FingerprintsView() {
 }
 
 export function App() {
-  const [tab, setTab] = useState<Tab>("alerts");
+  const getHashTab = (): Tab => {
+    const h = window.location.hash.replace("#", "");
+    return h === "fingerprints" ? "fingerprints" : "alerts";
+  };
+  const [tab, setTab] = useState<Tab>(getHashTab);
   const [openCount, setOpenCount] = useState(0);
   const [knownPackages, setKnownPackages] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<Date>(() => new Date());
+
+  useEffect(() => {
+    const handleHashChange = () => {
+      setTab(getHashTab());
+    };
+    window.addEventListener("hashchange", handleHashChange);
+    return () => window.removeEventListener("hashchange", handleHashChange);
+  }, []);
 
   useEffect(() => {
     const refresh = () => {
@@ -608,6 +626,9 @@ export function App() {
       });
     };
     refresh();
+    if (window.location.search.includes("static")) {
+      return;
+    }
     const unsub = subscribe({ onAlerts: refresh, onEvents: refresh });
     const timer = setInterval(refresh, 5000);
     return () => {
@@ -624,8 +645,8 @@ export function App() {
             <Icon name="triangle" />
           </div>
           <div>
-            <h1>HEISENBUG</h1>
-            <p>The bug that catches every bug</p>
+            <h1>GOODMAN</h1>
+            <p>by Heisenbug</p>
           </div>
         </div>
 

@@ -21,7 +21,17 @@ test/workload/node_modules/
 
 # misc
 *.log
+nohup.out
 .DS_Store
+__pycache__/
+*.pyc
 
 # TS build cache
 dashboard/tsconfig.tsbuildinfo
+
+# demo scratch output
+demo_build/frames/
+demo_build/chrome_profile/
+demo_build/*.db
+demo_build/*.db-shm
+demo_build/*.db-wal

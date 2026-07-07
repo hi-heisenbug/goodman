@@ -44,9 +44,9 @@ safe to deploy in a real cluster.
   when a change crosses those boundaries.
 - Never commit credentials, sudo passwords, local machine paths, temporary
   browser profiles, or one-off debugging state.
-- The dashboard brand is **HEISENBUG**, while the Go module remains
-  `github.com/goodman-sec/goodman`. Do not rename packages, module paths, or
-  public API surfaces as part of cosmetic work.
+- The product is **Goodman**. The startup/company name is **Heisenbug**. Use
+  "Goodman by Heisenbug" when both need to appear. Do not rename Go packages,
+  module paths, or public API surfaces as part of cosmetic work.
 
 ---
 
@@ -64,6 +64,8 @@ Good updates:
 - Add short troubleshooting notes when a failure mode is easy to misdiagnose.
 
 Bad updates:
+- Do not pollute this file with one-off context. Add guidance only when it is
+  durable, repo-specific, and likely to help future contributors.
 - Do not add chronological handoff logs, chat summaries, or commit-by-commit
   session history.
 - Do not include secrets, sudo passwords, private local paths, or machine-specific
@@ -212,7 +214,7 @@ environment:
 - **The dashboard is committed built.** `internal/api/ui/dist/` is checked in so
   `go build` works on a fresh clone without Node. If you change `dashboard/src`,
   run `make dashboard` and commit the rebuilt `dist/`.
-- **Dashboard design system:** HEISENBUG uses local `@fontsource` fonts only:
+- **Dashboard design system:** Goodman uses local `@fontsource` fonts only:
   headings/index labels are DM Sans 700; body/control text is Inter 400/600/700.
   Keep the light-mode palette aligned with the supplied brand system:
   `#93cb52`, `#1c9770`, `#bef3e2`, `#f2eeee`, `#464646`.
@@ -291,6 +293,8 @@ implement the handler, document it in [`docs/api.md`](docs/api.md), and add a
   buttons create mobile horizontal scroll. Check mobile width before merging.
 - Do not use a landing-page layout for the product UI. Operators need dense,
   scannable alert and fingerprint workflows.
+- Do not invert the names in UI, videos, or docs: **Goodman** is the product;
+  **Heisenbug** is the startup/company.
 
 ### Testing and release hygiene
 
