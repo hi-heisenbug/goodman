@@ -9,8 +9,9 @@ build, test, and extend Goodman without breaking its invariants.
 > 1. `make doctor` — confirm the toolchain and kernel are usable.
 > 2. `make build && make test` — must be green before you start.
 > 3. Make your change. Keep the C struct and Go struct in lockstep (see §"The one rule you must never break").
-> 4. `make test && make smoke` — smoke needs **no root** and exercises the whole backend.
-> 5. Live eBPF changes: `sudo make e2e` (needs root; can't run in an unprivileged sandbox).
+> 4. Dashboard changes: `make dashboard` and commit `internal/api/ui/dist/`.
+> 5. `make vet && make test && make smoke` — smoke needs **no root** and exercises the whole backend.
+> 6. Live eBPF changes: `sudo make e2e` (needs root; can't run in an unprivileged sandbox).
 
 ---
 
@@ -26,6 +27,26 @@ everything else is plumbing around it.
 
 Read [`docs/architecture.md`](docs/architecture.md) for the full design and
 [`docs/attribution.md`](docs/attribution.md) for the attribution algorithm.
+
+---
+
+## Production quality bar
+
+Goodman is an OSS security product, not a demo repository. Changes should leave
+the project understandable to a new contributor, runnable from a fresh clone, and
+safe to deploy in a real cluster.
+
+- Keep the full runtime path working: sensor → attribution → collector → store →
+  diff → API/SSE → dashboard.
+- Prefer a smaller correct change over a broad rewrite. This code has kernel,
+  database, API, and UI boundaries; accidental churn is expensive.
+- Keep source, generated build artifacts, tests, docs, Docker, and Helm in sync
+  when a change crosses those boundaries.
+- Never commit credentials, sudo passwords, local machine paths, temporary
+  browser profiles, or one-off debugging state.
+- The dashboard brand is **HEISENBUG**, while the Go module remains
+  `github.com/goodman-sec/goodman`. Do not rename packages, module paths, or
+  public API surfaces as part of cosmetic work.
 
 ---
 
@@ -113,6 +134,21 @@ all green. If you touched anything under `bpf/` or `internal/loader/`, note in
 your summary that `sudo make e2e` still needs to be run by a human on a real
 kernel, and why (unprivileged sandboxes can't load BPF — see below).
 
+For dashboard/UI changes, the finish bar is higher:
+
+```bash
+make dashboard
+(cd dashboard && npm audit --audit-level=moderate)
+make build
+make vet
+make test
+make smoke
+```
+
+Also visually verify at desktop and mobile widths with real-shaped API data.
+The dashboard must render live alerts/fingerprints from `/v1/*`; a static
+screenshot or hard-coded sample data is not an acceptable verification.
+
 ### Why `make e2e` may not run where you are
 
 Loading an eBPF program needs `CAP_BPF`/root. Many CI and agent sandboxes set
@@ -153,6 +189,14 @@ environment:
 - **The dashboard is committed built.** `internal/api/ui/dist/` is checked in so
   `go build` works on a fresh clone without Node. If you change `dashboard/src`,
   run `make dashboard` and commit the rebuilt `dist/`.
+- **Dashboard design system:** HEISENBUG uses local `@fontsource` fonts only:
+  headings/index labels are DM Sans 700; body/control text is Inter 400/600/700.
+  Keep the light-mode palette aligned with the supplied brand system:
+  `#93cb52`, `#1c9770`, `#bef3e2`, `#f2eeee`, `#464646`.
+- **Dashboard UX bar:** keep controls data-backed, responsive, and operational.
+  Avoid landing-page/marketing layouts, decorative gradient blobs, nested cards,
+  text overflow, and mobile horizontal scroll. Cards should stay at 8px radius or
+  less unless the whole design system changes.
 
 ---
 
@@ -185,19 +229,74 @@ implement the handler, document it in [`docs/api.md`](docs/api.md), and add a
 
 ---
 
-## Gotchas
+## Common mistakes to avoid
 
-- `bpf/vmlinux.h` is huge and generated. Regenerate with `make vmlinux` only when
-  targeting a different kernel; do not edit by hand.
-- `internal/loader/goodman.bpf.o` is a build artifact copied from `bpf/goodman.bpf.o`
-  by `make bpf`; it is git-ignored. The loader `//go:embed`s it, so `make build`
-  depends on `make bpf` having run (the Makefile wires this).
-- The `put_u16_dec` "loop not unrolled" clang warning is expected and harmless —
-  it's a bounded loop the kernel verifier accepts natively on ≥5.3.
-- perf maps are read via `/proc/<pid>/root/tmp/perf-<pid>.map` (the target's own
-  `/tmp` through its mount namespace) so it works both locally and in containers.
-- SQLite is the dev/pilot store (single writer, WAL); Postgres is production.
-  Don't add Redis or other infra without a strong reason (see plan §2).
+### eBPF and attribution
+
+- Do not edit `bpf/vmlinux.h` by hand. It is generated. Regenerate it with
+  `make vmlinux` only when intentionally targeting a different kernel.
+- Do not "fix" `internal/model/types_test.go` when `RawEvent` layout fails.
+  Fix the C and Go structs so they match.
+- Do not make attribution guessier to reduce `<unknown>` results. A wrong package
+  name is worse than an unknown package.
+- Do not read `/tmp/perf-<pid>.map` directly from the host namespace. Goodman
+  reads `/proc/<pid>/root/tmp/perf-<pid>.map` so containerized workloads resolve
+  against their own mount namespace.
+- Do not add blocking network, filesystem, or database work to the sensor hot
+  path. The ring-buffer reader must stay fast and lossy under pressure.
+
+### Storage, API, and rules
+
+- Do not add a migration for only one database. Every schema change needs both
+  `.postgres.sql` and `.sqlite.sql`.
+- Do not introduce Postgres-only SQL into shared store code unless the SQLite
+  path is explicitly separated and tested.
+- Do not hard-code new high-risk detections as scattered `if` statements. Use the
+  configurable rule list so operators can tune behavior.
+- Do not change API response shapes without updating `docs/api.md`, the CLI if
+  relevant, and the dashboard types.
+
+### Dashboard and frontend
+
+- Do not edit `dashboard/src` and forget `make dashboard`. The collector serves
+  committed files from `internal/api/ui/dist`, not the Vite source tree.
+- Do not add CDN fonts or remote design assets. The dashboard must work in
+  offline/private deployments; use local `@fontsource` assets.
+- Do not replace live API/SSE behavior with mock data in production components.
+  Mock data is fine only in tests or local visual harnesses.
+- Do not let long package names, versions, paths, behavior strings, or action
+  buttons create mobile horizontal scroll. Check mobile width before merging.
+- Do not use a landing-page layout for the product UI. Operators need dense,
+  scannable alert and fingerprint workflows.
+
+### Testing and release hygiene
+
+- Do not treat `make smoke` as redundant. It catches real collector, store,
+  fingerprint, diff, API, and alert behavior without root.
+- Do not claim live eBPF coverage if `sudo make e2e` did not run. Say clearly
+  when only the no-root test path was verified.
+- Do not leave temporary servers, collectors, sensors, Chrome instances, or test
+  databases running after local verification.
+- Do not commit stale Vite hashed assets. If `dashboard/dist` changes, old hashed
+  files in `internal/api/ui/dist/assets/` should usually disappear and new ones
+  should appear.
+- Do not change repo scripts just because a local agent/container lacks a tool.
+  For example, use `grep` locally if `rg` is missing, but do not weaken project
+  tooling for that environment.
+
+### Known non-bugs
+
+- The `put_u16_dec` "loop not unrolled" clang warning is expected and harmless;
+  it is a bounded loop the kernel verifier accepts on supported kernels.
+- `make e2e` needs root or the right BPF capabilities. In unprivileged sandboxes,
+  use `make smoke` and state that the live kernel path was not run.
+- Live e2e chooses dynamic collector/workload/sink ports by default. For a
+  port-sensitive reproduction, set `GOODMAN_E2E_COLLECTOR_PORT`,
+  `GOODMAN_E2E_WORKLOAD_PORT`, or `GOODMAN_E2E_SINK_PORT`.
+- Node may report its process comm as `node`, `nodejs`, or `MainThread`. Keep
+  those names covered when changing watch logic.
+- Simple headless screenshot commands may hang on pages with SSE. Use bounded
+  browser automation that waits for rendered DOM text, captures, then exits.
 
 ---
 

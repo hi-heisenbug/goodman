@@ -24,7 +24,9 @@ matches what you are trying to do.
 ## Agent And Contributor Entry Points
 
 - [AGENTS.md](../AGENTS.md) is required reading for coding agents and useful for
-  humans making substantial changes.
+  humans making substantial changes. It includes repository invariants,
+  production quality expectations, HEISENBUG dashboard rules, and common mistakes
+  to avoid.
 - [CONTRIBUTING.md](../CONTRIBUTING.md) explains the contributor workflow.
 - [SECURITY.md](../SECURITY.md) explains responsible disclosure and threat model.
 
