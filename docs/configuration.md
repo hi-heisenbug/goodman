@@ -42,14 +42,14 @@ GOODMAN_DSN='postgres://goodman:secret@db:5432/goodman?sslmode=require' ./bin/co
 | `-proc-root` | `GOODMAN_PROC_ROOT` | `/proc` | Host proc mount. Set to `/host/proc` in the DaemonSet. |
 | `-batch-interval` | `GOODMAN_BATCH_INTERVAL` | `1.5s` | How often to flush batched events to the collector. |
 | `-metrics-addr` | `GOODMAN_METRICS_ADDR` | `:9478` | Prometheus metrics listen address (`""` disables). |
-| `-comms` | `GOODMAN_EXTRA_COMMS` | *(none)* | Extra process names to watch, comma-separated (beyond built-in `node`/`python3`). |
+| `-comms` | `GOODMAN_EXTRA_COMMS` | *(none)* | Extra process names to watch, comma-separated (beyond built-in runtime comm names). |
 | `-watch-interval` | — | `3s` | How often to rescan `/proc` for runtime processes. |
 | `-stdout` | — | `false` | Print attributed events to stdout instead of sending to the collector (debugging). |
 | `-raw` | — | `false` | With `-stdout`: also print raw events including stack depth. |
 | `NODE_NAME` | — | hostname | Sensor identity in event batches (set to the k8s node name in the DaemonSet). |
 
-Watched runtimes default to `node`, `nodejs`, `python`, `python3`. Add more with
-`-comms` / `GOODMAN_EXTRA_COMMS`.
+Watched runtimes default to `node`, `nodejs`, Node's `MainThread`, `python`, and
+`python3`. Add more with `-comms` / `GOODMAN_EXTRA_COMMS`.
 
 ## High-risk rules
 

@@ -8,7 +8,7 @@ import (
 )
 
 // TestEmbeddedObjectSpec parses the embedded eBPF object (no privileges
-// required) and asserts the three tracepoint programs and the maps the loader
+// required) and asserts the tracepoint programs and the maps the loader
 // relies on are present with the expected types. This catches a stale/broken
 // .o without needing root to actually load it into the kernel.
 func TestEmbeddedObjectSpec(t *testing.T) {
@@ -20,7 +20,7 @@ func TestEmbeddedObjectSpec(t *testing.T) {
 		t.Fatalf("parse embedded object: %v", err)
 	}
 
-	for _, prog := range []string{"trace_openat", "trace_connect", "trace_execve"} {
+	for _, prog := range []string{"trace_open", "trace_openat", "trace_openat2", "trace_connect", "trace_execve"} {
 		p, ok := spec.Programs[prog]
 		if !ok {
 			t.Errorf("missing program %q", prog)

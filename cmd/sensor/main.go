@@ -70,7 +70,7 @@ func main() {
 		log.Fatalf("load eBPF: %v", err)
 	}
 	defer l.Close()
-	log.Printf("eBPF programs attached (openat, connect, execve); proc root %s", *procRoot)
+	log.Printf("eBPF programs attached (open/openat/openat2, connect, execve); proc root %s", *procRoot)
 
 	if *metricsAddr != "" {
 		go func() {

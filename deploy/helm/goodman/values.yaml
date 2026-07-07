@@ -9,7 +9,7 @@ registries: npm
 sensor:
   image: goodman/sensor:dev
   imagePullPolicy: IfNotPresent
-  # Extra process comm names to watch beyond the built-in node/python defaults.
+  # Extra process comm names to watch beyond the built-in runtime defaults.
   extraComms: ""
   resources:
     requests: { cpu: 50m, memory: 128Mi }

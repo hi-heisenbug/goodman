@@ -3,8 +3,8 @@
 package loader
 
 import (
-	_ "embed"
 	"bytes"
+	_ "embed"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -27,7 +27,8 @@ var bpfObject []byte
 
 // WatchedComms are the runtime process names Goodman attaches to by default.
 var WatchedComms = map[string]bool{
-	"node": true, "nodejs": true, "python3": true, "python": true,
+	"node": true, "nodejs": true, "MainThread": true,
+	"python3": true, "python": true,
 }
 
 type Loader struct {
@@ -60,7 +61,9 @@ func New(procRoot string) (*Loader, error) {
 
 	l := &Loader{coll: coll, procRoot: procRoot, watched: map[uint32]bool{}}
 	for prog, tp := range map[string]string{
+		"trace_open":    "sys_enter_open",
 		"trace_openat":  "sys_enter_openat",
+		"trace_openat2": "sys_enter_openat2",
 		"trace_connect": "sys_enter_connect",
 		"trace_execve":  "sys_enter_execve",
 	} {
@@ -135,8 +138,8 @@ func (l *Loader) Drops() uint64 {
 	return total
 }
 
-// RefreshWatched scans procRoot for runtime processes (node/python) and
-// syncs the kernel pid filter. onExit is called for pids that disappeared.
+// RefreshWatched scans procRoot for runtime processes and syncs the kernel pid
+// filter. onExit is called for pids that disappeared.
 func (l *Loader) RefreshWatched(extraComms []string, onNew, onExit func(pid uint32)) error {
 	comms := map[string]bool{}
 	for c := range WatchedComms {

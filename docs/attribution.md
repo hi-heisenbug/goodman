@@ -90,9 +90,9 @@ Raw syscall arguments are noisy — unique temp files, ephemeral ports. The same
 
 | Raw | Canonical |
 |---|---|
-| `openat /app/src/routes/user-42.js` | `READ /app/src/routes/**` |
-| `openat /app/node_modules/express/lib/view.js` | `READ /app/node_modules/express/**` |
-| `openat /etc/hosts` | `READ /etc/hosts` (shallow paths kept verbatim) |
+| `open* /app/src/routes/user-42.js` | `READ /app/src/routes/**` |
+| `open* /app/node_modules/express/lib/view.js` | `READ /app/node_modules/express/**` |
+| `open* /etc/hosts` | `READ /etc/hosts` (shallow paths kept verbatim) |
 | `connect 140.82.113.6:443` | `CONNECT 140.82.113.6:443` |
 | `execve /usr/bin/curl` | `EXEC curl` |
 
