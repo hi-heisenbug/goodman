@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Setup & troubleshooting help
+    url: https://github.com/goodman-sec/goodman/blob/main/docs/troubleshooting.md
+    about: Having trouble getting Goodman running? Check the troubleshooting guide before opening an issue.
+  - name: Report a security vulnerability
+    url: https://github.com/goodman-sec/goodman/blob/main/SECURITY.md
+    about: Please do not open a public issue for security vulnerabilities. Follow our responsible-disclosure policy instead.
