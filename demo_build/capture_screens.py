@@ -5,6 +5,7 @@ import os
 import sys
 import urllib.request
 import json
+import urllib.parse
 import tempfile
 import atexit
 from pathlib import Path
@@ -12,6 +13,8 @@ from pathlib import Path
 BUILD = Path(__file__).parent
 SCREENS = BUILD / "screenshots"
 SCREENS.mkdir(exist_ok=True)
+for old_shot in SCREENS.glob("*.png"):
+    old_shot.unlink()
 PROFILE_DIR = tempfile.TemporaryDirectory(prefix="goodman-demo-chrome-")
 atexit.register(PROFILE_DIR.cleanup)
 PROF = Path(PROFILE_DIR.name)
@@ -93,15 +96,44 @@ def capture(name, url):
     except Exception as e:
         print(f"    WARNING: Failed to capture {name}: {e}")
 
-# 1. Backdoor Code Preview
+def post(path):
+    req = urllib.request.Request(
+        f"http://127.0.0.1:{PORT}{path}",
+        data=b"",
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=5) as r:
+        return json.loads(r.read().decode())
+
+def set_triage_state():
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{PORT}/v1/alerts") as r:
+            alerts = json.loads(r.read().decode())
+        if len(alerts) >= 1:
+            post(f"/v1/alerts/{urllib.parse.quote(alerts[0]['id'])}/ack")
+            print(f"  Acknowledged {alerts[0]['package']} for triage screenshot")
+        if len(alerts) >= 2:
+            post(f"/v1/alerts/{urllib.parse.quote(alerts[1]['id'])}/resolve")
+            print(f"  Resolved {alerts[1]['package']} for triage screenshot")
+    except Exception as e:
+        print(f"  WARNING: Could not update alert state for triage screenshot: {e}")
+
+# 1. Malicious package update evidence.
 backdoor_html = f"file://{BUILD.resolve()}/backdoor_preview.html"
-capture("02_trigger", backdoor_html)
+capture("01_malicious_update", backdoor_html)
 
-# 2. Fingerprints Explorer
-capture("03_evidence", f"http://127.0.0.1:{PORT}/?static=true#fingerprints")
+# 2. Live alert review.
+capture("02_alerts_open", f"http://127.0.0.1:{PORT}/?static=true#alerts")
 
-# 3. Alerts Dashboard
-capture("04_output", f"http://127.0.0.1:{PORT}/?static=true#alerts")
+# 3. Fingerprint explorer.
+capture("03_fingerprints_all", f"http://127.0.0.1:{PORT}/?static=true#fingerprints")
+
+# 4. Triage state after real API status changes.
+set_triage_state()
+capture("04_alerts_triaged", f"http://127.0.0.1:{PORT}/?static=true&status=all#alerts")
+
+# 5. Learning fingerprints filter.
+capture("05_fingerprints_learning", f"http://127.0.0.1:{PORT}/?static=true&state=learning#fingerprints")
 
 print("=== Stopping Goodman Collector ===")
 collector_proc.terminate()

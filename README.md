@@ -19,6 +19,14 @@ The embedded Goodman dashboard by Heisenbug is a production React/Vite UI with
 live alert review, fingerprint exploration, SSE updates, and responsive mobile
 layouts.
 
+## Demo
+
+Watch the 54-second product walkthrough:
+
+<video src="demo_build/goodman_demo.mp4" controls width="100%" title="Goodman product demo"></video>
+
+[Open the demo video](demo_build/goodman_demo.mp4)
+
 ## What It Detects
 
 Goodman is built for dependency behavior drift:

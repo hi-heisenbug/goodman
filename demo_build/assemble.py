@@ -2,7 +2,7 @@
 """
 Goodman product demo video assembler.
 
-Output: goodman_demo.mp4  1920x1080  24fps
+Output: goodman_demo.mp4  1280x720  24fps
 """
 import shutil
 import subprocess
@@ -267,42 +267,8 @@ def scene_close():
     return img
 
 
-def frame_screenshot(img, eyebrow, title, body, url, accent=TURQ, crop=None):
-    out = base()
-    d = ImageDraw.Draw(out)
-
-    d.text((108, 138), eyebrow.upper(), font=F_LABEL, fill=accent, anchor="la")
-    d.text((108, 188), title, font=F_H2, fill=INK, anchor="la")
-    draw_multiline(d, (108, 260), wrap(body, 58), F_SMALL, CHARCOAL, spacing=10)
-
-    frame = [108, 386, W - 108, H - 84]
-    shadow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    sd = ImageDraw.Draw(shadow)
-    sd.rounded_rectangle([frame[0] + 14, frame[1] + 18, frame[2] + 14, frame[3] + 18], radius=8, fill=(0, 0, 0, 34))
-    out = Image.alpha_composite(out.convert("RGBA"), shadow).convert("RGB")
-    d = ImageDraw.Draw(out)
-
-    card(d, frame)
-    bar_h = 54
-    d.rectangle([frame[0] + 1, frame[1] + 1, frame[2] - 1, frame[1] + bar_h], fill=(246, 248, 247))
-    d.line([(frame[0], frame[1] + bar_h), (frame[2], frame[1] + bar_h)], fill=LINE, width=1)
-    for i, color in enumerate([(220, 53, 69), (255, 176, 32), (40, 167, 69)]):
-        cx = frame[0] + 30 + i * 28
-        cy = frame[1] + 27
-        d.ellipse([cx - 8, cy - 8, cx + 8, cy + 8], fill=color)
-    d.text((frame[0] + 140, frame[1] + 27), url, font=F_SMALL, fill=MUTED, anchor="lm")
-    d.rounded_rectangle([frame[2] - 148, frame[1] + 14, frame[2] - 28, frame[1] + 40], radius=13, fill=MINT)
-    d.text((frame[2] - 88, frame[1] + 27), "LIVE PROOF", font=font(16, True), fill=TURQ, anchor="mm")
-
-    shot = img
-    if crop:
-        shot = shot.crop(crop)
-    sx0, sy0 = frame[0] + 1, frame[1] + bar_h + 1
-    sw, sh = frame[2] - frame[0] - 2, frame[3] - frame[1] - bar_h - 2
-    scale = min(sw / shot.width, sh / shot.height)
-    shot = shot.resize((int(shot.width * scale), int(shot.height * scale)), Image.Resampling.LANCZOS)
-    out.paste(shot, (sx0 + (sw - shot.width) // 2, sy0 + (sh - shot.height) // 2))
-    return out
+def proof_scene(img, eyebrow, title, body, url, accent=TURQ):
+    return img.resize((W, H), Image.Resampling.LANCZOS)
 
 
 _frame_idx = 0
@@ -376,6 +342,8 @@ def encode():
         "medium",
         "-crf",
         "18",
+        "-vf",
+        "scale=1280:720",
         "-pix_fmt",
         "yuv420p",
         "-movflags",
@@ -394,63 +362,87 @@ def main():
     FRAMES.mkdir(parents=True, exist_ok=True)
 
     print("Loading proof screenshots...")
-    trigger = load_screen("02_trigger")
-    evidence = load_screen("03_evidence")
-    output = load_screen("04_output")
+    malicious = load_screen("01_malicious_update")
+    alerts_open = load_screen("02_alerts_open")
+    fingerprints_all = load_screen("03_fingerprints_all")
+    alerts_triaged = load_screen("04_alerts_triaged")
+    fingerprints_learning = load_screen("05_fingerprints_learning")
 
     scenes = [
-        ("opener", lambda: write_still(scene_opener(), 5.0)),
-        ("problem", lambda: write_still(scene_problem(), 6.5)),
+        ("opener", lambda: write_still(scene_opener(), 4.5)),
+        ("problem", lambda: write_still(scene_problem(), 5.5)),
         (
             "malicious update",
-            lambda: write_zoom(
-                frame_screenshot(
-                    trigger,
+            lambda: write_still(
+                proof_scene(
+                    malicious,
                     "Step 1",
                     "A dependency update introduces new runtime behavior",
                     "The suspicious code path is package-scoped before the operator ever starts triage.",
                     "node_modules/jsonwebtoken/index.js",
                     AMBER,
-                    crop=(560, 390, 1480, 1080),
                 ),
-                8.0,
-                anchor=(0.50, 0.56),
+                6.5,
             ),
         ),
-        ("attribution pipeline", lambda: write_still(scene_pipeline(), 7.0)),
+        (
+            "open alerts",
+            lambda: write_still(
+                proof_scene(
+                    alerts_open,
+                    "Step 2",
+                    "Goodman shows the live dependency drift queue",
+                    "Operators see severity, affected service, package version shift, and risky new behavior in one review surface.",
+                    "dashboard: open alerts",
+                    RED,
+                ),
+                7.0,
+            ),
+        ),
         (
             "fingerprint proof",
-            lambda: write_zoom(
-                frame_screenshot(
-                    evidence,
-                    "Step 2",
+            lambda: write_still(
+                proof_scene(
+                    fingerprints_all,
+                    "Step 3",
                     "Goodman learns package behavior baselines",
                     "The fingerprint library shows what each package normally reads, executes, and connects to.",
-                    "http://localhost:8844/?static=true#fingerprints",
+                    "dashboard: fingerprint explorer",
                     TURQ,
-                    crop=(520, 250, 1480, 1080),
                 ),
-                8.5,
-                anchor=(0.50, 0.48),
+                7.0,
+            ),
+        ),
+        ("attribution pipeline", lambda: write_still(scene_pipeline(), 5.0)),
+        (
+            "triage proof",
+            lambda: write_still(
+                proof_scene(
+                    alerts_triaged,
+                    "Step 4",
+                    "Goodman turns drift into an operator action",
+                    "After real API updates, the dashboard reflects acknowledged and resolved work without leaving the alert workflow.",
+                    "dashboard: triage queue",
+                    RED,
+                ),
+                7.0,
             ),
         ),
         (
-            "alert proof",
-            lambda: write_zoom(
-                frame_screenshot(
-                    output,
-                    "Step 3",
-                    "Goodman turns drift into an operator action",
-                    "The alert explains the new behaviors, severity, affected service, and rollback path.",
-                    "http://localhost:8844/?static=true#alerts",
-                    RED,
-                    crop=(520, 250, 1480, 1080),
+            "learning fingerprints",
+            lambda: write_still(
+                proof_scene(
+                    fingerprints_learning,
+                    "Step 5",
+                    "Separate learning packages from stable baselines",
+                    "The same product surface exposes which dependencies are trusted and which still need runtime observations.",
+                    "dashboard: learning fingerprints",
+                    LIME,
                 ),
-                9.0,
-                anchor=(0.50, 0.42),
+                6.5,
             ),
         ),
-        ("close", lambda: write_still(scene_close(), 6.0)),
+        ("close", lambda: write_still(scene_close(), 5.0)),
     ]
 
     for name, render in scenes:

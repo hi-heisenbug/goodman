@@ -309,7 +309,11 @@ function SeverityIcon({ sev }: { sev: Severity }) {
 
 function AlertsView() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [status, setStatus] = useState<AlertStatus | "all">("open");
+  const getInitialStatus = (): AlertStatus | "all" => {
+    const value = new URLSearchParams(window.location.search).get("status");
+    return value === "acknowledged" || value === "resolved" || value === "all" ? value : "open";
+  };
+  const [status, setStatus] = useState<AlertStatus | "all">(getInitialStatus);
   const [err, setErr] = useState("");
 
   const load = useCallback(() => {
@@ -478,7 +482,11 @@ function FingerprintCard({ fp }: { fp: Fingerprint }) {
 function FingerprintsView() {
   const [fingerprints, setFingerprints] = useState<Fingerprint[]>([]);
   const [query, setQuery] = useState("");
-  const [mode, setMode] = useState<"all" | "baseline" | "learning">("all");
+  const getInitialMode = (): "all" | "baseline" | "learning" => {
+    const value = new URLSearchParams(window.location.search).get("state");
+    return value === "baseline" || value === "learning" ? value : "all";
+  };
+  const [mode, setMode] = useState<"all" | "baseline" | "learning">(getInitialMode);
   const [err, setErr] = useState("");
 
   const load = useCallback(() => {
