@@ -50,6 +50,29 @@ safe to deploy in a real cluster.
 
 ---
 
+## Keep this guide current
+
+Treat this file as living maintainer documentation. When you discover a
+repeatable trap, invariant, setup issue, verification command, or release
+requirement that would help the next contributor avoid a mistake, update this
+file in the same change.
+
+Good updates:
+- Add common mistakes that caused real failures.
+- Add non-obvious invariants that tests or reviewers depend on.
+- Add verification commands when a subsystem gains a new required check.
+- Add short troubleshooting notes when a failure mode is easy to misdiagnose.
+
+Bad updates:
+- Do not add chronological handoff logs, chat summaries, or commit-by-commit
+  session history.
+- Do not include secrets, sudo passwords, private local paths, or machine-specific
+  state.
+- Do not duplicate long docs already covered elsewhere; link the canonical doc
+  and keep this file as the high-signal map.
+
+---
+
 ## Repository map
 
 ```
