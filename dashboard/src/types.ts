@@ -8,6 +8,7 @@ export interface Alert {
   old_version: string;
   new_version: string;
   severity: Severity;
+  baseline_behaviors?: string[];
   new_behaviors: string[];
   detected_at: number; // unix ns
   status: AlertStatus;

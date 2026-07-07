@@ -74,9 +74,9 @@ func (e *RawEvent) UserStack() []uint64 {
 
 // Attributed is a RawEvent after we've figured out which package caused it.
 type Attributed struct {
-	Service   string    `json:"service"`   // k8s service / pod name (or cwd basename locally)
-	Package   string    `json:"package"`   // e.g. "@tanstack/react-router"; "<app>" if app code
-	Version   string    `json:"version"`   // e.g. "1.120.17"; "" if unknown
+	Service   string    `json:"service"` // k8s service / pod name (or cwd basename locally)
+	Package   string    `json:"package"` // e.g. "@tanstack/react-router"; "<app>" if app code
+	Version   string    `json:"version"` // e.g. "1.120.17"; "" if unknown
 	Type      EventType `json:"type"`
 	Behavior  string    `json:"behavior"`  // canonicalized: "READ /app/src/**" or "CONNECT 1.2.3.4:443"
 	Timestamp uint64    `json:"timestamp"` // ns since boot converted to unix ns by the sensor
@@ -109,15 +109,16 @@ type Fingerprint struct {
 
 // Alert is emitted by the diff engine.
 type Alert struct {
-	ID           string   `json:"id"`
-	Service      string   `json:"service"`
-	Package      string   `json:"package"`
-	OldVersion   string   `json:"old_version"`
-	NewVersion   string   `json:"new_version"`
-	Severity     string   `json:"severity"` // INFO | WARN | CRITICAL
-	NewBehaviors []string `json:"new_behaviors"`
-	DetectedAt   uint64   `json:"detected_at"` // unix ns
-	Status       string   `json:"status"`      // open | acknowledged | resolved
+	ID                string   `json:"id"`
+	Service           string   `json:"service"`
+	Package           string   `json:"package"`
+	OldVersion        string   `json:"old_version"`
+	NewVersion        string   `json:"new_version"`
+	Severity          string   `json:"severity"` // INFO | WARN | CRITICAL
+	BaselineBehaviors []string `json:"baseline_behaviors,omitempty"`
+	NewBehaviors      []string `json:"new_behaviors"`
+	DetectedAt        uint64   `json:"detected_at"` // unix ns
+	Status            string   `json:"status"`      // open | acknowledged | resolved
 }
 
 const (

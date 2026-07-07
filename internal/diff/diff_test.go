@@ -106,6 +106,9 @@ func TestDriftPipeline(t *testing.T) {
 	if alert.OldVersion != "1.0.0" || alert.NewVersion != "1.0.1" {
 		t.Fatalf("versions = %s -> %s", alert.OldVersion, alert.NewVersion)
 	}
+	if !sameStrings(alert.BaselineBehaviors, baseline) {
+		t.Fatalf("baseline context = %v, want %v", alert.BaselineBehaviors, baseline)
+	}
 	want := map[string]bool{drift[2]: true, drift[3]: true}
 	for _, b := range alert.NewBehaviors {
 		if !want[b] {
@@ -149,6 +152,9 @@ func TestDriftPipeline(t *testing.T) {
 	if sameVer == nil || sameVer.Severity != model.SeverityCritical {
 		t.Fatalf("same-version exec drift: %+v", sameVer)
 	}
+	if !sameStrings(sameVer.BaselineBehaviors, baseline) {
+		t.Fatalf("same-version baseline context = %v, want %v", sameVer.BaselineBehaviors, baseline)
+	}
 
 	// Alert lifecycle.
 	if err := s.SetAlertStatus(ctx, alert.ID, model.AlertAcknowledged); err != nil {
@@ -158,4 +164,21 @@ func TestDriftPipeline(t *testing.T) {
 	if len(open) != 1 { // only the same-version alert remains open
 		t.Fatalf("open alerts = %d, want 1", len(open))
 	}
+}
+
+func sameStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	counts := map[string]int{}
+	for _, s := range got {
+		counts[s]++
+	}
+	for _, s := range want {
+		counts[s]--
+		if counts[s] < 0 {
+			return false
+		}
+	}
+	return true
 }

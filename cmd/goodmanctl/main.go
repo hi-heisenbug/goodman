@@ -26,6 +26,7 @@ Usage:
   goodmanctl tail          [-collector URL]                stream live events + alerts
   goodmanctl alerts        [-collector URL] [-status S]    list alerts
   goodmanctl ack ID        [-collector URL]                acknowledge an alert
+  goodmanctl resolve ID    [-collector URL]                resolve an alert
   goodmanctl fingerprints  [-collector URL] [-service S] [-package P]
   goodmanctl attribute -pid N [-duration 15s] [-proc-root /proc]
                                                             live-attribute one pid (needs root)
@@ -45,6 +46,8 @@ func main() {
 		cmdAlerts(args)
 	case "ack":
 		cmdAck(args)
+	case "resolve":
+		cmdResolve(args)
 	case "fingerprints":
 		cmdFingerprints(args)
 	case "attribute":
@@ -145,13 +148,21 @@ func cmdAlerts(args []string) {
 }
 
 func cmdAck(args []string) {
+	postAlertAction(args, "ack", "acknowledged")
+}
+
+func cmdResolve(args []string) {
+	postAlertAction(args, "resolve", "resolved")
+}
+
+func postAlertAction(args []string, action, done string) {
 	fs := flag.NewFlagSet("ack", flag.ExitOnError)
 	collector := collectorFlag(fs)
 	fs.Parse(args)
 	if fs.NArg() != 1 {
-		log.Fatal("usage: goodmanctl ack <alert-id>")
+		log.Fatalf("usage: goodmanctl %s <alert-id>", action)
 	}
-	resp, err := http.Post(*collector+"/v1/alerts/"+url.PathEscape(fs.Arg(0))+"/ack", "application/json", nil)
+	resp, err := http.Post(*collector+"/v1/alerts/"+url.PathEscape(fs.Arg(0))+"/"+action, "application/json", nil)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -159,7 +170,7 @@ func cmdAck(args []string) {
 	if resp.StatusCode != http.StatusOK {
 		log.Fatalf("collector returned %s", resp.Status)
 	}
-	fmt.Println("acknowledged")
+	fmt.Println(done)
 }
 
 func cmdFingerprints(args []string) {

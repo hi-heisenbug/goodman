@@ -101,7 +101,7 @@ so a fresh Go build can serve the UI without a separate Node server.
 ```bash
 helm install goodman deploy/helm/goodman \
   --set cluster=prod \
-  --set registries=npm,pypi
+  --set-string registries='npm\,pypi'
 
 kubectl port-forward svc/goodman-collector 8844:8844
 ```

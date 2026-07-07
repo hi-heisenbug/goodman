@@ -46,6 +46,7 @@ function Behavior({ text, kind }: { text: string; kind: "add" | "base" }) {
 function AlertCard({ a, onChange }: { a: Alert; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
   const critRule = a.new_behaviors.find((b) => SENSITIVE.test(b));
+  const baseline = a.baseline_behaviors || [];
   const act = async (fn: (id: string) => Promise<void>) => {
     setBusy(true);
     try {
@@ -78,10 +79,13 @@ function AlertCard({ a, onChange }: { a: Alert; onChange: () => void }) {
       <div className="diff">
         <div className="col">
           <h4>
-            Baseline behavior <span className="tag b-good">ESTABLISHED</span>
+            Baseline behavior <span className="tag b-good">{baseline.length} KNOWN</span>
           </h4>
-          <Behavior kind="base" text="reads only within its own package dir" />
-          <Behavior kind="base" text="known service dependencies" />
+          {baseline.length === 0 ? (
+            <div className="muted-note">Baseline fingerprint exists; behavior context is unavailable for this alert.</div>
+          ) : (
+            baseline.map((b) => <Behavior key={b} kind="base" text={b} />)
+          )}
         </div>
         <div className="col">
           <h4>
@@ -237,17 +241,18 @@ function FingerprintCard({ fp }: { fp: Fingerprint }) {
 export function App() {
   const [tab, setTab] = useState<"alerts" | "fingerprints">("alerts");
   const [openCount, setOpenCount] = useState(0);
-  const [live, setLive] = useState(false);
 
   useEffect(() => {
-    const refresh = () => fetchAlerts("open").then((a) => setOpenCount(a.length)).catch(() => {});
+    const refresh = () =>
+      fetchAlerts("open")
+        .then((a) => setOpenCount(a.length))
+        .catch(() => {});
     refresh();
     const unsub = subscribe({
       onAlerts: () => {
-        setLive(true);
         refresh();
       },
-      onEvents: () => setLive(true),
+      onEvents: refresh,
     });
     const t = setInterval(refresh, 5000);
     return () => {
@@ -264,8 +269,8 @@ export function App() {
           <h1>Goodman</h1>
           <p>Runtime dependency behavior monitoring</p>
         </div>
-        <span className={`live-dot ${live ? "on" : "off"}`}>
-          <i /> {live ? "live" : "connecting"}
+        <span className="live-dot on">
+          <i /> monitoring
         </span>
       </header>
 

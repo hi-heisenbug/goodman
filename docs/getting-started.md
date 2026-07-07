@@ -9,7 +9,7 @@ You need an **x86-64 Linux host** (bare metal, VM, or WSL2) with:
 
 - kernel **≥ 5.8** with BTF at `/sys/kernel/btf/vmlinux` (most distros since 2020)
 - `go` ≥ 1.23, `clang`, `llvm`, `bpftool`
-- `node` ≥ 18 (only to rebuild the dashboard — the built UI ships in the repo)
+- `node` ≥ 20.19 (only to rebuild the dashboard — the built UI ships in the repo)
 
 > **Not on Linux?** The sensor needs a real kernel. On macOS/Windows, spin up a
 > Linux VM (multipass, UTM, Lima, or any cloud instance) and work there. Docker

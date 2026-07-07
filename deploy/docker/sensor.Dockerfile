@@ -17,4 +17,5 @@ FROM gcr.io/distroless/static-debian12:nonroot AS runtime
 # The sensor must run as root/privileged to load BPF; the DaemonSet overrides
 # runAsNonRoot. Ship CA certs for the collector HTTPS case.
 COPY --from=build /out/sensor /usr/local/bin/sensor
+USER 0:0
 ENTRYPOINT ["/usr/local/bin/sensor"]

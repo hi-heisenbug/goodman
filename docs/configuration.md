@@ -105,7 +105,7 @@ Example production install:
 ```bash
 helm install goodman deploy/helm/goodman \
   --set cluster=prod \
-  --set registries=npm,pypi \
+  --set-string registries='npm\,pypi' \
   --set collector.image=ghcr.io/goodman-sec/collector:0.1.0 \
   --set sensor.image=ghcr.io/goodman-sec/sensor:0.1.0 \
   --set postgres.dsn='postgres://goodman:secret@db:5432/goodman?sslmode=require'

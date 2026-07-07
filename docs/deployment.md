@@ -19,7 +19,7 @@ Goodman deploys as a privileged **DaemonSet** (the sensor, one per node) plus a
 ```bash
 helm install goodman deploy/helm/goodman \
   --set cluster=prod \
-  --set registries=npm,pypi
+  --set-string registries='npm\,pypi'
 ```
 
 Then open the dashboard:
@@ -88,10 +88,11 @@ and small (collector ~19 MB, sensor ~12 MB).
 ## Security posture
 
 - The **sensor** runs privileged because loading eBPF and reading host `/proc`
-  requires it. v2 will drop to the minimal capability set
+  requires it. The chart runs it as UID 0 inside a privileged DaemonSet. v2 will drop to the minimal capability set
   (`SYS_ADMIN`, `BPF`, `PERFMON`, `SYS_PTRACE`).
-- The **collector** runs as non-root, read-only-friendly, and only needs its
-  datastore.
+- The **collector** runs as non-root with all Linux capabilities dropped. The
+  chart sets `fsGroup: 65532` so the SQLite `/data` volume is writable by the
+  distroless non-root user.
 - Behavior strings can contain file paths — treat the collector's data as
   sensitive. For data residency, run the collector **in your own cluster** so
   behavior data never leaves it; the future cross-tenant fingerprint network
