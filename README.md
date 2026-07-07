@@ -32,7 +32,7 @@ alerts; it does not block or sandbox.
 
 ```text
 kernel tracepoints
-openat/connect/execve
+open/openat/openat2/connect/execve
         |
         v
 eBPF sensor captures syscall + user stack
@@ -47,7 +47,7 @@ collector learns fingerprints and diffs new behavior
 REST API, SSE stream, Prometheus metrics, dashboard
 ```
 
-1. **Capture:** CO-RE eBPF hooks `openat`, `connect`, and `execve` for watched
+1. **Capture:** CO-RE eBPF hooks `open`, `openat`, `openat2`, `connect`, and `execve` for watched
    Node/Python processes and records the user-space stack.
 2. **Attribute:** userspace resolves stack addresses through V8 perf maps and
    `/proc/<pid>/maps`, then maps the deepest `node_modules/<pkg>/` frame to its

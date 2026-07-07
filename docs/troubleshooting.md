@@ -31,17 +31,18 @@ Almost always a kernel/BTF mismatch. Confirm `/sys/kernel/btf/vmlinux` exists an
 the kernel is ≥ 5.8. Regenerate `bpf/vmlinux.h` **on the target kernel** with
 `make vmlinux` and rebuild. Include the full verifier log when filing an issue.
 
-**`attach sys_enter_openat: no such file or directory`**
-The syscall tracepoints aren't available — the kernel was built without
+**`attach sys_enter_*: no such file or directory`**
+One or more syscall tracepoints aren't available — the kernel was built without
 `CONFIG_FTRACE`/tracepoints, or you're in a restricted container. Run the sensor
 on the host (or a privileged DaemonSet with `hostPID`).
 
 ## No events / no attribution
 
 **`goodmanctl tail` shows nothing**
-1. Is the sensor watching the process? It only traces `node`/`python3` (and
-   `-comms` extras). Check `goodman_sensor_watched_pids` > 0.
-2. Is the process actually making `openat`/`connect`/`execve` calls? Drive traffic.
+1. Is the sensor watching the process? It traces built-in runtime comm names
+   (`node`, `nodejs`, `MainThread`, `python`, `python3`) and `-comms` extras.
+   Check `goodman_sensor_watched_pids` > 0.
+2. Is the process actually making file-open, `connect`, or `execve` calls? Drive traffic.
 3. In k8s, is `-proc-root=/host/proc` set and `/proc` mounted?
 
 **Events show `<unknown>` or `<app>` instead of a package**

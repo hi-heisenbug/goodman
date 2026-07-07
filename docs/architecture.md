@@ -11,7 +11,7 @@ signal.
 ```
    ┌─────────── kernel ───────────┐   ┌──────────────── user space ─────────────────┐
                                                                                        
-   syscall (openat/connect/execve)                                                     
+   syscall (open/openat/openat2/connect/execve)
         │                                                                              
         ▼                                                                              
    ┌─────────┐  event + user stack   ┌──────────┐  package@version   ┌─────────────┐  
@@ -33,7 +33,7 @@ signal.
                                                               └───────────────────────┘
 ```
 
-1. **Capture** — an eBPF program hooks three syscall tracepoints and, for each
+1. **Capture** — eBPF programs hook low-volume security syscall tracepoints and, for each
    event from a *watched* process, grabs the user-space call stack.
 2. **Attribute** — user space resolves that stack to a source file, finds the
    deepest frame inside a `node_modules/<pkg>/` directory, and reads the version
@@ -51,10 +51,11 @@ Goodman ships two long-running binaries plus a CLI.
 
 Runs on every node (a privileged DaemonSet in Kubernetes, or as root locally).
 
-- Loads the embedded eBPF object and attaches the three tracepoints
+- Loads the embedded eBPF object and attaches the syscall tracepoints
   (`internal/loader`).
 - Maintains the in-kernel `watched_pids` map by periodically scanning `/proc` for
-  `node`/`python3` processes (`RefreshWatched`).
+  built-in runtime comm names (`node`, `nodejs`, `MainThread`, `python`,
+  `python3`) plus configured extras (`RefreshWatched`).
 - Reads `RawEvent`s from the ring buffer, resolves each to an `Attributed` event
   (`internal/attribute`), and batches them to the collector over gzip'd HTTP.
 - **Never blocks the ring-buffer reader on the network:** events flow through a
@@ -99,9 +100,10 @@ Overhead is a feature, not an afterthought. Two design choices keep it bounded:
 - **Only watched pids.** The eBPF programs early-return for any process not in the
   `watched_pids` map, so syscalls from the rest of the system cost a single hash
   lookup.
-- **Only three low-volume syscalls.** Goodman traces `openat`, `connect`, and
-  `execve` — deliberately **not** `read`/`write`, which are orders of magnitude
-  higher volume. A file *open* already tells you what a package touches.
+- **Only low-volume security syscalls.** Goodman traces file opens (`open`,
+  `openat`, `openat2`), `connect`, and `execve` — deliberately **not**
+  `read`/`write`, which are orders of magnitude higher volume. A file *open*
+  already tells you what a package touches.
 
 If overhead regresses, the next levers are a tighter syscall set and in-kernel
 per-`(pid, behavior)` deduplication so identical behaviors aren't re-sent.

@@ -20,23 +20,63 @@ if [[ $EUID -ne 0 ]]; then
   exit 2
 fi
 
-PORT=8845
+free_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+PORT="${GOODMAN_E2E_COLLECTOR_PORT:-$(free_port)}"
 BASE="http://127.0.0.1:$PORT"
 DB="$(mktemp -u /tmp/goodman-e2e-XXXX.db)"
 WORK="$ROOT/test/workload"
 FAKE_SECRETS="/tmp/goodman-fake-secrets"
-SINK_PORT=9999
+SINK_PORT="${GOODMAN_E2E_SINK_PORT:-$(free_port)}"
+WORKLOAD_PORT="${GOODMAN_E2E_WORKLOAD_PORT:-$(free_port)}"
 LEARN_OBS="${LEARN_OBS:-20}"
 
 pids=()
+workload_pids=()
+passed=0
 cleanup() {
   for p in "${pids[@]:-}"; do kill "$p" 2>/dev/null || true; done
-  rm -f "$DB" "$DB"-* /tmp/goodman-e2e-*.log
-  rm -rf "$FAKE_SECRETS"
+  if [[ "$passed" == "1" && "${GOODMAN_E2E_KEEP_LOGS:-0}" != "1" ]]; then
+    rm -f "$DB" "$DB"-* /tmp/goodman-e2e-*.log
+    rm -f "$WORK"/isolate-*-v8.log
+    for p in "${workload_pids[@]:-}"; do rm -f "/tmp/perf-$p.map"; done
+    rm -rf "$FAKE_SECRETS"
+  else
+    echo "e2e logs preserved under /tmp/goodman-e2e-*.log" >&2
+  fi
 }
 trap cleanup EXIT
 
+dump_state() {
+  echo "--- collector log ---" >&2
+  tail -n 120 /tmp/goodman-e2e-collector.log >&2 2>/dev/null || true
+  echo "--- sensor log ---" >&2
+  tail -n 160 /tmp/goodman-e2e-sensor.log >&2 2>/dev/null || true
+  echo "--- workload log ---" >&2
+  tail -n 120 /tmp/goodman-e2e-workload.log >&2 2>/dev/null || true
+  echo "--- fingerprints ---" >&2
+  ./bin/goodmanctl fingerprints -collector "$BASE" -json >&2 2>/dev/null || true
+  echo "--- alerts ---" >&2
+  curl -sf "$BASE/v1/alerts" >&2 2>/dev/null || true
+  echo >&2
+}
+
+fail() {
+  echo "ERROR: $*" >&2
+  dump_state
+  exit 1
+}
+
 echo "== 0. prep: fake secrets + local sink =="
+echo "   collector=$PORT workload=$WORKLOAD_PORT sink=$SINK_PORT"
 mkdir -p "$FAKE_SECRETS"
 echo "AKIA_FAKE_DO_NOT_USE=deadbeef" > "$FAKE_SECRETS/credentials"
 
@@ -63,7 +103,7 @@ GOODMAN_DSN="$DB" GOODMAN_LEARN_OBS="$LEARN_OBS" GOODMAN_LEARN_MIN_AGE=1ns GOODM
 pids+=("$!")
 for i in $(seq 1 50); do curl -sf "$BASE/v1/healthz" >/dev/null 2>&1 && break; sleep 0.1; done
 
-./bin/sensor -collector "$BASE" -proc-root /proc -batch-interval 500ms \
+./bin/sensor -collector "$BASE" -proc-root /proc -batch-interval 500ms -metrics-addr "" -watch-interval 200ms \
   >/tmp/goodman-e2e-sensor.log 2>&1 &
 pids+=("$!")
 sleep 1
@@ -75,36 +115,55 @@ install_pkg() { # $1 = version dir
 }
 
 start_workload() {
-  ( cd "$WORK" && GOODMAN_SINK_PORT="$SINK_PORT" GOODMAN_FAKE_CRED="$FAKE_SECRETS/credentials" PORT=8080 \
-      node --perf-basic-prof --interpreted-frames-native-stack server.js \
+  ( cd "$WORK" && export GOODMAN_SINK_PORT="$SINK_PORT" GOODMAN_FAKE_CRED="$FAKE_SECRETS/credentials" PORT="$WORKLOAD_PORT" && \
+      exec node --perf-basic-prof --interpreted-frames-native-stack server.js \
       >/tmp/goodman-e2e-workload.log 2>&1 ) &
-  WORKLOAD_PID=$!; pids+=("$WORKLOAD_PID")
-  for i in $(seq 1 50); do curl -sf "http://127.0.0.1:8080/healthz" >/dev/null 2>&1 && return 0; sleep 0.1; done
+  WORKLOAD_PID=$!; pids+=("$WORKLOAD_PID"); workload_pids+=("$WORKLOAD_PID")
+  for i in $(seq 1 50); do
+    kill -0 "$WORKLOAD_PID" 2>/dev/null || { echo "workload exited early"; cat /tmp/goodman-e2e-workload.log; return 1; }
+    curl -sf "http://127.0.0.1:$WORKLOAD_PORT/healthz" >/dev/null 2>&1 && return 0
+    sleep 0.1
+  done
   echo "workload failed to start"; cat /tmp/goodman-e2e-workload.log; return 1
 }
 
+wait_workload_watched() {
+  for i in $(seq 1 75); do
+    grep -q "watching pid $WORKLOAD_PID" /tmp/goodman-e2e-sensor.log 2>/dev/null && return 0
+    kill -0 "$WORKLOAD_PID" 2>/dev/null || fail "workload pid $WORKLOAD_PID exited before the sensor watched it"
+    sleep 0.1
+  done
+  fail "sensor did not watch workload pid $WORKLOAD_PID"
+}
+
 drive() { # $1 = requests
-  for i in $(seq 1 "$1"); do curl -sf "http://127.0.0.1:8080/" >/dev/null 2>&1 || true; done
+  for i in $(seq 1 "$1"); do curl -sf "http://127.0.0.1:$WORKLOAD_PORT/" >/dev/null; done
 }
 
 echo "== 2. baseline: good-pkg@1.0.0, drive traffic, wait for promotion =="
 install_pkg good-pkg-1.0.0
 start_workload
+wait_workload_watched
 # generate enough observations to cross the learning window
 for round in $(seq 1 6); do drive 60; sleep 0.7; done
 
+promoted=0
 for i in $(seq 1 30); do
   if ./bin/goodmanctl fingerprints -collector "$BASE" -json 2>/dev/null | \
      python3 -c 'import json,sys; fps=json.load(sys.stdin); sys.exit(0 if any(f["package"]=="good-pkg" and f["version"]=="1.0.0" and f["is_baseline"] for f in fps) else 1)'; then
-    echo "   baseline promoted."; break
+    echo "   baseline promoted."
+    promoted=1
+    break
   fi
   drive 40; sleep 0.7
 done
+[[ "$promoted" == "1" ]] || fail "good-pkg@1.0.0 baseline was not promoted"
 
 echo "== 3. swap to good-pkg@1.0.1, restart workload, drive traffic =="
 kill "$WORKLOAD_PID" 2>/dev/null || true; sleep 1
 install_pkg good-pkg-1.0.1
 start_workload
+wait_workload_watched
 for round in $(seq 1 5); do drive 40; sleep 0.7; done
 
 echo "== 4. assert CRITICAL alert =="
@@ -116,9 +175,10 @@ for i in $(seq 1 20); do
 done
 echo "alerts: $ALERTS"
 
-echo "$ALERTS" | python3 - <<'PY'
+ALERTS_JSON="$ALERTS" python3 - <<'PY'
 import json, sys
-alerts = json.load(sys.stdin)
+import os
+alerts = json.loads(os.environ["ALERTS_JSON"])
 crit = [a for a in alerts if a["package"] == "good-pkg" and a["severity"] == "CRITICAL"]
 assert crit, f"no CRITICAL good-pkg alert; got {alerts}"
 a = crit[0]
@@ -132,4 +192,5 @@ assert not any(x["package"] not in ("good-pkg","<app>","<unknown>") for x in ale
 print("OK: CRITICAL drift alert for good-pkg 1.0.0 -> 1.0.1 with secret read + sink connect")
 PY
 
+passed=1
 echo "== DRIFT E2E PASSED =="

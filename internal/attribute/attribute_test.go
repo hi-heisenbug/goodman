@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/goodman-sec/goodman/internal/model"
 )
@@ -148,5 +149,63 @@ func TestAttributeEndToEnd(t *testing.T) {
 	ev3.Stack[0] = 0xdeadbeef
 	if got3 := r.Attribute(ev3, 0); got3.Package != "<unknown>" {
 		t.Fatalf("attributed %q, want <unknown>", got3.Package)
+	}
+}
+
+func TestAttributeUsesOpenedPackagePathAndShortThreadContext(t *testing.T) {
+	proc := t.TempDir()
+	pid := 4243
+	pidDir := fmt.Sprintf("%s/%d", proc, pid)
+	writeFile(t, pidDir+"/root/app/node_modules/good-pkg/package.json", `{"version":"1.0.1"}`)
+	writeFile(t, pidDir+"/root/tmp/perf-4243.map", "")
+	writeFile(t, pidDir+"/status", "Name:\tMainThread\nNSpid:\t4243\n")
+	writeFile(t, pidDir+"/maps", "00400000-00500000 r-xp 00000000 08:01 1 /usr/bin/node\n")
+	writeFile(t, pidDir+"/cgroup", "0::/user.slice\n")
+	os.Symlink("/work/workload", pidDir+"/cwd")
+
+	r := NewResolver(proc)
+	tid := uint32(9001)
+	baseTs := uint64(10_000_000_000)
+
+	packageRead := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventFileOpen), Timestamp: baseTs}
+	copy(packageRead.Arg[:], "/app/node_modules/good-pkg/data.json")
+	got := r.Attribute(packageRead, 0)
+	if got.Package != "good-pkg" || got.Version != "1.0.1" {
+		t.Fatalf("package path fallback = %q@%q, want good-pkg@1.0.1", got.Package, got.Version)
+	}
+
+	ordinaryRead := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventFileOpen), Timestamp: baseTs + uint64(5*time.Millisecond)}
+	copy(ordinaryRead.Arg[:], "/etc/localtime")
+	got = r.Attribute(ordinaryRead, 0)
+	if got.Package != "<unknown>" {
+		t.Fatalf("ordinary file inherited context: %q", got.Package)
+	}
+
+	secretRead := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventFileOpen), Timestamp: baseTs + uint64(10*time.Millisecond)}
+	copy(secretRead.Arg[:], "/tmp/goodman-fake-secrets/credentials")
+	got = r.Attribute(secretRead, 0)
+	if got.Package != "good-pkg" || got.Version != "1.0.1" {
+		t.Fatalf("same-thread context for secret = %q@%q, want good-pkg@1.0.1", got.Package, got.Version)
+	}
+
+	connect := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventNetConnect), Timestamp: baseTs + uint64(20*time.Millisecond)}
+	copy(connect.Arg[:], "127.0.0.1:9999")
+	got = r.Attribute(connect, 0)
+	if got.Package != "good-pkg" || got.Version != "1.0.1" {
+		t.Fatalf("same-thread context for connect = %q@%q, want good-pkg@1.0.1", got.Package, got.Version)
+	}
+
+	otherThread := &model.RawEvent{PID: uint32(pid), TID: tid + 1, Type: uint8(model.EventNetConnect), Timestamp: baseTs + uint64(30*time.Millisecond)}
+	copy(otherThread.Arg[:], "127.0.0.1:9999")
+	got = r.Attribute(otherThread, 0)
+	if got.Package != "<unknown>" {
+		t.Fatalf("different thread inherited context: %q", got.Package)
+	}
+
+	expired := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventNetConnect), Timestamp: baseTs + uint64(packageContextTTL) + 1}
+	copy(expired.Arg[:], "127.0.0.1:9999")
+	got = r.Attribute(expired, 0)
+	if got.Package != "<unknown>" {
+		t.Fatalf("expired context attributed %q, want <unknown>", got.Package)
 	}
 }

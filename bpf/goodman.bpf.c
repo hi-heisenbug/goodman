@@ -71,8 +71,7 @@ static __always_inline int watched(__u32 *tgid)
     return bpf_map_lookup_elem(&watched_pids, tgid) != NULL;
 }
 
-SEC("tracepoint/syscalls/sys_enter_openat")
-int trace_openat(struct trace_event_raw_sys_enter *ctx)
+static __always_inline int submit_file_open(struct trace_event_raw_sys_enter *ctx, __u64 filename_arg)
 {
     __u32 tgid;
     if (!watched(&tgid))
@@ -81,10 +80,28 @@ int trace_openat(struct trace_event_raw_sys_enter *ctx)
     struct event *e = reserve_event(ctx, tgid, EVENT_FILE_OPEN);
     if (!e)
         return 0;
-    const char *path = (const char *)ctx->args[1]; /* openat: 2nd arg = filename */
+    const char *path = (const char *)filename_arg;
     bpf_probe_read_user_str(&e->arg, sizeof(e->arg), path);
     bpf_ringbuf_submit(e, 0);
     return 0;
+}
+
+SEC("tracepoint/syscalls/sys_enter_open")
+int trace_open(struct trace_event_raw_sys_enter *ctx)
+{
+    return submit_file_open(ctx, ctx->args[0]); /* open: filename */
+}
+
+SEC("tracepoint/syscalls/sys_enter_openat")
+int trace_openat(struct trace_event_raw_sys_enter *ctx)
+{
+    return submit_file_open(ctx, ctx->args[1]); /* openat: filename */
+}
+
+SEC("tracepoint/syscalls/sys_enter_openat2")
+int trace_openat2(struct trace_event_raw_sys_enter *ctx)
+{
+    return submit_file_open(ctx, ctx->args[1]); /* openat2: filename */
 }
 
 /* Render "a.b.c.d:port" or "[v6-hex]:port" into e->arg without snprintf

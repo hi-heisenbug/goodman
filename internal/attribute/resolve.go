@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/goodman-sec/goodman/internal/model"
 )
@@ -21,10 +22,17 @@ type Resolver struct {
 }
 
 type pidState struct {
-	perf    *PerfMap
-	maps    *ProcMaps
-	pidRoot string
-	service string
+	perf          *PerfMap
+	maps          *ProcMaps
+	pidRoot       string
+	service       string
+	threadContext map[uint32]packageContext
+}
+
+type packageContext struct {
+	pkg       string
+	version   string
+	timestamp uint64
 }
 
 func NewResolver(procRoot string) *Resolver {
@@ -38,10 +46,11 @@ func (r *Resolver) state(pid int) *pidState {
 	if !ok {
 		nspid := NSPID(r.procRoot, pid)
 		st = &pidState{
-			perf:    NewPerfMap(PerfMapPath(r.procRoot, pid, nspid)),
-			maps:    NewProcMaps(r.procRoot, pid),
-			pidRoot: fmt.Sprintf("%s/%d/root", r.procRoot, pid),
-			service: detectService(r.procRoot, pid),
+			perf:          NewPerfMap(PerfMapPath(r.procRoot, pid, nspid)),
+			maps:          NewProcMaps(r.procRoot, pid),
+			pidRoot:       fmt.Sprintf("%s/%d/root", r.procRoot, pid),
+			service:       detectService(r.procRoot, pid),
+			threadContext: map[uint32]packageContext{},
 		}
 		r.pids[pid] = st
 	}
@@ -67,6 +76,8 @@ func sourcePathOf(sym string) (string, bool) {
 	}
 	return m[1], true
 }
+
+const packageContextTTL = 250 * time.Millisecond
 
 // Frame is one resolved stack frame (for goodmanctl attribute --pid output).
 type Frame struct {
@@ -108,6 +119,7 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 
 	pkg, version := "", ""
 	appSource := ""
+	refreshContext := false
 	// stack[0] is the innermost (deepest) frame. The first frame that
 	// resolves into a node_modules path is the deepest actor.
 	for _, addr := range ev.UserStack() {
@@ -133,6 +145,7 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 					pkg, version = p, ""
 				}
 			}
+			refreshContext = pkg != ""
 			break
 		}
 		if appSource == "" && !strings.HasPrefix(src, "node:") {
@@ -140,12 +153,25 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		}
 	}
 	if pkg == "" {
-		if appSource != "" {
+		if p, v, ok := packageFromOpenedPath(st.pidRoot, ev); ok {
+			pkg, version = p, v
+			refreshContext = true
+		} else if appSource != "" {
 			pkg = "<app>" // application's own code, not a dependency
 			version = appVersion(st.pidRoot, appSource)
+		} else if ev.TID != 0 && contextEligible(ev) {
+			if ctx, ok := st.threadContext[ev.TID]; ok && ev.Timestamp >= ctx.timestamp &&
+				ev.Timestamp-ctx.timestamp <= uint64(packageContextTTL) {
+				pkg, version = ctx.pkg, ctx.version
+			} else {
+				pkg = "<unknown>"
+			}
 		} else {
 			pkg = "<unknown>"
 		}
+	}
+	if refreshContext && ev.TID != 0 && pkg != "" && pkg != "<app>" && pkg != "<unknown>" {
+		st.threadContext[ev.TID] = packageContext{pkg: pkg, version: version, timestamp: ev.Timestamp}
 	}
 
 	return model.Attributed{
@@ -155,6 +181,34 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		Type:      model.EventType(ev.Type),
 		Behavior:  Canonicalize(model.EventType(ev.Type), ev.ArgString()),
 		Timestamp: ev.Timestamp + bootToUnixNs,
+	}
+}
+
+func packageFromOpenedPath(pidRoot string, ev *model.RawEvent) (pkg, version string, ok bool) {
+	if model.EventType(ev.Type) != model.EventFileOpen {
+		return "", "", false
+	}
+	path := ev.ArgString()
+	if !strings.Contains(path, "/node_modules/") {
+		return "", "", false
+	}
+	if p, v, ok := PathToPackage(pidRoot, path); ok {
+		return p, v, true
+	}
+	if p, _, _ := splitNodeModules(path); p != "" {
+		return p, "", true
+	}
+	return "", "", false
+}
+
+func contextEligible(ev *model.RawEvent) bool {
+	switch model.EventType(ev.Type) {
+	case model.EventNetConnect, model.EventProcExec:
+		return true
+	case model.EventFileOpen:
+		return IsSensitivePath(ev.ArgString())
+	default:
+		return false
 	}
 }
 
