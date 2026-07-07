@@ -19,6 +19,15 @@ help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
+## --- Setup ---
+.PHONY: doctor
+doctor: ## Check tools, kernel, and eBPF support; print setup guidance
+	@bash scripts/preflight.sh
+
+.PHONY: setup
+setup: ## Install build prerequisites (Debian/Ubuntu) then run doctor
+	@bash scripts/setup.sh
+
 ## --- eBPF ---
 .PHONY: vmlinux
 vmlinux: ## Regenerate bpf/vmlinux.h from the running kernel's BTF
