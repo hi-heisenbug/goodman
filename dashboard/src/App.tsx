@@ -1,25 +1,63 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Alert, Fingerprint, Severity } from "./types";
+import type { Alert, AlertStatus, Fingerprint, Severity } from "./types";
 import { ackAlert, fetchAlerts, fetchFingerprints, resolveAlert, subscribe } from "./api";
 
-const SENSITIVE = /(secret|token|credential|password|shadow|169\.254\.169\.254|\.pem|\.key|\.aws|\.ssh|\.npmrc|\.env|id_rsa)/i;
+type Tab = "alerts" | "fingerprints";
+type IconName =
+  | "activity"
+  | "alert"
+  | "archive"
+  | "bolt"
+  | "check"
+  | "chevronRight"
+  | "clipboard"
+  | "cube"
+  | "fingerprint"
+  | "grid"
+  | "link"
+  | "lock"
+  | "search"
+  | "shield"
+  | "spark";
 
-function SeverityIcon({ sev }: { sev: Severity }) {
-  if (sev === "CRITICAL")
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M12 2 2 21h20L12 2Z" /><path d="M12 9v5" /><path d="M12 17.5v.2" />
-      </svg>
-    );
-  if (sev === "WARN")
-    return (
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-        <circle cx="12" cy="12" r="9" /><path d="M12 8v4.5" /><path d="M12 16v.2" />
-      </svg>
-    );
+const SENSITIVE =
+  /(secret|token|credential|password|shadow|169\.254\.169\.254|\.pem|\.key|\.aws|\.ssh|\.npmrc|\.env|id_rsa)/i;
+
+const STATUS_LABELS: Record<AlertStatus | "all", string> = {
+  open: "Open",
+  acknowledged: "Acknowledged",
+  resolved: "Resolved",
+  all: "All",
+};
+
+const SEVERITY_LABELS: Record<Severity, string> = {
+  CRITICAL: "Critical",
+  WARN: "Warning",
+  INFO: "Info",
+};
+
+function Icon({ name }: { name: IconName }) {
+  const paths: Record<IconName, JSX.Element> = {
+    activity: <><path d="M3 12h4l2-7 4 14 2-7h6" /></>,
+    alert: <><path d="M12 2 2 21h20L12 2Z" /><path d="M12 9v5" /><path d="M12 17.5h.01" /></>,
+    archive: <><path d="M4 7h16" /><path d="M6 7v13h12V7" /><path d="M9 11h6" /><path d="M5 3h14l1 4H4l1-4Z" /></>,
+    bolt: <><path d="m13 2-8 12h6l-1 8 8-12h-6l1-8Z" /></>,
+    check: <><path d="m5 12 4 4L19 6" /></>,
+    chevronRight: <><path d="m9 6 6 6-6 6" /></>,
+    clipboard: <><path d="M9 4h6l1 2h3v14H5V6h3l1-2Z" /><path d="M9 10h6" /><path d="M9 14h5" /></>,
+    cube: <><path d="m12 2 8 4.5v9L12 20l-8-4.5v-9L12 2Z" /><path d="M4 6.5 12 11l8-4.5" /><path d="M12 11v9" /></>,
+    fingerprint: <><path d="M7 7a5 5 0 0 1 10 0" /><path d="M6 11a6 6 0 0 0 12 0" /><path d="M9 11a3 3 0 0 0 6 0V8a3 3 0 0 0-6 0v3Z" /><path d="M12 17v3" /></>,
+    grid: <><path d="M4 4h7v7H4z" /><path d="M13 4h7v7h-7z" /><path d="M4 13h7v7H4z" /><path d="M13 13h7v7h-7z" /></>,
+    link: <><path d="M10 13a5 5 0 0 0 7.1 0l2-2a5 5 0 0 0-7.1-7.1l-1 1" /><path d="M14 11a5 5 0 0 0-7.1 0l-2 2A5 5 0 0 0 12 20.1l1-1" /></>,
+    lock: <><path d="M6 10h12v10H6z" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></>,
+    search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
+    shield: <><path d="M12 2 20 5v6c0 5-3.4 8.4-8 11-4.6-2.6-8-6-8-11V5l8-3Z" /><path d="m9 12 2 2 4-5" /></>,
+    spark: <><path d="M12 2v6" /><path d="M12 16v6" /><path d="M4.9 4.9 9 9" /><path d="m15 15 4.1 4.1" /><path d="M2 12h6" /><path d="M16 12h6" /><path d="m4.9 19.1 4.1-4.1" /><path d="m15 9 4.1-4.1" /></>,
+  };
+
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="9" /><path d="M12 11v5" /><path d="M12 8v.2" />
+    <svg className="icon" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      {paths[name]}
     </svg>
   );
 }
@@ -33,258 +71,437 @@ function relTime(ns: number): string {
   return new Date(ms).toLocaleDateString();
 }
 
+function classForSeverity(sev: Severity): string {
+  return sev.toLowerCase();
+}
+
+function versionShift(a: Alert) {
+  return `${a.old_version || "previous"} -> ${a.new_version || "unknown"}`;
+}
+
 function Behavior({ text, kind }: { text: string; kind: "add" | "base" }) {
-  const hot = SENSITIVE.test(text);
+  const sensitive = SENSITIVE.test(text);
   return (
-    <div className={`behavior ${kind}`}>
-      <span className="mark">{kind === "add" ? "+" : "✓"}</span>
-      <span className={hot && kind === "add" ? "hi" : undefined}>{text}</span>
+    <div className={`behavior ${kind} ${sensitive ? "sensitive" : ""}`}>
+      <span className="behavior-mark" aria-hidden="true">
+        {kind === "add" ? "+" : "-"}
+      </span>
+      <span>{text}</span>
     </div>
   );
 }
 
-function AlertCard({ a, onChange }: { a: Alert; onChange: () => void }) {
+function MetricCard({
+  label,
+  value,
+  tone = "neutral",
+  icon,
+  detail,
+}: {
+  label: string;
+  value: string | number;
+  tone?: "neutral" | "critical" | "warning" | "good" | "accent";
+  icon: IconName;
+  detail?: string;
+}) {
+  return (
+    <div className={`metric ${tone}`}>
+      <div className="metric-icon">
+        <Icon name={icon} />
+      </div>
+      <div>
+        <div className="metric-value">{value}</div>
+        <div className="metric-label">{label}</div>
+        {detail && <div className="metric-detail">{detail}</div>}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ icon, title, body }: { icon: IconName; title: string; body: string }) {
+  return (
+    <div className="empty">
+      <div className="empty-icon">
+        <Icon name={icon} />
+      </div>
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </div>
+  );
+}
+
+function AlertCard({ alert, onChange }: { alert: Alert; onChange: () => void }) {
   const [busy, setBusy] = useState(false);
-  const critRule = a.new_behaviors.find((b) => SENSITIVE.test(b));
-  const baseline = a.baseline_behaviors || [];
+  const [copied, setCopied] = useState(false);
+  const baseline = alert.baseline_behaviors || [];
+  const criticalBehavior = alert.new_behaviors.find((behavior) => SENSITIVE.test(behavior));
+  const rollback = `kubectl set image deployment/${alert.service} ${alert.package}=${alert.package}@${alert.old_version || "previous"}`;
+
   const act = async (fn: (id: string) => Promise<void>) => {
     setBusy(true);
     try {
-      await fn(a.id);
+      await fn(alert.id);
       onChange();
     } finally {
       setBusy(false);
     }
   };
-  const kubectl = `kubectl set image deployment/${a.service} ${a.package}=${a.package}@${a.old_version || "previous"}`;
+
+  const copyRollback = async () => {
+    await navigator.clipboard?.writeText(rollback);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
   return (
-    <div className={`alert ${a.severity} ${a.status}`}>
-      <div className="head">
-        <span className={`badge ${a.severity}`}>
-          <SeverityIcon sev={a.severity} /> {a.severity}
-        </span>
-        <div className="title">
-          <div className="pkg">{a.package}</div>
-          <div className="sub">
-            service <b>{a.service}</b> &middot;{" "}
-            <span className="vershift">
-              <span className="old">{a.old_version || "—"}</span>
-              <span className="arrow">→</span>
-              <span className="new">{a.new_version}</span>
-            </span>
+    <article className={`alert-card ${classForSeverity(alert.severity)} ${alert.status}`}>
+      <div className="alert-top">
+        <div className={`severity-pill ${classForSeverity(alert.severity)}`}>
+          <SeverityIcon sev={alert.severity} />
+          <span>{SEVERITY_LABELS[alert.severity]}</span>
+        </div>
+
+        <div className="alert-title">
+          <div className="package-line">
+            <span>{alert.package}</span>
+            <span className="version-shift">{versionShift(alert)}</span>
+          </div>
+          <div className="alert-subtitle">
+            <span>{alert.service}</span>
+            <span>{relTime(alert.detected_at)}</span>
+            <span className={`status-dot ${alert.status}`}>{STATUS_LABELS[alert.status]}</span>
           </div>
         </div>
-        <div className="when">{relTime(a.detected_at)}</div>
+
+        {criticalBehavior && (
+          <div className="risk-chip">
+            <Icon name="lock" />
+            <span>{SENSITIVE.exec(criticalBehavior)?.[0]}</span>
+          </div>
+        )}
       </div>
-      <div className="diff">
-        <div className="col">
-          <h4>
-            Baseline behavior <span className="tag b-good">{baseline.length} KNOWN</span>
-          </h4>
+
+      <div className="diff-grid">
+        <section>
+          <div className="section-label">
+            <span>Known baseline</span>
+            <b>{baseline.length}</b>
+          </div>
           {baseline.length === 0 ? (
-            <div className="muted-note">Baseline fingerprint exists; behavior context is unavailable for this alert.</div>
+            <p className="quiet">Baseline fingerprint exists, but detailed behavior context is unavailable.</p>
           ) : (
-            baseline.map((b) => <Behavior key={b} kind="base" text={b} />)
+            baseline.map((behavior) => <Behavior key={behavior} kind="base" text={behavior} />)
           )}
-        </div>
-        <div className="col">
-          <h4>
-            Drift detected <span className="tag" style={{ color: "var(--critical)" }}>{a.new_behaviors.length} NEW</span>
-          </h4>
-          {a.new_behaviors.map((b) => (
-            <Behavior key={b} kind="add" text={b} />
+        </section>
+
+        <section>
+          <div className="section-label critical-text">
+            <span>New behavior</span>
+            <b>{alert.new_behaviors.length}</b>
+          </div>
+          {alert.new_behaviors.map((behavior) => (
+            <Behavior key={behavior} kind="add" text={behavior} />
           ))}
-        </div>
+        </section>
       </div>
-      <div className="actions">
-        <button className="primary" title={kubectl} onClick={() => navigator.clipboard?.writeText(kubectl)}>
-          Copy rollback
+
+      <div className="action-bar">
+        <button className="primary-action" title={rollback} onClick={copyRollback}>
+          <Icon name={copied ? "check" : "clipboard"} />
+          {copied ? "Copied" : "Rollback"}
         </button>
-        <a
-          href={`https://www.npmjs.com/package/${a.package}/v/${a.new_version}`}
-          target="_blank"
-          rel="noreferrer"
-        >
-          Investigate ↗
+        <a className="secondary-action" href={`https://www.npmjs.com/package/${alert.package}/v/${alert.new_version}`} target="_blank" rel="noreferrer">
+          <Icon name="link" />
+          Investigate
         </a>
-        <span className="spacer" />
-        {critRule && <span className="rule">matched: {SENSITIVE.exec(critRule)?.[0]}</span>}
-        {a.status === "open" && (
-          <button disabled={busy} onClick={() => act(ackAlert)}>
+        <span className="action-spacer" />
+        {alert.status === "open" && (
+          <button className="quiet-action" disabled={busy} onClick={() => act(ackAlert)}>
             Acknowledge
           </button>
         )}
-        {a.status !== "resolved" && (
-          <button disabled={busy} onClick={() => act(resolveAlert)}>
+        {alert.status !== "resolved" && (
+          <button className="quiet-action" disabled={busy} onClick={() => act(resolveAlert)}>
             Resolve
           </button>
         )}
       </div>
-    </div>
+    </article>
   );
+}
+
+function SeverityIcon({ sev }: { sev: Severity }) {
+  if (sev === "CRITICAL") return <Icon name="alert" />;
+  if (sev === "WARN") return <Icon name="bolt" />;
+  return <Icon name="activity" />;
 }
 
 function AlertsView() {
   const [alerts, setAlerts] = useState<Alert[]>([]);
-  const [status, setStatus] = useState<string>("open");
+  const [status, setStatus] = useState<AlertStatus | "all">("open");
   const [err, setErr] = useState("");
 
   const load = useCallback(() => {
-    fetchAlerts(status || undefined)
-      .then((a) => {
-        setAlerts(a);
-        setErr("");
-      })
-      .catch((e) => setErr(String(e)));
-  }, [status]);
-
-  useEffect(() => {
-    load();
-    const unsub = subscribe({ onAlerts: () => load() });
-    const t = setInterval(load, 5000);
-    return () => {
-      unsub();
-      clearInterval(t);
-    };
-  }, [load]);
-
-  return (
-    <>
-      {err && <div className="err">{err}</div>}
-      <div className="filters">
-        <div className="seg">
-          {["open", "acknowledged", "resolved", ""].map((s) => (
-            <button key={s || "all"} className={status === s ? "active" : ""} onClick={() => setStatus(s)}>
-              {s || "all"}
-            </button>
-          ))}
-        </div>
-      </div>
-      {alerts.length === 0 ? (
-        <div className="empty">
-          <div className="big">🛡️</div>
-          No {status || ""} alerts. Dependencies are behaving within baseline.
-        </div>
-      ) : (
-        alerts.map((a) => <AlertCard key={a.id} a={a} onChange={load} />)
-      )}
-    </>
-  );
-}
-
-function FingerprintsView() {
-  const [fps, setFps] = useState<Fingerprint[]>([]);
-  const [q, setQ] = useState("");
-  const [err, setErr] = useState("");
-
-  useEffect(() => {
-    fetchFingerprints()
-      .then((f) => {
-        setFps(f);
+    fetchAlerts()
+      .then((items) => {
+        setAlerts(items);
         setErr("");
       })
       .catch((e) => setErr(String(e)));
   }, []);
 
-  const filtered = useMemo(() => {
-    const t = q.trim().toLowerCase();
-    if (!t) return fps;
-    return fps.filter((f) => f.package.toLowerCase().includes(t) || f.service.toLowerCase().includes(t));
-  }, [fps, q]);
+  useEffect(() => {
+    load();
+    const unsub = subscribe({ onAlerts: () => load(), onEvents: () => load() });
+    const timer = setInterval(load, 5000);
+    return () => {
+      unsub();
+      clearInterval(timer);
+    };
+  }, [load]);
+
+  const visible = useMemo(() => {
+    if (status === "all") return alerts;
+    return alerts.filter((alert) => alert.status === status);
+  }, [alerts, status]);
+
+  const counts = useMemo(
+    () => ({
+      critical: alerts.filter((alert) => alert.severity === "CRITICAL" && alert.status !== "resolved").length,
+      open: alerts.filter((alert) => alert.status === "open").length,
+      acknowledged: alerts.filter((alert) => alert.status === "acknowledged").length,
+      resolved: alerts.filter((alert) => alert.status === "resolved").length,
+    }),
+    [alerts],
+  );
 
   return (
-    <>
-      {err && <div className="err">{err}</div>}
-      <div className="filters">
-        <input placeholder="search package or service…" value={q} onChange={(e) => setQ(e.target.value)} />
+    <section className="view">
+      {err && <div className="error-banner">{err}</div>}
+
+      <div className="metrics-grid">
+        <MetricCard label="Critical active" value={counts.critical} tone="critical" icon="alert" detail="Needs review" />
+        <MetricCard label="Open alerts" value={counts.open} tone={counts.open ? "warning" : "good"} icon="activity" detail="Untriaged drift" />
+        <MetricCard label="Acknowledged" value={counts.acknowledged} icon="archive" detail="Owned by team" />
+        <MetricCard label="Resolved" value={counts.resolved} tone="good" icon="check" detail="Closed loop" />
       </div>
-      {filtered.length === 0 ? (
-        <div className="empty">
-          <div className="big">🔍</div>
-          No fingerprints learned yet. Run a workload to populate baselines.
+
+      <div className="toolbar">
+        <div>
+          <h2>Alert review</h2>
+          <p>Prioritize dependency updates that changed runtime behavior.</p>
         </div>
-      ) : (
-        filtered.map((f) => <FingerprintCard key={`${f.service}/${f.package}/${f.version}`} fp={f} />)
-      )}
-    </>
+        <div className="segmented" role="tablist" aria-label="Alert status">
+          {(["open", "acknowledged", "resolved", "all"] as const).map((item) => (
+            <button key={item} className={status === item ? "active" : ""} onClick={() => setStatus(item)}>
+              {STATUS_LABELS[item]}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="alert-list">
+        {visible.length === 0 ? (
+          <EmptyState icon="shield" title="No matching alerts" body="Dependencies are behaving within the selected review state." />
+        ) : (
+          visible.map((alert) => <AlertCard key={alert.id} alert={alert} onChange={load} />)
+        )}
+      </div>
+    </section>
   );
 }
 
 function FingerprintCard({ fp }: { fp: Fingerprint }) {
   const entries = Object.entries(fp.behaviors).sort((a, b) => b[1].count - a[1].count);
-  const max = Math.max(1, ...entries.map(([, s]) => s.count));
+  const top = entries.slice(0, 7);
+  const max = Math.max(1, ...entries.map(([, stat]) => stat.count));
+
   return (
-    <div className="fp">
-      <div className="fhead">
-        <span className="fpkg">
-          {fp.package}
-          {fp.version ? `@${fp.version}` : ""}
-        </span>
-        <span className={`chip ${fp.is_baseline ? "base" : "learn"}`}>
-          {fp.is_baseline ? "BASELINE" : "LEARNING"}
-        </span>
-        <span className="meta">
-          {fp.service} &middot; {fp.obs_count} obs &middot; {entries.length} behaviors
+    <article className="fingerprint-card">
+      <div className="fingerprint-head">
+        <div>
+          <div className="package-line">
+            <span>{fp.package}</span>
+            {fp.version && <span className="version-shift">@{fp.version}</span>}
+          </div>
+          <div className="alert-subtitle">
+            <span>{fp.service}</span>
+            <span>{fp.obs_count} observations</span>
+            <span>{entries.length} behaviors</span>
+          </div>
+        </div>
+        <span className={`state-chip ${fp.is_baseline ? "baseline" : "learning"}`}>
+          {fp.is_baseline ? "Baseline" : "Learning"}
         </span>
       </div>
-      {entries.map(([name, s]) => (
-        <div className="bhrow" key={name}>
-          <span className="name">{name}</span>
-          <span className="bar" style={{ width: `${Math.max(4, (s.count / max) * 160)}px` }} />
-          <span className="cnt">×{s.count}</span>
+
+      <div className="behavior-table">
+        {top.map(([name, stat]) => (
+          <div className="behavior-row" key={name}>
+            <span className="behavior-name">{name}</span>
+            <span className="mini-bar" aria-hidden="true">
+              <i style={{ width: `${Math.max(6, (stat.count / max) * 100)}%` }} />
+            </span>
+            <span className="behavior-count">x{stat.count}</span>
+          </div>
+        ))}
+      </div>
+    </article>
+  );
+}
+
+function FingerprintsView() {
+  const [fingerprints, setFingerprints] = useState<Fingerprint[]>([]);
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<"all" | "baseline" | "learning">("all");
+  const [err, setErr] = useState("");
+
+  const load = useCallback(() => {
+    fetchFingerprints()
+      .then((items) => {
+        setFingerprints(items);
+        setErr("");
+      })
+      .catch((e) => setErr(String(e)));
+  }, []);
+
+  useEffect(() => {
+    load();
+    const unsub = subscribe({ onEvents: () => load() });
+    const timer = setInterval(load, 8000);
+    return () => {
+      unsub();
+      clearInterval(timer);
+    };
+  }, [load]);
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return fingerprints
+      .filter((fp) => (mode === "all" ? true : mode === "baseline" ? fp.is_baseline : !fp.is_baseline))
+      .filter((fp) => !needle || fp.package.toLowerCase().includes(needle) || fp.service.toLowerCase().includes(needle))
+      .sort((a, b) => Number(b.is_baseline) - Number(a.is_baseline) || b.obs_count - a.obs_count);
+  }, [fingerprints, mode, query]);
+
+  const behaviorCount = fingerprints.reduce((sum, fp) => sum + Object.keys(fp.behaviors).length, 0);
+
+  return (
+    <section className="view">
+      {err && <div className="error-banner">{err}</div>}
+
+      <div className="metrics-grid">
+        <MetricCard label="Packages learned" value={fingerprints.length} icon="cube" detail="Across services" />
+        <MetricCard label="Baselines" value={fingerprints.filter((fp) => fp.is_baseline).length} tone="good" icon="shield" detail="Promoted" />
+        <MetricCard label="Learning" value={fingerprints.filter((fp) => !fp.is_baseline).length} tone="warning" icon="activity" detail="Still observing" />
+        <MetricCard label="Behaviors" value={behaviorCount} tone="accent" icon="grid" detail="Canonical signals" />
+      </div>
+
+      <div className="toolbar">
+        <div>
+          <h2>Fingerprint explorer</h2>
+          <p>Inspect learned package behavior before and after dependency updates.</p>
         </div>
-      ))}
-    </div>
+        <label className="search-box">
+          <Icon name="search" />
+          <input placeholder="Search package or service" value={query} onChange={(e) => setQuery(e.target.value)} />
+        </label>
+      </div>
+
+      <div className="subtoolbar">
+        <div className="segmented compact" role="tablist" aria-label="Fingerprint state">
+          {(["all", "baseline", "learning"] as const).map((item) => (
+            <button key={item} className={mode === item ? "active" : ""} onClick={() => setMode(item)}>
+              {item[0].toUpperCase() + item.slice(1)}
+            </button>
+          ))}
+        </div>
+        <span>{filtered.length} results</span>
+      </div>
+
+      <div className="fingerprint-list">
+        {filtered.length === 0 ? (
+          <EmptyState icon="fingerprint" title="No fingerprints found" body="Run a watched workload or adjust the current filters." />
+        ) : (
+          filtered.map((fp) => <FingerprintCard key={`${fp.service}/${fp.package}/${fp.version}`} fp={fp} />)
+        )}
+      </div>
+    </section>
   );
 }
 
 export function App() {
-  const [tab, setTab] = useState<"alerts" | "fingerprints">("alerts");
+  const [tab, setTab] = useState<Tab>("alerts");
   const [openCount, setOpenCount] = useState(0);
+  const [knownPackages, setKnownPackages] = useState(0);
+  const [lastRefresh, setLastRefresh] = useState<Date>(() => new Date());
 
   useEffect(() => {
-    const refresh = () =>
-      fetchAlerts("open")
-        .then((a) => setOpenCount(a.length))
-        .catch(() => {});
+    const refresh = () => {
+      Promise.allSettled([fetchAlerts("open"), fetchFingerprints()]).then(([alertsResult, fingerprintsResult]) => {
+        if (alertsResult.status === "fulfilled") setOpenCount(alertsResult.value.length);
+        if (fingerprintsResult.status === "fulfilled") setKnownPackages(fingerprintsResult.value.length);
+        setLastRefresh(new Date());
+      });
+    };
     refresh();
-    const unsub = subscribe({
-      onAlerts: () => {
-        refresh();
-      },
-      onEvents: refresh,
-    });
-    const t = setInterval(refresh, 5000);
+    const unsub = subscribe({ onAlerts: refresh, onEvents: refresh });
+    const timer = setInterval(refresh, 5000);
     return () => {
       unsub();
-      clearInterval(t);
+      clearInterval(timer);
     };
   }, []);
 
   return (
-    <div className="app">
-      <header className="top">
-        <div className="logo">G</div>
-        <div className="brand">
-          <h1>Goodman</h1>
-          <p>Runtime dependency behavior monitoring</p>
+    <div className="app-shell">
+      <aside className="sidebar">
+        <div className="brand-block">
+          <div className="logo-mark">
+            <Icon name="shield" />
+          </div>
+          <div>
+            <h1>Goodman</h1>
+            <p>Runtime dependency security</p>
+          </div>
         </div>
-        <span className="live-dot on">
-          <i /> monitoring
-        </span>
-      </header>
 
-      <div className="tabs">
-        <button className={tab === "alerts" ? "active" : ""} onClick={() => setTab("alerts")}>
-          Alerts
-          {openCount > 0 && <span className="count">{openCount}</span>}
-        </button>
-        <button className={tab === "fingerprints" ? "active" : ""} onClick={() => setTab("fingerprints")}>
-          Fingerprint Explorer
-        </button>
-      </div>
+        <nav className="nav-list" aria-label="Dashboard sections">
+          <button className={tab === "alerts" ? "active" : ""} onClick={() => setTab("alerts")}>
+            <Icon name="alert" />
+            <span>Alerts</span>
+            {openCount > 0 && <b>{openCount}</b>}
+          </button>
+          <button className={tab === "fingerprints" ? "active" : ""} onClick={() => setTab("fingerprints")}>
+            <Icon name="fingerprint" />
+            <span>Fingerprints</span>
+          </button>
+        </nav>
 
-      {tab === "alerts" ? <AlertsView /> : <FingerprintsView />}
+        <div className="side-panel">
+          <div className="side-panel-head">
+            <Icon name="spark" />
+            <span>Live sensor</span>
+          </div>
+          <strong>{openCount === 0 ? "Healthy" : `${openCount} open`}</strong>
+          <p>{knownPackages} learned package fingerprints</p>
+        </div>
+      </aside>
+
+      <main className="workspace">
+        <header className="workspace-head">
+          <div>
+            <p className="eyebrow">Security operations</p>
+            <h2>{tab === "alerts" ? "Dependency drift review" : "Runtime fingerprint library"}</h2>
+          </div>
+          <div className="monitor-pill">
+            <i />
+            <span>Monitoring</span>
+            <small>{lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
+          </div>
+        </header>
+
+        {tab === "alerts" ? <AlertsView /> : <FingerprintsView />}
+      </main>
     </div>
   );
 }
