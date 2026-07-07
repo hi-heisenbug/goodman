@@ -1,8 +1,8 @@
 # Development
 
-The dev loop, testing strategy, and how to cut a release. If you're an automated
-agent, read [`AGENTS.md`](../AGENTS.md) first — it has the repo map and the
-invariants.
+The dev loop, testing strategy, and how to cut a release. If you're making a
+substantial change, read [`AGENTS.md`](../AGENTS.md) first — it has the repo map,
+invariants, production quality bar, and common mistakes to avoid.
 
 ## The loop
 
@@ -78,6 +78,24 @@ make dashboard   # builds and copies dist/ into internal/api/ui/dist
 
 The built `dist/` is **committed** so `go build` works without Node. If you
 changed `dashboard/src`, rebuild and commit the new `dist/` in the same PR.
+
+The production dashboard is the HEISENBUG UI, not a demo shell. Keep the React
+views wired to `/v1/alerts`, `/v1/fingerprints`, `/v1/stream`, and the alert
+action endpoints. Use local `@fontsource` DM Sans/Inter assets and the brand
+palette documented in [`AGENTS.md`](../AGENTS.md#conventions); do not add CDN
+fonts or hard-coded mock data.
+
+For UI changes, verify:
+
+```bash
+make dashboard
+(cd dashboard && npm audit --audit-level=moderate)
+```
+
+Then serve the built `dashboard/dist` with mock `/v1/*` responses or a real
+collector and check desktop and mobile layouts. Watch specifically for mobile
+horizontal overflow, clipped long package/behavior strings, stale built assets,
+and SSE-related screenshot tooling hangs.
 
 ## Regenerating vmlinux.h
 

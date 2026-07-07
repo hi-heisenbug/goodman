@@ -92,6 +92,47 @@ The SSE stream connects on first event. If it stays "connecting", confirm the
 collector is reachable (`curl http://<collector>:8844/v1/healthz`) and that events
 are being ingested (`goodman_collector_events_ingested_total`).
 
+**Dashboard source changed but the embedded UI did not**
+Run `make dashboard`. The collector serves `internal/api/ui/dist`, not
+`dashboard/src`. A common agent mistake is to edit React/CSS, run only `npm run
+build`, and forget to copy the new `dist` into the embedded Go package.
+
+**Dashboard looks right locally but CI or `go build` serves old assets**
+Check `git status --short internal/api/ui/dist dashboard/src`. The hashed Vite
+asset filenames should change when the source bundle changes, and the old hashed
+assets should be removed. Commit source and rebuilt embedded assets together.
+
+**Headless browser screenshots hang**
+Long-lived `/v1/stream` SSE connections can keep simple `chromium --screenshot`
+commands from exiting in some environments. Use Chrome DevTools Protocol or
+another bounded browser automation path: wait until DOM text from mock `/v1/*`
+data appears, capture the screenshot, then close the browser. If visual checks
+are impossible, still run `make dashboard` and assert rendered DOM text from a
+served production bundle.
+
+## E2E harness
+
+**`sudo make e2e` fails because a port is in use**
+The live e2e harness chooses free ports dynamically by default. To pin ports for
+debugging or to avoid a known conflict, set:
+
+```bash
+GOODMAN_E2E_COLLECTOR_PORT=8844 \
+GOODMAN_E2E_WORKLOAD_PORT=3000 \
+GOODMAN_E2E_SINK_PORT=9999 \
+sudo make e2e
+```
+
+**Sensor never watches the Node workload**
+Check `/tmp/goodman-e2e-sensor.log` for `watching pid ...`. Node can report its
+comm as `node`, `nodejs`, or `MainThread` depending on distro/runtime. Keep all
+of those covered if you change comm filtering.
+
+**Need to keep e2e logs after a passing run**
+Set `GOODMAN_E2E_KEEP_LOGS=1` before running. The harness preserves
+`/tmp/goodman-e2e-*.log`, perf maps, and temporary state on failure by default,
+but this flag is useful when collecting evidence across reruns.
+
 ## Kubernetes
 
 **Sensor pods CrashLoopBackOff**
