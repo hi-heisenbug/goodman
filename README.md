@@ -15,6 +15,9 @@ to an IP. Goodman tells you which dependency in that process did it.
 
 ![Goodman dashboard showing a critical dependency drift alert](docs/images/dashboard.png)
 
+The embedded HEISENBUG dashboard is a production React/Vite UI with live alert
+review, fingerprint exploration, SSE updates, and responsive mobile layouts.
+
 ## What It Detects
 
 Goodman is built for dependency behavior drift:
