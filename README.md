@@ -87,6 +87,16 @@ make smoke
 `make smoke` is the no-root demo. It starts the collector, feeds synthetic
 baseline and drift events, and asserts exactly one CRITICAL alert.
 
+To explore the product UI with realistic data:
+
+```bash
+make demo
+```
+
+Then open `http://127.0.0.1:8844`. This no-root path starts the collector with a
+local SQLite database, seeds baseline fingerprints and dependency-drift alerts,
+and keeps the dashboard running until you press `Ctrl-C`.
+
 For the real eBPF path:
 
 ```bash

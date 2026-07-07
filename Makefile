@@ -79,6 +79,10 @@ e2e: build workload ## Full eBPF drift replay (NEEDS ROOT: run `sudo make e2e`)
 smoke: build ## Backend-only smoke test (no root needed)
 	bash test/e2e/smoke_test.sh
 
+.PHONY: demo
+demo: build ## Start a no-root local product demo with seeded alerts and fingerprints
+	bash scripts/demo.sh
+
 ## --- Docker / Helm ---
 .PHONY: docker
 docker: ## Build sensor + collector images
@@ -95,4 +99,4 @@ kind-e2e: ## Create a kind cluster, install Goodman, run the in-cluster drift te
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -rf bin $(BPF_OBJ) $(LOADER_OBJ) goodman.db goodman.db-* dashboard/dist
+	rm -rf bin $(BPF_OBJ) $(LOADER_OBJ) goodman.db goodman.db-* dashboard/dist demo_build/*.db demo_build/*.db-shm demo_build/*.db-wal
