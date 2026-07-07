@@ -88,14 +88,21 @@ int trace_openat(struct trace_event_raw_sys_enter *ctx)
 }
 
 /* Render "a.b.c.d:port" or "[v6-hex]:port" into e->arg without snprintf
- * (bpf_snprintf needs kernel 5.13; keep the floor at 5.8). */
+ * (bpf_snprintf needs kernel 5.13; keep the floor at 5.8).
+ *
+ * Every write masks its index with (PATH_MAX_LEN-1) so the verifier can
+ * statically prove the store is in bounds regardless of the data-dependent
+ * position. PATH_MAX_LEN is a power of two (256), so the mask is exact. */
+#define ARG_MASK (PATH_MAX_LEN - 1)
+#define PUT(buf, pos, c) do { (buf)[(pos) & ARG_MASK] = (c); (pos)++; } while (0)
+
 static __always_inline int put_u8_dec(char *buf, int pos, __u8 v)
 {
     if (v >= 100)
-        buf[pos++] = '0' + v / 100;
+        PUT(buf, pos, '0' + v / 100);
     if (v >= 10)
-        buf[pos++] = '0' + (v / 10) % 10;
-    buf[pos++] = '0' + v % 10;
+        PUT(buf, pos, '0' + (v / 10) % 10);
+    PUT(buf, pos, '0' + v % 10);
     return pos;
 }
 
@@ -104,7 +111,7 @@ static __always_inline int put_u16_dec(char *buf, int pos, __u16 v)
     char tmp[5];
     int n = 0;
     if (v == 0) {
-        buf[pos++] = '0';
+        PUT(buf, pos, '0');
         return pos;
     }
 #pragma unroll
@@ -117,7 +124,7 @@ static __always_inline int put_u16_dec(char *buf, int pos, __u16 v)
 #pragma unroll
     for (int i = 4; i >= 0; i--) {
         if (i < n)
-            buf[pos++] = tmp[i];
+            PUT(buf, pos, tmp[i]);
     }
     return pos;
 }
@@ -148,32 +155,32 @@ int trace_connect(struct trace_event_raw_sys_enter *ctx)
         __u32 ip = bpf_ntohl(sa.sin_addr.s_addr);
         __u16 port = bpf_ntohs(sa.sin_port);
         pos = put_u8_dec(e->arg, pos, (ip >> 24) & 0xff);
-        e->arg[pos++] = '.';
+        PUT(e->arg, pos, '.');
         pos = put_u8_dec(e->arg, pos, (ip >> 16) & 0xff);
-        e->arg[pos++] = '.';
+        PUT(e->arg, pos, '.');
         pos = put_u8_dec(e->arg, pos, (ip >> 8) & 0xff);
-        e->arg[pos++] = '.';
+        PUT(e->arg, pos, '.');
         pos = put_u8_dec(e->arg, pos, ip & 0xff);
-        e->arg[pos++] = ':';
+        PUT(e->arg, pos, ':');
         pos = put_u16_dec(e->arg, pos, port);
     } else {
         struct sockaddr_in6 sa6 = {};
         bpf_probe_read_user(&sa6, sizeof(sa6), uaddr);
         __u16 port = bpf_ntohs(sa6.sin6_port);
-        e->arg[pos++] = '[';
+        PUT(e->arg, pos, '[');
 #pragma unroll
         for (int i = 0; i < 16; i++) {
             __u8 b = sa6.sin6_addr.in6_u.u6_addr8[i];
-            e->arg[pos++] = hexd[b >> 4];
-            e->arg[pos++] = hexd[b & 0xf];
+            PUT(e->arg, pos, hexd[b >> 4]);
+            PUT(e->arg, pos, hexd[b & 0xf]);
             if ((i & 1) && i != 15)
-                e->arg[pos++] = ':';
+                PUT(e->arg, pos, ':');
         }
-        e->arg[pos++] = ']';
-        e->arg[pos++] = ':';
+        PUT(e->arg, pos, ']');
+        PUT(e->arg, pos, ':');
         pos = put_u16_dec(e->arg, pos, port);
     }
-    e->arg[pos] = 0;
+    e->arg[pos & ARG_MASK] = 0;
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
