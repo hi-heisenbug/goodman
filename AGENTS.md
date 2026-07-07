@@ -148,6 +148,7 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make build` | Build `sensor`, `collector`, `goodmanctl` into `bin/` | no |
 | `make test` | `go test ./...` (unit tests, all packages) | no |
 | `make smoke` | Backend end-to-end via synthetic events → asserts one CRITICAL alert | **no** |
+| `make demo` | No-root interactive product demo with seeded alerts/fingerprints | **no** |
 | `make e2e` | **Real eBPF** drift replay: sensor + Node workload → alert | **yes** |
 | `make docker` | Build both container images | no (docker daemon) |
 | `make helm-lint` | Lint the Helm chart | no |

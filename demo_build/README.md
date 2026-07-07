@@ -39,6 +39,16 @@ python3 demo_build/capture_screens.py
 python3 demo_build/assemble.py
 ```
 
+To run the interactive product demo locally with seeded data:
+
+```bash
+make demo
+```
+
+Use `GOODMAN_DEMO_PORT`, `GOODMAN_DEMO_HOST`, `GOODMAN_DEMO_DB`,
+`GOODMAN_DEMO_LEARN_OBS`, and `GOODMAN_DEMO_LEARN_MIN_AGE` to override the
+default local demo settings.
+
 Do not commit `frames/`, Chromium profiles, local SQLite DB files, `nohup.out`,
 temporary collector logs, or extra resized copies unless they are explicitly
 requested. Keep one canonical final video by default.

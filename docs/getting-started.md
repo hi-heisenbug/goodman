@@ -62,7 +62,26 @@ new secret read and metadata connect — and that no baseline behavior leaked in
 it. If it prints `SMOKE TEST PASSED`, your backend, store, fingerprint engine,
 diff engine, and API all work.
 
-## 4. The full live demo with real eBPF (`sudo make e2e`)
+## 4. Open the product dashboard with demo data (`make demo`)
+
+For a no-root product walkthrough, start the collector with realistic seeded
+fingerprints and drift alerts:
+
+```bash
+make demo
+```
+
+Open **http://127.0.0.1:8844**. The command keeps the collector running until
+you press `Ctrl-C`. It uses a local SQLite database at
+`demo_build/goodman_demo.db`, which is ignored by git.
+
+If port `8844` is already in use:
+
+```bash
+GOODMAN_DEMO_PORT=8855 make demo
+```
+
+## 5. The full live demo with real eBPF (`sudo make e2e`)
 
 This is the real thing: the eBPF sensor captures actual syscalls from a running
 Node app and attributes them to the package that made them.
@@ -86,7 +105,7 @@ What it does (all benign — no real malware, no real exfiltration):
 > `unprivileged_bpf_disabled` set (check `make doctor`), the sensor must run as
 > root. `make smoke` is the no-root alternative for the backend.
 
-## 5. Run the stack yourself and open the dashboard
+## 6. Run the stack yourself and open the dashboard
 
 Start the collector with a short, dev-friendly learning window:
 
