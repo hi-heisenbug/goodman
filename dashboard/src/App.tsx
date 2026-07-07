@@ -18,7 +18,8 @@ type IconName =
   | "lock"
   | "search"
   | "shield"
-  | "spark";
+  | "spark"
+  | "triangle";
 
 const SENSITIVE =
   /(secret|token|credential|password|shadow|169\.254\.169\.254|\.pem|\.key|\.aws|\.ssh|\.npmrc|\.env|id_rsa)/i;
@@ -53,6 +54,7 @@ function Icon({ name }: { name: IconName }) {
     search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
     shield: <><path d="M12 2 20 5v6c0 5-3.4 8.4-8 11-4.6-2.6-8-6-8-11V5l8-3Z" /><path d="m9 12 2 2 4-5" /></>,
     spark: <><path d="M12 2v6" /><path d="M12 16v6" /><path d="M4.9 4.9 9 9" /><path d="m15 15 4.1 4.1" /><path d="M2 12h6" /><path d="M16 12h6" /><path d="m4.9 19.1 4.1-4.1" /><path d="m15 9 4.1-4.1" /></>,
+    triangle: <><path d="M12 3 3 21h18L12 3Z" /></>,
   };
 
   return (
@@ -457,11 +459,11 @@ export function App() {
       <aside className="sidebar">
         <div className="brand-block">
           <div className="logo-mark">
-            <Icon name="shield" />
+            <Icon name="triangle" />
           </div>
           <div>
-            <h1>Goodman</h1>
-            <p>Runtime dependency security</p>
+            <h1>HEISENBUG</h1>
+            <p>The bug that catches every bug</p>
           </div>
         </div>
 
@@ -490,8 +492,8 @@ export function App() {
       <main className="workspace">
         <header className="workspace-head">
           <div>
-            <p className="eyebrow">Security operations</p>
-            <h2>{tab === "alerts" ? "Dependency drift review" : "Runtime fingerprint library"}</h2>
+            <p className="eyebrow">Runtime security index</p>
+            <h2>{tab === "alerts" ? "Dependency drift review" : "Behavior fingerprint library"}</h2>
           </div>
           <div className="monitor-pill">
             <i />
