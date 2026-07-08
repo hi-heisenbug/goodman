@@ -86,7 +86,7 @@ in [`deploy/helm/goodman/values.yaml`](../deploy/helm/goodman/values.yaml).
 |---|---|---|
 | `cluster` | `dev` | Deployment identity. |
 | `registries` | `npm` | Comma-separated registries watched (informational in v1). |
-| `sensor.image` / `collector.image` | `ghcr.io/goodman-sec/*:0.1.0` | Container images. |
+| `sensor.image` / `collector.image` | `ghcr.io/hi-heisenbug/*:0.1.0` | Container images. |
 | `sensor.extraComms` | `""` | Extra process names to watch. |
 | `sensor.metricsPort` | `9478` | Sensor Prometheus port. |
 | `collector.replicas` | `1` | Collector replica count. |
@@ -106,7 +106,7 @@ Example production install:
 helm install goodman deploy/helm/goodman \
   --set cluster=prod \
   --set-string registries='npm\,pypi' \
-  --set collector.image=ghcr.io/goodman-sec/collector:0.1.0 \
-  --set sensor.image=ghcr.io/goodman-sec/sensor:0.1.0 \
+  --set collector.image=ghcr.io/hi-heisenbug/collector:0.1.0 \
+  --set sensor.image=ghcr.io/hi-heisenbug/sensor:0.1.0 \
   --set postgres.dsn='postgres://goodman:secret@db:5432/goodman?sslmode=require'
 ```

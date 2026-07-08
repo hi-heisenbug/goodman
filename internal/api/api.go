@@ -25,10 +25,10 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/goodman-sec/goodman/internal/diff"
-	"github.com/goodman-sec/goodman/internal/fingerprint"
-	"github.com/goodman-sec/goodman/internal/model"
-	"github.com/goodman-sec/goodman/internal/store"
+	"github.com/hi-heisenbug/goodman/internal/diff"
+	"github.com/hi-heisenbug/goodman/internal/fingerprint"
+	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
 var (

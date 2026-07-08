@@ -52,8 +52,8 @@ func TestHelmDefaultsUseReleaseImagesAndActionableNotes(t *testing.T) {
 	}
 	rendered := string(out)
 	for _, want := range []string{
-		`image: "ghcr.io/goodman-sec/sensor:0.1.0"`,
-		`image: "ghcr.io/goodman-sec/collector:0.1.0"`,
+		`image: "ghcr.io/hi-heisenbug/sensor:0.1.0"`,
+		`image: "ghcr.io/hi-heisenbug/collector:0.1.0"`,
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("rendered chart missing %q\n%s", want, rendered)

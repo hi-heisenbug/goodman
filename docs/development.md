@@ -114,6 +114,6 @@ make vmlinux     # bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/
 
 1. Update `CHANGELOG.md` (move `[Unreleased]` items into a dated version).
 2. Bump `appVersion`/`version` in `deploy/helm/goodman/Chart.yaml`.
-3. `make docker REGISTRY=ghcr.io/goodman-sec TAG=X.Y.Z` and push both images.
+3. `make docker REGISTRY=ghcr.io/hi-heisenbug TAG=X.Y.Z` and push both images.
 4. Tag: `git tag vX.Y.Z && git push --tags`.
 5. Verify `sudo make e2e` on a real kernel before announcing.

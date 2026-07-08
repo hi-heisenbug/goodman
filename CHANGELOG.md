@@ -41,5 +41,5 @@ Initial public release.
 - Helm chart for Kubernetes deployment.
 - Benign-drift end-to-end test.
 
-[Unreleased]: https://github.com/goodman-sec/goodman/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/goodman-sec/goodman/releases/tag/v0.1.0
+[Unreleased]: https://github.com/hi-heisenbug/goodman/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/hi-heisenbug/goodman/releases/tag/v0.1.0

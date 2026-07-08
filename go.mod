@@ -1,4 +1,4 @@
-module github.com/goodman-sec/goodman
+module github.com/hi-heisenbug/goodman
 
 go 1.23
 

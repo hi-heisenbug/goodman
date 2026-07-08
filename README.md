@@ -1,6 +1,6 @@
 # Goodman
 
-[![CI](https://github.com/goodman-sec/goodman/actions/workflows/ci.yml/badge.svg)](https://github.com/goodman-sec/goodman/actions/workflows/ci.yml)
+[![CI](https://github.com/hi-heisenbug/goodman/actions/workflows/ci.yml/badge.svg)](https://github.com/hi-heisenbug/goodman/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](go.mod)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-helm-326CE5.svg)](deploy/helm/goodman)

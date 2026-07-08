@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goodman-sec/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 func writeFile(t *testing.T, path, content string) {

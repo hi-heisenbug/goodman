@@ -32,8 +32,8 @@ Equivalent raw Helm command:
 helm install goodman deploy/helm/goodman \
   --set cluster=prod \
   --set-string registries='npm\,pypi' \
-  --set collector.image=ghcr.io/goodman-sec/collector:0.1.0 \
-  --set sensor.image=ghcr.io/goodman-sec/sensor:0.1.0
+  --set collector.image=ghcr.io/hi-heisenbug/collector:0.1.0 \
+  --set sensor.image=ghcr.io/hi-heisenbug/sensor:0.1.0
 ```
 
 Then open the dashboard:
@@ -49,8 +49,8 @@ SQLite:
 ```bash
 helm install goodman deploy/helm/goodman \
   --set cluster=prod \
-  --set collector.image=ghcr.io/goodman-sec/collector:0.1.0 \
-  --set sensor.image=ghcr.io/goodman-sec/sensor:0.1.0 \
+  --set collector.image=ghcr.io/hi-heisenbug/collector:0.1.0 \
+  --set sensor.image=ghcr.io/hi-heisenbug/sensor:0.1.0 \
   --set postgres.dsn='postgres://goodman:secret@db:5432/goodman?sslmode=require'
 ```
 
@@ -102,9 +102,9 @@ under `/host/proc/<pid>/root/tmp/perf-<pid>.map`, which sees each target's own
 ## Building and publishing images
 
 ```bash
-make docker REGISTRY=ghcr.io/goodman-sec TAG=0.1.0
-docker push ghcr.io/goodman-sec/collector:0.1.0
-docker push ghcr.io/goodman-sec/sensor:0.1.0
+make docker REGISTRY=ghcr.io/hi-heisenbug TAG=0.1.0
+docker push ghcr.io/hi-heisenbug/collector:0.1.0
+docker push ghcr.io/hi-heisenbug/sensor:0.1.0
 ```
 
 The sensor image rebuilds the eBPF object from source inside the build stage, so

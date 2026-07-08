@@ -7,7 +7,7 @@ cluster: dev
 registries: npm
 
 sensor:
-  image: ghcr.io/goodman-sec/sensor:0.1.0
+  image: ghcr.io/hi-heisenbug/sensor:0.1.0
   imagePullPolicy: IfNotPresent
   # Extra process comm names to watch beyond the built-in runtime defaults.
   extraComms: ""
@@ -18,7 +18,7 @@ sensor:
   metricsPort: 9478
 
 collector:
-  image: ghcr.io/goodman-sec/collector:0.1.0
+  image: ghcr.io/hi-heisenbug/collector:0.1.0
   imagePullPolicy: IfNotPresent
   replicas: 1
   service:

@@ -21,7 +21,7 @@ You need an **x86-64 Linux host** (bare metal, VM, or WSL2) with:
 The fastest path on Debian/Ubuntu:
 
 ```bash
-git clone https://github.com/goodman-sec/goodman
+git clone https://github.com/hi-heisenbug/goodman
 cd goodman
 ./scripts/setup.sh      # installs prerequisites, then runs the doctor
 ```
