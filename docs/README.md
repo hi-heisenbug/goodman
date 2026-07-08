@@ -7,6 +7,7 @@ matches what you are trying to do.
 
 | Guide | Use it when |
 |---|---|
+| [Setup and usage](setup-and-usage.md) | You want the full copy-paste path for local setup, dashboard usage, CLI, Kubernetes, and validation. |
 | [Getting started](getting-started.md) | You want the first local build, no-root smoke test, and real eBPF demo. |
 | [Deployment](deployment.md) | You want to run Goodman on Kubernetes with Helm. |
 | [Configuration](configuration.md) | You need flags, environment variables, Helm values, storage, or rule tuning. |

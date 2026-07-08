@@ -4,6 +4,9 @@ The dev loop, testing strategy, and how to cut a release. If you're making a
 substantial change, read [`AGENTS.md`](../AGENTS.md) first — it has the repo map,
 invariants, production quality bar, and common mistakes to avoid.
 
+For first-time setup, running the dashboard, using `goodmanctl`, and installing
+Goodman on Kubernetes, use [Setup and usage](setup-and-usage.md).
+
 ## The loop
 
 ```bash

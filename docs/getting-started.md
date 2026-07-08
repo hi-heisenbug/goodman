@@ -3,6 +3,9 @@
 This guide takes you from a fresh Linux host to your first drift alert in about
 ten minutes. No Kubernetes required — everything runs locally.
 
+For the complete local, dashboard, CLI, Kubernetes, and coding-agent workflow,
+see [Setup and usage](setup-and-usage.md).
+
 ## 1. Prerequisites
 
 You need an **x86-64 Linux host** (bare metal, VM, or WSL2) with:
