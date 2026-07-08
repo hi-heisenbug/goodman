@@ -77,6 +77,9 @@ worse than no attribution.
 You need an x86-64 Linux host with kernel 5.8+ and BTF, plus Go, clang/LLVM,
 bpftool, and Node if you want to rebuild the dashboard.
 
+The complete setup and usage guide is in
+[docs/setup-and-usage.md](docs/setup-and-usage.md). The shortest local path is:
+
 ```bash
 make doctor
 make build
@@ -171,6 +174,7 @@ configuration, image publishing, and the chart resources.
 ## Documentation
 
 - [Getting started](docs/getting-started.md)
+- [Setup and usage](docs/setup-and-usage.md)
 - [Architecture](docs/architecture.md)
 - [Attribution](docs/attribution.md)
 - [Configuration](docs/configuration.md)
@@ -189,6 +193,9 @@ make vet
 make test
 make smoke
 ```
+
+Use [docs/setup-and-usage.md](docs/setup-and-usage.md) for the full local,
+dashboard, CLI, and Kubernetes workflow.
 
 Run `sudo make e2e` before merging changes to `bpf/`, `internal/loader/`, or
 `internal/attribute/`.
