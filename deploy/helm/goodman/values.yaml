@@ -1,5 +1,5 @@
-# Goodman Helm values. Install:
-#   helm install goodman goodman/goodman --set cluster=prod --set-string registries='npm\,pypi'
+# Goodman Helm values. Fast install from a checkout:
+#   scripts/install-k8s.sh --cluster prod
 
 # Free-form deployment identity (shown in the UI / used for multi-cluster later).
 cluster: dev
@@ -7,7 +7,7 @@ cluster: dev
 registries: npm
 
 sensor:
-  image: goodman/sensor:dev
+  image: ghcr.io/goodman-sec/sensor:0.1.0
   imagePullPolicy: IfNotPresent
   # Extra process comm names to watch beyond the built-in runtime defaults.
   extraComms: ""
@@ -18,7 +18,7 @@ sensor:
   metricsPort: 9478
 
 collector:
-  image: goodman/collector:dev
+  image: ghcr.io/goodman-sec/collector:0.1.0
   imagePullPolicy: IfNotPresent
   replicas: 1
   service:
