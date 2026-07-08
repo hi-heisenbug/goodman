@@ -114,6 +114,15 @@ make vmlinux     # bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/
 
 1. Update `CHANGELOG.md` (move `[Unreleased]` items into a dated version).
 2. Bump `appVersion`/`version` in `deploy/helm/goodman/Chart.yaml`.
-3. `make docker REGISTRY=ghcr.io/hi-heisenbug TAG=X.Y.Z` and push both images.
-4. Tag: `git tag vX.Y.Z && git push --tags`.
-5. Verify `sudo make e2e` on a real kernel before announcing.
+3. Verify `sudo make e2e` on a real kernel.
+4. Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
+5. Confirm the `Images` GitHub Actions workflow published:
+   - `ghcr.io/hi-heisenbug/collector:X.Y.Z`
+   - `ghcr.io/hi-heisenbug/sensor:X.Y.Z`
+   - `ghcr.io/hi-heisenbug/collector:latest`
+   - `ghcr.io/hi-heisenbug/sensor:latest`
+6. Create the GitHub release and attach the demo video if it changed.
+
+The release tag is the source of truth for container publishing. Do not require
+maintainers to push GHCR images from a laptop. For emergency re-publishes, run
+the `Images` workflow manually with the intended image tag.

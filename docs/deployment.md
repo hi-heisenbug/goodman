@@ -101,10 +101,14 @@ under `/host/proc/<pid>/root/tmp/perf-<pid>.map`, which sees each target's own
 
 ## Building and publishing images
 
+Release images are built and pushed by the `Images` GitHub Actions workflow
+when a `vX.Y.Z` tag is pushed. Maintainers do not need local GHCR credentials
+for normal releases.
+
+For local validation only:
+
 ```bash
-make docker REGISTRY=ghcr.io/hi-heisenbug TAG=0.1.0
-docker push ghcr.io/hi-heisenbug/collector:0.1.0
-docker push ghcr.io/hi-heisenbug/sensor:0.1.0
+make docker REGISTRY=goodman TAG=dev
 ```
 
 The sensor image rebuilds the eBPF object from source inside the build stage, so
