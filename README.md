@@ -121,14 +121,28 @@ so a fresh Go build can serve the UI without a separate Node server.
 ## Kubernetes
 
 ```bash
-helm install goodman deploy/helm/goodman \
-  --set cluster=prod \
-  --set-string registries='npm\,pypi'
-
-kubectl port-forward svc/goodman-collector 8844:8844
+scripts/install-k8s.sh --cluster prod
 ```
 
-Tier-1 Node attribution needs this environment variable on watched workloads:
+Enable package attribution on the Node workloads you want Goodman to watch:
+
+```bash
+scripts/enable-node-attribution.sh --namespace checkout --selector app=api
+```
+
+Or patch every Deployment in a namespace:
+
+```bash
+scripts/enable-node-attribution.sh --namespace checkout --all
+```
+
+Open the dashboard:
+
+```bash
+kubectl -n goodman-system port-forward svc/goodman-collector 8844:8844
+```
+
+Tier-1 Node attribution is one environment variable on watched workloads:
 
 ```yaml
 env:

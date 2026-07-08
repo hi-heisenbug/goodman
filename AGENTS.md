@@ -151,6 +151,7 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make demo` | No-root interactive product demo with seeded alerts/fingerprints | **no** |
 | `make e2e` | **Real eBPF** drift replay: sensor + Node workload → alert | **yes** |
 | `make docker` | Build both container images | no (docker daemon) |
+| `make install-k8s` | Install Goodman into the current Kubernetes context | no |
 | `make helm-lint` | Lint the Helm chart | no |
 | `make vet` | `go vet ./...` | no |
 | `make clean` | Remove build artifacts | no |

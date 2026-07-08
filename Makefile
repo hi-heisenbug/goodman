@@ -16,7 +16,7 @@ UI_DIST := internal/api/ui/dist
 
 .PHONY: help
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
+	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
 ## --- Setup ---
@@ -88,6 +88,10 @@ demo: build ## Start a no-root local product demo with seeded alerts and fingerp
 docker: ## Build sensor + collector images
 	docker build -f deploy/docker/collector.Dockerfile -t $(REGISTRY)/collector:$(TAG) .
 	docker build -f deploy/docker/sensor.Dockerfile -t $(REGISTRY)/sensor:$(TAG) .
+
+.PHONY: install-k8s
+install-k8s: ## Install Goodman into the current Kubernetes context
+	bash scripts/install-k8s.sh
 
 .PHONY: helm-lint
 helm-lint: ## Lint the Helm chart

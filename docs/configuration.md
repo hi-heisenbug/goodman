@@ -86,7 +86,7 @@ in [`deploy/helm/goodman/values.yaml`](../deploy/helm/goodman/values.yaml).
 |---|---|---|
 | `cluster` | `dev` | Deployment identity. |
 | `registries` | `npm` | Comma-separated registries watched (informational in v1). |
-| `sensor.image` / `collector.image` | `goodman/*:dev` | Container images. |
+| `sensor.image` / `collector.image` | `ghcr.io/goodman-sec/*:0.1.0` | Container images. |
 | `sensor.extraComms` | `""` | Extra process names to watch. |
 | `sensor.metricsPort` | `9478` | Sensor Prometheus port. |
 | `collector.replicas` | `1` | Collector replica count. |

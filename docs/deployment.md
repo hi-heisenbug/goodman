@@ -16,10 +16,24 @@ Goodman deploys as a privileged **DaemonSet** (the sensor, one per node) plus a
 
 ## Install
 
+Fast path from a checkout:
+
+```bash
+scripts/install-k8s.sh --cluster prod
+```
+
+That command installs Goodman into the current `kubectl` context using the
+release images, creates the namespace if needed, waits for readiness, and prints
+the dashboard and workload-attribution commands.
+
+Equivalent raw Helm command:
+
 ```bash
 helm install goodman deploy/helm/goodman \
   --set cluster=prod \
-  --set-string registries='npm\,pypi'
+  --set-string registries='npm\,pypi' \
+  --set collector.image=ghcr.io/goodman-sec/collector:0.1.0 \
+  --set sensor.image=ghcr.io/goodman-sec/sensor:0.1.0
 ```
 
 Then open the dashboard:
@@ -54,8 +68,20 @@ env:
     value: "--perf-basic-prof --interpreted-frames-native-stack"
 ```
 
-The Helm install NOTES remind you of this (toggle with
-`attribution.requireNodeOptions`). Automatic injection via a
+Patch selected Deployments:
+
+```bash
+scripts/enable-node-attribution.sh --namespace checkout --selector app=api
+```
+
+Patch every Deployment in a namespace:
+
+```bash
+scripts/enable-node-attribution.sh --namespace checkout --all
+```
+
+The Helm install NOTES also print the raw `kubectl set env` commands (toggle
+with `attribution.requireNodeOptions`). Automatic injection via a
 `MutatingAdmissionWebhook` is a v1.1 item (architected, not yet built); Tier-2
 in-kernel V8 unwinding removes the flag entirely.
 

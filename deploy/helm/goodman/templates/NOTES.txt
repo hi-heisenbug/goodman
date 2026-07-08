@@ -10,11 +10,17 @@ Open the dashboard:
 {{- if .Values.attribution.requireNodeOptions }}
 
 ACTION REQUIRED (Tier-1 attribution): add this to each Node workload you want
-attributed — one env var, no code change:
+attributed - one env var, no code change:
 
   env:
     - name: NODE_OPTIONS
       value: "--perf-basic-prof --interpreted-frames-native-stack"
+
+Patch a whole namespace:
+  kubectl -n <app-namespace> set env deployment --all NODE_OPTIONS="--perf-basic-prof --interpreted-frames-native-stack"
+
+Or patch selected deployments:
+  kubectl -n <app-namespace> set env deployment -l app=<app-label> NODE_OPTIONS="--perf-basic-prof --interpreted-frames-native-stack"
 {{- end }}
 
 Datastore: {{ if .Values.postgres.dsn }}PostgreSQL{{ else }}embedded SQLite at {{ .Values.postgres.sqlitePath }} (pilot mode){{ end }}
