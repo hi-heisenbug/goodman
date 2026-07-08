@@ -8,8 +8,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/goodman-sec/goodman/internal/model"
-	"github.com/goodman-sec/goodman/internal/store"
+	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
 func TestListAlertsEnrichesBaselineBehaviors(t *testing.T) {

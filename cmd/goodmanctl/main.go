@@ -15,9 +15,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/goodman-sec/goodman/internal/attribute"
-	"github.com/goodman-sec/goodman/internal/loader"
-	"github.com/goodman-sec/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/attribute"
+	"github.com/hi-heisenbug/goodman/internal/loader"
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 const usage = `goodmanctl — Goodman dev CLI

@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/goodman-sec/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 // Resolver turns raw kernel events (pid + stack of instruction pointers)

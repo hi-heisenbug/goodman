@@ -16,7 +16,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 	_ "modernc.org/sqlite"
 
-	"github.com/goodman-sec/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 //go:embed migrations/*.sql

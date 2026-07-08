@@ -14,9 +14,9 @@ import (
 	"sort"
 	"time"
 
-	"github.com/goodman-sec/goodman/internal/fingerprint"
-	"github.com/goodman-sec/goodman/internal/model"
-	"github.com/goodman-sec/goodman/internal/store"
+	"github.com/hi-heisenbug/goodman/internal/fingerprint"
+	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
 // Rule marks matching new behaviors as high risk (CRITICAL).

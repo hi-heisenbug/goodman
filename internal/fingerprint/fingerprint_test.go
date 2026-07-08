@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/goodman-sec/goodman/internal/model"
-	"github.com/goodman-sec/goodman/internal/store"
+	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
 func newStore(t *testing.T) *store.Store {
@@ -76,7 +76,7 @@ func TestIngestSkipsEmptyPackages(t *testing.T) {
 	eng := NewEngine(newStore(t), LearningWindow{MinObs: 1})
 	ups, err := eng.Ingest(ctx, []model.Attributed{
 		{Service: "s", Package: "", Behavior: "READ /x", Timestamp: 1}, // no package -> skipped
-		{Service: "s", Package: "p", Behavior: "", Timestamp: 1},        // no behavior -> skipped
+		{Service: "s", Package: "p", Behavior: "", Timestamp: 1},       // no behavior -> skipped
 	})
 	if err != nil {
 		t.Fatal(err)

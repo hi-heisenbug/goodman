@@ -19,7 +19,7 @@ import (
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
 
-	"github.com/goodman-sec/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 //go:embed goodman.bpf.o

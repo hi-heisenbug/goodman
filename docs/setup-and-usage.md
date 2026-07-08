@@ -50,7 +50,7 @@ make doctor
 ## Fresh Local Setup
 
 ```bash
-git clone https://github.com/goodman-sec/goodman
+git clone https://github.com/hi-heisenbug/goodman
 cd goodman
 make doctor
 make build

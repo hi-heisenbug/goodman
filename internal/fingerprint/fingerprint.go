@@ -7,8 +7,8 @@ import (
 	"context"
 	"time"
 
-	"github.com/goodman-sec/goodman/internal/model"
-	"github.com/goodman-sec/goodman/internal/store"
+	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
 // LearningWindow controls baseline promotion: a fingerprint becomes a
@@ -35,9 +35,9 @@ func NewEngine(s *store.Store, w LearningWindow) *Engine {
 
 // Update is the result of ingesting events for one fingerprint.
 type Update struct {
-	Fingerprint   *model.Fingerprint
+	Fingerprint    *model.Fingerprint
 	FreshBehaviors []string // behaviors first seen in this batch
-	JustPromoted  bool     // crossed the learning window in this batch
+	JustPromoted   bool     // crossed the learning window in this batch
 }
 
 // Ingest merges a batch of events into fingerprints and returns one Update

@@ -4,16 +4,16 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/goodman-sec/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 // Canonicalize maps a raw syscall argument to a stable behavior string so
 // the same logical behavior always produces the same fingerprint entry.
 //
-//   FILE_OPEN  -> "READ /app/src/routes/**"      (dir-collapsed)
-//              -> "READ /var/run/secrets/k8s.io/token"  (sensitive: verbatim)
-//   NET_CONNECT-> "CONNECT 1.2.3.4:443"
-//   PROC_EXEC  -> "EXEC curl"
+//	FILE_OPEN  -> "READ /app/src/routes/**"      (dir-collapsed)
+//	           -> "READ /var/run/secrets/k8s.io/token"  (sensitive: verbatim)
+//	NET_CONNECT-> "CONNECT 1.2.3.4:443"
+//	PROC_EXEC  -> "EXEC curl"
 func Canonicalize(t model.EventType, arg string) string {
 	switch t {
 	case model.EventFileOpen:

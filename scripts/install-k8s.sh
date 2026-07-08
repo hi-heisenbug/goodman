@@ -7,7 +7,7 @@ cd "$(dirname "$0")/.."
 RELEASE="${GOODMAN_RELEASE:-goodman}"
 NAMESPACE="${GOODMAN_NAMESPACE:-goodman-system}"
 CLUSTER="${GOODMAN_CLUSTER:-prod}"
-IMAGE_REGISTRY="${GOODMAN_IMAGE_REGISTRY:-ghcr.io/goodman-sec}"
+IMAGE_REGISTRY="${GOODMAN_IMAGE_REGISTRY:-ghcr.io/hi-heisenbug}"
 TAG="${GOODMAN_IMAGE_TAG:-0.1.0}"
 CHART="${GOODMAN_CHART:-deploy/helm/goodman}"
 POSTGRES_DSN="${GOODMAN_POSTGRES_DSN:-}"
@@ -24,7 +24,7 @@ Options:
   --release NAME        Helm release name (default: goodman)
   --namespace NAME      Kubernetes namespace (default: goodman-system)
   --cluster NAME        Cluster label shown in Goodman (default: prod)
-  --registry REGISTRY   Image registry/repo prefix (default: ghcr.io/goodman-sec)
+  --registry REGISTRY   Image registry/repo prefix (default: ghcr.io/hi-heisenbug)
   --tag TAG             Image tag for sensor and collector (default: 0.1.0)
   --chart PATH_OR_OCI   Helm chart path/ref (default: deploy/helm/goodman)
   --postgres-dsn DSN    Production Postgres DSN. Empty uses SQLite pilot mode.
