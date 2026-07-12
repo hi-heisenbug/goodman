@@ -19,6 +19,7 @@ matches what you are trying to do.
 |---|---|
 | [Architecture](architecture.md) | You want the component model and data flow. |
 | [Attribution](attribution.md) | You need to understand how Goodman maps a syscall to `package@version`. |
+| [Replay corpus](replay-corpus.md) | You want to see Goodman catch real npm supply-chain attacks (`make replay`). |
 | [API reference](api.md) | You are integrating with the collector REST API, SSE stream, or metrics. |
 | [Development](development.md) | You are changing code, tests, dashboard assets, Docker, or Helm. |
 
@@ -39,6 +40,7 @@ make build
 make vet
 make test
 make smoke
+make replay
 ```
 
 `sudo make e2e` is the real kernel path and requires root or the right eBPF

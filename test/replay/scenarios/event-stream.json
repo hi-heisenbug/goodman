@@ -1,0 +1,33 @@
+{
+  "name": "event-stream",
+  "incident": "event-stream / flatmap-stream (November 2018)",
+  "reference": "https://github.com/dominictarr/event-stream/issues/116",
+  "summary": "A new maintainer added flatmap-stream as a dependency of the hugely popular event-stream, then shipped flatmap-stream@0.1.1 with code that targeted the Copay bitcoin wallet: it read the wallet file and exfiltrated the keys to an attacker host. The 0.1.0 baseline was inert.",
+  "service": "payments",
+  "package": "flatmap-stream",
+  "baseline": {
+    "version": "0.1.0",
+    "behaviors": [
+      "READ /app/node_modules/flatmap-stream/**",
+      "READ /app/node_modules/event-stream/**"
+    ]
+  },
+  "malicious": {
+    "version": "0.1.1",
+    "behaviors": [
+      "READ /app/node_modules/flatmap-stream/**",
+      "READ /home/app/.config/Copay/wallet.dat",
+      "CONNECT 104.245.39.112:443"
+    ]
+  },
+  "expect": {
+    "severity": "CRITICAL",
+    "old_version": "0.1.0",
+    "new_version": "0.1.1",
+    "new_behaviors": [
+      "READ /home/app/.config/Copay/wallet.dat",
+      "CONNECT 104.245.39.112:443"
+    ],
+    "matched_rules": ["new-outbound-connect", "secret-read"]
+  }
+}

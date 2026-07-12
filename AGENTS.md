@@ -148,6 +148,7 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make build` | Build `sensor`, `collector`, `goodmanctl` into `bin/` | no |
 | `make test` | `go test ./...` (unit tests, all packages) | no |
 | `make smoke` | Backend end-to-end via synthetic events → asserts one CRITICAL alert | **no** |
+| `make replay` | Replay real npm attacks (event-stream, eslint-scope, ua-parser-js, node-ipc); assert each is caught | **no** |
 | `make demo` | No-root interactive product demo with seeded alerts/fingerprints | **no** |
 | `make e2e` | **Real eBPF** drift replay: sensor + Node workload → alert | **yes** |
 | `make docker` | Build both container images | no (docker daemon) |
@@ -254,6 +255,11 @@ UI stay open. Add matching cases to `internal/api/auth_test.go`.
 **Change attribution** — work in `internal/attribute/`; extend the simulated
 `/proc` fixtures in `attribute_test.go` to cover the new case. Do not weaken the
 "never misattribute" guarantee.
+
+**Add an attack to the replay corpus** — drop a JSON file in
+`test/replay/scenarios/` (the runner discovers it). Use real, benign canonical
+behaviors; omit `baseline` to test the always-on (no-baseline) path. `make
+replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 
 **Change the wire event** — see "The one rule you must never break" above.
 

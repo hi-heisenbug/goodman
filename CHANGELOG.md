@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `goodmanctl alerts`.
 - Tracked schema migrations (`schema_migrations` table) so non-idempotent
   migrations run exactly once per database.
+- Attack replay corpus (`make replay`): benign reproductions of the
+  event-stream, eslint-scope, ua-parser-js, and node-ipc npm supply-chain
+  attacks, each asserting Goodman raises the expected CRITICAL alert. See
+  `docs/replay-corpus.md`.
 - Bearer-token authentication for the collector API: `GOODMAN_INGEST_TOKEN`
   protects sensor ingestion and `GOODMAN_API_TOKEN` protects the
   alerts/fingerprints/stream API. The sensor, `goodmanctl`, and the dashboard

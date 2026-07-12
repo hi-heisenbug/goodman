@@ -79,6 +79,10 @@ e2e: build workload ## Full eBPF drift replay (NEEDS ROOT: run `sudo make e2e`)
 smoke: build ## Backend-only smoke test (no root needed)
 	bash test/e2e/smoke_test.sh
 
+.PHONY: replay
+replay: ## Replay real npm supply-chain attacks and assert each is caught (no root)
+	go test ./test/replay/ -v -count=1
+
 .PHONY: demo
 demo: build ## Start a no-root local product demo with seeded alerts and fingerprints
 	bash scripts/demo.sh

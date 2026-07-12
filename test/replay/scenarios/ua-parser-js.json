@@ -1,0 +1,32 @@
+{
+  "name": "ua-parser-js",
+  "incident": "ua-parser-js (October 2021)",
+  "reference": "https://github.com/advisories/GHSA-pjwm-rvh2-c87w",
+  "summary": "The maintainer's npm account was hijacked and ua-parser-js@0.7.29/0.8.0/1.0.0 shipped a preinstall script that downloaded and executed a cryptominer plus a credential-stealing binary. The prior 0.7.28 baseline only read its own files; the hijacked version adds process execution and outbound download traffic.",
+  "service": "web",
+  "package": "ua-parser-js",
+  "baseline": {
+    "version": "0.7.28",
+    "behaviors": [
+      "READ /app/node_modules/ua-parser-js/**"
+    ]
+  },
+  "malicious": {
+    "version": "0.7.29",
+    "behaviors": [
+      "READ /app/node_modules/ua-parser-js/**",
+      "EXEC /app/node_modules/ua-parser-js/jsextension",
+      "CONNECT 159.148.186.228:80"
+    ]
+  },
+  "expect": {
+    "severity": "CRITICAL",
+    "old_version": "0.7.28",
+    "new_version": "0.7.29",
+    "new_behaviors": [
+      "EXEC /app/node_modules/ua-parser-js/jsextension",
+      "CONNECT 159.148.186.228:80"
+    ],
+    "matched_rules": ["new-exec", "new-outbound-connect"]
+  }
+}

@@ -1,0 +1,32 @@
+{
+  "name": "node-ipc",
+  "incident": "node-ipc / peacenotwar (March 2022)",
+  "reference": "https://github.com/advisories/GHSA-97m3-w2cp-4xx6",
+  "summary": "The node-ipc maintainer shipped protestware (10.1.1/10.1.2) that geolocated the host by its public IP and, for targeted regions, overwrote files on disk with a heart emoji. The prior 10.1.0 baseline only read its own package files; the drift adds an outbound geo-IP lookup and file access far outside node_modules.",
+  "service": "api",
+  "package": "node-ipc",
+  "baseline": {
+    "version": "10.1.0",
+    "behaviors": [
+      "READ /app/node_modules/node-ipc/**"
+    ]
+  },
+  "malicious": {
+    "version": "10.1.1",
+    "behaviors": [
+      "READ /app/node_modules/node-ipc/**",
+      "CONNECT 104.26.9.5:443",
+      "READ /home/app/Desktop/**"
+    ]
+  },
+  "expect": {
+    "severity": "CRITICAL",
+    "old_version": "10.1.0",
+    "new_version": "10.1.1",
+    "new_behaviors": [
+      "CONNECT 104.26.9.5:443",
+      "READ /home/app/Desktop/**"
+    ],
+    "matched_rules": ["new-outbound-connect"]
+  }
+}

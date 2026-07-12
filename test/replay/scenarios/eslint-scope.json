@@ -1,0 +1,25 @@
+{
+  "name": "eslint-scope",
+  "incident": "eslint-scope (July 2018)",
+  "reference": "https://eslint.org/blog/2018/07/postmortem-for-malicious-package-publishes/",
+  "summary": "An attacker published eslint-scope@3.7.2 with a postinstall payload that read the developer/CI ~/.npmrc (the npm auth token) and posted it to a pastebin, then used it to publish further malicious packages. There was no prior Goodman baseline for this version on the affected host; the always-on secret-read rule catches it on the first observation, during the learning window.",
+  "service": "ci-runner",
+  "package": "eslint-scope",
+  "malicious": {
+    "version": "3.7.2",
+    "behaviors": [
+      "READ /app/node_modules/eslint-scope/**",
+      "READ /home/ci/.npmrc",
+      "CONNECT 151.101.0.116:443"
+    ]
+  },
+  "expect": {
+    "severity": "CRITICAL",
+    "old_version": "",
+    "new_version": "3.7.2",
+    "new_behaviors": [
+      "READ /home/ci/.npmrc"
+    ],
+    "matched_rules": ["secret-read"]
+  }
+}

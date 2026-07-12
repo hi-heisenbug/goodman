@@ -90,6 +90,17 @@ make smoke
 `make smoke` is the no-root demo. It starts the collector, feeds synthetic
 baseline and drift events, and asserts exactly one CRITICAL alert.
 
+To see Goodman catch real npm supply-chain attacks (event-stream, eslint-scope,
+ua-parser-js, node-ipc) reproduced as benign fixtures:
+
+```bash
+make replay
+```
+
+Each scenario learns a baseline, replays the attack's runtime behavior, and
+asserts the expected CRITICAL alert. See
+[docs/replay-corpus.md](docs/replay-corpus.md).
+
 To explore the product UI with realistic data:
 
 ```bash
