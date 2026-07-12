@@ -36,8 +36,9 @@ func NewEngine(s *store.Store, w LearningWindow) *Engine {
 // Update is the result of ingesting events for one fingerprint.
 type Update struct {
 	Fingerprint    *model.Fingerprint
-	FreshBehaviors []string // behaviors first seen in this batch
-	JustPromoted   bool     // crossed the learning window in this batch
+	FreshBehaviors []string                    // behaviors first seen in this batch
+	FreshEvents    map[string]model.Attributed // first event that introduced each fresh behavior
+	JustPromoted   bool                        // crossed the learning window in this batch
 }
 
 // Ingest merges a batch of events into fingerprints and returns one Update
@@ -71,11 +72,13 @@ func (e *Engine) Ingest(ctx context.Context, events []model.Attributed) ([]Updat
 		}
 
 		var fresh []string
+		freshEvents := map[string]model.Attributed{}
 		for _, ev := range evs {
 			st, known := fp.Behaviors[ev.Behavior]
 			if !known {
 				st = model.BehaviorStat{FirstSeen: ev.Timestamp}
 				fresh = append(fresh, ev.Behavior)
+				freshEvents[ev.Behavior] = ev
 			}
 			st.Count++
 			if ev.Timestamp > st.LastSeen {
@@ -99,7 +102,7 @@ func (e *Engine) Ingest(ctx context.Context, events []model.Attributed) ([]Updat
 		if err := e.store.UpsertFingerprint(ctx, fp); err != nil {
 			return nil, err
 		}
-		updates = append(updates, Update{Fingerprint: fp, FreshBehaviors: fresh, JustPromoted: promoted})
+		updates = append(updates, Update{Fingerprint: fp, FreshBehaviors: fresh, FreshEvents: freshEvents, JustPromoted: promoted})
 	}
 	return updates, nil
 }

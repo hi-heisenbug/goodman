@@ -1115,3 +1115,24 @@ button {
 .token-card .primary-action {
   justify-content: center;
 }
+
+/* Matched high-risk rule chips on alert cards */
+.rule-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.rule-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border: 1px solid var(--critical);
+  border-radius: 6px;
+  background: var(--critical-bg);
+  color: var(--critical);
+  font: 700 11px Inter, sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: lowercase;
+}

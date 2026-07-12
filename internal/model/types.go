@@ -80,6 +80,7 @@ type Attributed struct {
 	Type      EventType `json:"type"`
 	Behavior  string    `json:"behavior"`  // canonicalized: "READ /app/src/**" or "CONNECT 1.2.3.4:443"
 	Timestamp uint64    `json:"timestamp"` // ns since boot converted to unix ns by the sensor
+	Sensor    string    `json:"sensor,omitempty"` // stamped by the collector from the batch header
 }
 
 // EventBatch is what the sensor POSTs to the collector.
@@ -107,18 +108,29 @@ type Fingerprint struct {
 	IsBaseline bool                    `json:"is_baseline"`
 }
 
+// Evidence is the triage context for one new behavior on an alert: which
+// high-risk rules it matched, which sensor first saw it, and when.
+type Evidence struct {
+	Behavior  string   `json:"behavior"`
+	Rules     []string `json:"rules,omitempty"` // matched high-risk rule names
+	Sensor    string   `json:"sensor,omitempty"`
+	FirstSeen uint64   `json:"first_seen,omitempty"` // unix ns
+}
+
 // Alert is emitted by the diff engine.
 type Alert struct {
-	ID                string   `json:"id"`
-	Service           string   `json:"service"`
-	Package           string   `json:"package"`
-	OldVersion        string   `json:"old_version"`
-	NewVersion        string   `json:"new_version"`
-	Severity          string   `json:"severity"` // INFO | WARN | CRITICAL
-	BaselineBehaviors []string `json:"baseline_behaviors,omitempty"`
-	NewBehaviors      []string `json:"new_behaviors"`
-	DetectedAt        uint64   `json:"detected_at"` // unix ns
-	Status            string   `json:"status"`      // open | acknowledged | resolved
+	ID                string     `json:"id"`
+	Service           string     `json:"service"`
+	Package           string     `json:"package"`
+	OldVersion        string     `json:"old_version"`
+	NewVersion        string     `json:"new_version"`
+	Severity          string     `json:"severity"` // INFO | WARN | CRITICAL
+	BaselineBehaviors []string   `json:"baseline_behaviors,omitempty"`
+	NewBehaviors      []string   `json:"new_behaviors"`
+	MatchedRules      []string   `json:"matched_rules,omitempty"` // union of matched rule names
+	Evidence          []Evidence `json:"evidence,omitempty"`      // per-behavior triage context
+	DetectedAt        uint64     `json:"detected_at"` // unix ns
+	Status            string     `json:"status"`      // open | acknowledged | resolved
 }
 
 const (

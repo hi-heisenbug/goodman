@@ -20,17 +20,31 @@ import (
 )
 
 // Rule marks matching new behaviors as high risk (CRITICAL).
+//
+// AlwaysOn rules fire even when no baseline exists yet: some behaviors
+// (credential reads, cloud-metadata access) are alert-worthy the first time
+// they are ever seen, during the learning window included. Rules without
+// AlwaysOn only escalate drift against an established baseline.
+//
+// Exclude patterns suppress a match without deleting the rule, so operators
+// can tune noise ("new outbound connects are critical, except to our CDN").
 type Rule struct {
-	Name    string `json:"name"`
-	Pattern string `json:"pattern"` // regex matched against the behavior string
-	re      *regexp.Regexp
+	Name     string   `json:"name"`
+	Pattern  string   `json:"pattern"`             // regex matched against the behavior string
+	AlwaysOn bool     `json:"always_on,omitempty"` // fire without a baseline (learning window included)
+	Exclude  []string `json:"exclude,omitempty"`   // regexes that suppress a match
+	re       *regexp.Regexp
+	exclude  []*regexp.Regexp
 }
 
 // DefaultRules encode the four attack patterns from the May-2026 incidents:
 // secret reads, cloud-metadata access, new outbound connects, new execs.
+// Secret reads and cloud-metadata access are always-on: they are never
+// legitimate "learning", so they alert from minute one. Connects and execs
+// are drift-only; almost every package does one legitimately.
 var DefaultRules = []Rule{
-	{Name: "secret-read", Pattern: `^READ .*(secret|token|credential|password|shadow|\.pem|\.key|\.aws|\.ssh|\.npmrc|\.env|id_rsa)`},
-	{Name: "cloud-metadata", Pattern: `^CONNECT 169\.254\.169\.254:`},
+	{Name: "secret-read", AlwaysOn: true, Pattern: `^READ .*(secret|token|credential|password|shadow|wallet|\.pem|\.key|\.aws|\.ssh|\.npmrc|\.env|id_rsa)`},
+	{Name: "cloud-metadata", AlwaysOn: true, Pattern: `^CONNECT 169\.254\.169\.254:`},
 	{Name: "new-outbound-connect", Pattern: `^CONNECT `},
 	{Name: "new-exec", Pattern: `^EXEC `},
 }
@@ -56,9 +70,29 @@ func LoadRules(path string) ([]Rule, error) {
 		if err != nil {
 			return nil, fmt.Errorf("rule %q: %w", r.Name, err)
 		}
-		out[i] = Rule{Name: r.Name, Pattern: r.Pattern, re: re}
+		excl := make([]*regexp.Regexp, len(r.Exclude))
+		for j, e := range r.Exclude {
+			if excl[j], err = regexp.Compile("(?i)" + e); err != nil {
+				return nil, fmt.Errorf("rule %q exclude %q: %w", r.Name, e, err)
+			}
+		}
+		out[i] = Rule{Name: r.Name, Pattern: r.Pattern, AlwaysOn: r.AlwaysOn, Exclude: r.Exclude, re: re, exclude: excl}
 	}
 	return out, nil
+}
+
+// matches reports whether the behavior triggers this rule: the pattern must
+// match and no exclude pattern may match.
+func (r *Rule) matches(behavior string) bool {
+	if !r.re.MatchString(behavior) {
+		return false
+	}
+	for _, e := range r.exclude {
+		if e.MatchString(behavior) {
+			return false
+		}
+	}
+	return true
 }
 
 type Engine struct {
@@ -81,11 +115,15 @@ func alertID(service, pkg, oldV, newV string) string {
 // live behavior set has drifted from the relevant baseline. Returns the
 // alert if one was created or extended.
 //
-// Two triggers (per plan §9):
+// Three triggers:
 //  1. A new version is accumulating behavior while an older version of the
 //     same (service, package) already has a baseline -> version-drift.
 //  2. New behavior appears on a version AFTER it was promoted to baseline
 //     -> same-version drift.
+//  0. No baseline exists at all, but a fresh behavior matches an always-on
+//     high-risk rule -> alert during the learning window. Without this, a
+//     package that is malicious from day one is silently baselined
+//     (poisoning), and the product is mute for the whole learning window.
 func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Alert, error) {
 	fp := up.Fingerprint
 
@@ -93,14 +131,32 @@ func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Ale
 	// (JustPromoted means the fresh behaviors were learned, not drift.)
 	if fp.IsBaseline && !up.JustPromoted && len(up.FreshBehaviors) > 0 {
 		return eng.emit(ctx, fp.Service, fp.Package, fp.Version, fp.Version,
-			baselineBehaviors(fp.Behaviors, up.FreshBehaviors), up.FreshBehaviors)
+			baselineBehaviors(fp.Behaviors, up.FreshBehaviors), up.FreshBehaviors, up.FreshEvents)
 	}
 
 	// Trigger 1: new (not yet baseline) version vs previous version's baseline.
 	if !fp.IsBaseline {
 		base, err := eng.store.LatestBaseline(ctx, fp.Service, fp.Package, fp.Version)
-		if err != nil || base == nil {
-			return nil, err // no baseline yet -> still learning, never alert
+		if err != nil {
+			return nil, err
+		}
+		if base == nil {
+			// Trigger 0: still learning, no baseline anywhere. Alert only on
+			// always-on high-risk behaviors; everything else is learning.
+			var hot []string
+			for _, b := range up.FreshBehaviors {
+				for i := range eng.rules {
+					if eng.rules[i].AlwaysOn && eng.rules[i].matches(b) {
+						hot = append(hot, b)
+						break
+					}
+				}
+			}
+			if len(hot) == 0 {
+				return nil, nil
+			}
+			return eng.emit(ctx, fp.Service, fp.Package, "", fp.Version,
+				baselineBehaviors(fp.Behaviors, hot), hot, up.FreshEvents)
 		}
 		var novel []string
 		for _, b := range up.FreshBehaviors {
@@ -112,20 +168,36 @@ func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Ale
 			return nil, nil // version bump with identical behavior: NO alert
 		}
 		return eng.emit(ctx, fp.Service, fp.Package, base.Version, fp.Version,
-			behaviorKeys(base.Behaviors), novel)
+			behaviorKeys(base.Behaviors), novel, up.FreshEvents)
 	}
 	return nil, nil
 }
 
-func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, baselineBehaviors, newBehaviors []string) (*model.Alert, error) {
+func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, baselineBehaviors, newBehaviors []string, freshEvents map[string]model.Attributed) (*model.Alert, error) {
 	severity := model.SeverityWarn
+	ruleSet := map[string]bool{}
+	evidence := make([]model.Evidence, 0, len(newBehaviors))
 	for _, b := range newBehaviors {
-		for _, r := range eng.rules {
-			if r.re.MatchString(b) {
+		ev := model.Evidence{Behavior: b}
+		for i := range eng.rules {
+			if eng.rules[i].matches(b) {
 				severity = model.SeverityCritical
+				ruleSet[eng.rules[i].Name] = true
+				ev.Rules = append(ev.Rules, eng.rules[i].Name)
 			}
 		}
+		if first, ok := freshEvents[b]; ok {
+			ev.Sensor = first.Sensor
+			ev.FirstSeen = first.Timestamp
+		}
+		evidence = append(evidence, ev)
 	}
+	matched := make([]string, 0, len(ruleSet))
+	for name := range ruleSet {
+		matched = append(matched, name)
+	}
+	sort.Strings(matched)
+
 	a := &model.Alert{
 		ID:                alertID(service, pkg, oldV, newV),
 		Service:           service,
@@ -135,6 +207,8 @@ func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, ba
 		Severity:          severity,
 		BaselineBehaviors: baselineBehaviors,
 		NewBehaviors:      newBehaviors,
+		MatchedRules:      matched,
+		Evidence:          evidence,
 		DetectedAt:        uint64(time.Now().UnixNano()),
 		Status:            model.AlertOpen,
 	}

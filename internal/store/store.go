@@ -84,14 +84,30 @@ func (s *Store) PruneResolvedAlerts(ctx context.Context, cutoff time.Time) (int6
 	return res.RowsAffected()
 }
 
+// migrate applies pending migration files in name order. Applied files are
+// recorded in schema_migrations so non-idempotent statements (ALTER TABLE on
+// SQLite) run exactly once per database.
 func (s *Store) migrate(ctx context.Context) error {
+	if _, err := s.db.ExecContext(ctx,
+		`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
+		return err
+	}
 	entries, err := migrations.ReadDir("migrations")
 	if err != nil {
 		return err
 	}
 	suffix := "." + s.dialect + ".sql"
-	for _, e := range entries {
+	for _, e := range entries { // ReadDir returns names sorted
 		if !strings.HasSuffix(e.Name(), suffix) {
+			continue
+		}
+		var applied int
+		err := s.db.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM schema_migrations WHERE name=$1`, e.Name()).Scan(&applied)
+		if err != nil {
+			return err
+		}
+		if applied > 0 {
 			continue
 		}
 		sqlText, err := migrations.ReadFile("migrations/" + e.Name())
@@ -100,6 +116,11 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 		if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
 			return fmt.Errorf("%s: %w", e.Name(), err)
+		}
+		if _, err := s.db.ExecContext(ctx,
+			`INSERT INTO schema_migrations (name, applied_at) VALUES ($1,$2)`,
+			e.Name(), time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
 		}
 	}
 	return nil
@@ -213,24 +234,65 @@ func (s *Store) UpsertAlert(ctx context.Context, a *model.Alert) (created bool, 
 	if existing != nil {
 		merged := mergeBehaviors(existing.NewBehaviors, a.NewBehaviors)
 		sev := maxSeverity(existing.Severity, a.Severity)
+		rules := mergeBehaviors(existing.MatchedRules, a.MatchedRules)
+		evidence := mergeEvidence(existing.Evidence, a.Evidence)
 		nbJSON, _ := json.Marshal(merged)
+		ruJSON, _ := json.Marshal(orEmpty(rules))
+		evJSON, _ := json.Marshal(evidence)
 		_, err := s.db.ExecContext(ctx,
-			`UPDATE alerts SET new_behaviors=$1, severity=$2 WHERE id=$3`,
-			string(nbJSON), sev, a.ID)
+			`UPDATE alerts SET new_behaviors=$1, severity=$2, matched_rules=$3, evidence=$4 WHERE id=$5`,
+			string(nbJSON), sev, string(ruJSON), string(evJSON), a.ID)
 		return false, err
 	}
 	nbJSON, _ := json.Marshal(a.NewBehaviors)
+	ruJSON, _ := json.Marshal(orEmpty(a.MatchedRules))
+	evJSON, _ := json.Marshal(orEmptyEvidence(a.Evidence))
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO alerts (id, service, package, old_version, new_version, severity, new_behaviors, detected_at, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+		INSERT INTO alerts (id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, detected_at, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		a.ID, a.Service, a.Package, a.OldVersion, a.NewVersion, a.Severity,
-		string(nbJSON), a.DetectedAt, a.Status)
+		string(nbJSON), string(ruJSON), string(evJSON), a.DetectedAt, a.Status)
 	return err == nil, err
+}
+
+func orEmpty(s []string) []string {
+	if s == nil {
+		return []string{}
+	}
+	return s
+}
+
+func orEmptyEvidence(e []model.Evidence) []model.Evidence {
+	if e == nil {
+		return []model.Evidence{}
+	}
+	return e
+}
+
+// mergeEvidence unions evidence lists by behavior, keeping the earliest
+// first-seen entry for each behavior.
+func mergeEvidence(a, b []model.Evidence) []model.Evidence {
+	byBehavior := map[string]int{}
+	out := make([]model.Evidence, 0, len(a)+len(b))
+	for _, e := range append(append([]model.Evidence{}, a...), b...) {
+		i, seen := byBehavior[e.Behavior]
+		if !seen {
+			byBehavior[e.Behavior] = len(out)
+			out = append(out, e)
+			continue
+		}
+		if e.FirstSeen != 0 && (out[i].FirstSeen == 0 || e.FirstSeen < out[i].FirstSeen) {
+			out[i].FirstSeen = e.FirstSeen
+			out[i].Sensor = e.Sensor
+		}
+		out[i].Rules = mergeBehaviors(out[i].Rules, e.Rules)
+	}
+	return out
 }
 
 func (s *Store) GetAlert(ctx context.Context, id string) (*model.Alert, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, service, package, old_version, new_version, severity, new_behaviors, detected_at, status
+		`SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, detected_at, status
 		 FROM alerts WHERE id=$1`, id)
 	return scanAlert(row)
 }
@@ -239,10 +301,10 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 func scanAlert(row rowScanner) (*model.Alert, error) {
 	var a model.Alert
-	var nbJSON []byte
+	var nbJSON, ruJSON, evJSON []byte
 	var oldVersion sql.NullString
 	err := row.Scan(&a.ID, &a.Service, &a.Package, &oldVersion, &a.NewVersion,
-		&a.Severity, &nbJSON, &a.DetectedAt, &a.Status)
+		&a.Severity, &nbJSON, &ruJSON, &evJSON, &a.DetectedAt, &a.Status)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -253,11 +315,17 @@ func scanAlert(row rowScanner) (*model.Alert, error) {
 	if err := json.Unmarshal(nbJSON, &a.NewBehaviors); err != nil {
 		return nil, err
 	}
+	if err := json.Unmarshal(ruJSON, &a.MatchedRules); err != nil {
+		return nil, err
+	}
+	if err := json.Unmarshal(evJSON, &a.Evidence); err != nil {
+		return nil, err
+	}
 	return &a, nil
 }
 
 func (s *Store) ListAlerts(ctx context.Context, status string) ([]model.Alert, error) {
-	q := `SELECT id, service, package, old_version, new_version, severity, new_behaviors, detected_at, status
+	q := `SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, detected_at, status
 	      FROM alerts`
 	var args []any
 	if status != "" {

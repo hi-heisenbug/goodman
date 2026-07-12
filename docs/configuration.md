@@ -83,15 +83,39 @@ Drift is escalated from `WARN` to `CRITICAL` when a new behavior matches a
 high-risk rule. Rules are a config-driven list of case-insensitive regexes matched
 against the canonical behavior string — never hard-coded — so you can tune them.
 
+Each rule supports four fields:
+
+| Field | Meaning |
+|---|---|
+| `name` | Shown on alerts as `matched_rules`; keep it short and stable. |
+| `pattern` | Case-insensitive regex matched against the canonical behavior string. |
+| `always_on` | Fire even when no baseline exists yet, learning window included. Reserve this for behaviors that are never legitimate learning (credential reads, cloud metadata). Without it, the rule only escalates drift against an established baseline. |
+| `exclude` | Regexes that suppress a match without deleting the rule, for noise tuning ("new connects are critical, except to our CDN"). |
+
 The built-in defaults (also in [`deploy/rules.example.json`](../deploy/rules.example.json)):
 
 ```json
 [
-  { "name": "secret-read",          "pattern": "^READ .*(secret|token|credential|password|shadow|\\.pem|\\.key|\\.aws|\\.ssh|\\.npmrc|\\.env|id_rsa)" },
-  { "name": "cloud-metadata",       "pattern": "^CONNECT 169\\.254\\.169\\.254:" },
+  { "name": "secret-read",          "always_on": true, "pattern": "^READ .*(secret|token|credential|password|shadow|wallet|\\.pem|\\.key|\\.aws|\\.ssh|\\.npmrc|\\.env|id_rsa)" },
+  { "name": "cloud-metadata",       "always_on": true, "pattern": "^CONNECT 169\\.254\\.169\\.254:" },
   { "name": "new-outbound-connect", "pattern": "^CONNECT " },
   { "name": "new-exec",             "pattern": "^EXEC " }
 ]
+```
+
+`secret-read` and `cloud-metadata` are always-on: a package reading `.npmrc`
+or calling the cloud metadata service alerts the first time it is ever seen,
+even during the learning window. This closes the baseline-poisoning gap where
+a package that is malicious from day one would otherwise be learned as
+normal. `new-outbound-connect` and `new-exec` stay drift-only because nearly
+every package legitimately connects or execs at some point; "new vs baseline"
+is the only meaningful signal for them.
+
+An example of noise tuning with `exclude`:
+
+```json
+{ "name": "new-outbound-connect", "pattern": "^CONNECT ",
+  "exclude": ["^CONNECT 10\\.", "^CONNECT 151\\.101\\."] }
 ```
 
 Point the collector at your own file:

@@ -242,6 +242,15 @@ function AlertCard({ alert, onChange }: { alert: Alert; onChange: () => void }) 
             <span>{relTime(alert.detected_at)}</span>
             <span className={`status-dot ${alert.status}`}>{STATUS_LABELS[alert.status]}</span>
           </div>
+          {(alert.matched_rules?.length ?? 0) > 0 && (
+            <div className="rule-chips" aria-label="Matched high-risk rules">
+              {alert.matched_rules!.map((rule) => (
+                <span className="rule-chip" key={rule} title={`Matched high-risk rule: ${rule}`}>
+                  {rule}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {criticalBehavior && (

@@ -136,6 +136,9 @@ func cmdTail(args []string) {
 						for _, b := range a.NewBehaviors {
 							fmt.Printf("     + %s\n", b)
 						}
+						if len(a.MatchedRules) > 0 {
+							fmt.Printf("     rules: %s\n", strings.Join(a.MatchedRules, ", "))
+						}
 						fmt.Println()
 					}
 				}
@@ -172,6 +175,15 @@ func cmdAlerts(args []string) {
 			a.Severity, a.Status, a.Service, a.Package, orDash(a.OldVersion), a.NewVersion)
 		for _, b := range a.NewBehaviors {
 			fmt.Printf("    + %s\n", b)
+		}
+		if len(a.MatchedRules) > 0 {
+			fmt.Printf("    rules: %s\n", strings.Join(a.MatchedRules, ", "))
+		}
+		for _, ev := range a.Evidence {
+			if ev.Sensor != "" {
+				fmt.Printf("    seen: %s on %s at %s\n", ev.Behavior, ev.Sensor,
+					model.NsToTime(ev.FirstSeen).Format("2006-01-02 15:04:05"))
+			}
 		}
 		fmt.Printf("    id: %s\n", a.ID)
 	}

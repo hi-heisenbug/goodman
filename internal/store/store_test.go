@@ -225,3 +225,70 @@ func TestPruneResolvedAlerts(t *testing.T) {
 		t.Fatalf("pre-epoch prune = (%d, %v), want (0, nil)", n, err)
 	}
 }
+
+// Reopening the same database must not fail on non-idempotent migrations
+// (ALTER TABLE runs once, tracked in schema_migrations).
+func TestMigrationsAreTrackedAcrossReopen(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reopen.db")
+	for i := 0; i < 3; i++ {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatalf("open #%d: %v", i+1, err)
+		}
+		s.Close()
+	}
+}
+
+func TestUpsertAlertMergesRulesAndEvidence(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	first := &model.Alert{
+		ID: "ev-1", Service: "web", Package: "pkg", NewVersion: "1.0.1",
+		Severity:     model.SeverityCritical,
+		NewBehaviors: []string{"READ /root/.npmrc"},
+		MatchedRules: []string{"secret-read"},
+		Evidence: []model.Evidence{
+			{Behavior: "READ /root/.npmrc", Rules: []string{"secret-read"}, Sensor: "node-a", FirstSeen: 500},
+		},
+		DetectedAt: 500, Status: model.AlertOpen,
+	}
+	if _, err := s.UpsertAlert(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	// Same alert id, new behavior from another sensor, plus an earlier
+	// sighting of the first behavior.
+	second := &model.Alert{
+		ID: "ev-1", Service: "web", Package: "pkg", NewVersion: "1.0.1",
+		Severity:     model.SeverityCritical,
+		NewBehaviors: []string{"READ /root/.npmrc", "CONNECT 169.254.169.254:80"},
+		MatchedRules: []string{"secret-read", "cloud-metadata"},
+		Evidence: []model.Evidence{
+			{Behavior: "READ /root/.npmrc", Rules: []string{"secret-read"}, Sensor: "node-b", FirstSeen: 400},
+			{Behavior: "CONNECT 169.254.169.254:80", Rules: []string{"cloud-metadata"}, Sensor: "node-b", FirstSeen: 600},
+		},
+		DetectedAt: 600, Status: model.AlertOpen,
+	}
+	if _, err := s.UpsertAlert(ctx, second); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetAlert(ctx, "ev-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.MatchedRules) != 2 {
+		t.Fatalf("matched_rules = %v, want union of 2", got.MatchedRules)
+	}
+	if len(got.Evidence) != 2 {
+		t.Fatalf("evidence = %+v, want 2 entries", got.Evidence)
+	}
+	for _, ev := range got.Evidence {
+		if ev.Behavior == "READ /root/.npmrc" {
+			if ev.FirstSeen != 400 || ev.Sensor != "node-b" {
+				t.Fatalf("earliest sighting must win: %+v", ev)
+			}
+		}
+	}
+}

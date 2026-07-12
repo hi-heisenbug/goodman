@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Always-on high-risk rules (`always_on` in the rules JSON): credential reads
+  and cloud-metadata access now alert from the first observation, during the
+  learning window and with no baseline, closing the baseline-poisoning gap.
+- Per-rule `exclude` patterns for noise tuning without deleting a rule.
+- Alert evidence: every alert now carries `matched_rules` (which high-risk
+  rules fired) and per-behavior `evidence` (rule names, reporting sensor,
+  first-seen timestamp). Shown in the dashboard as rule chips and by
+  `goodmanctl alerts`.
+- Tracked schema migrations (`schema_migrations` table) so non-idempotent
+  migrations run exactly once per database.
 - Bearer-token authentication for the collector API: `GOODMAN_INGEST_TOKEN`
   protects sensor ingestion and `GOODMAN_API_TOKEN` protects the
   alerts/fingerprints/stream API. The sensor, `goodmanctl`, and the dashboard

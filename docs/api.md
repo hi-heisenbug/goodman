@@ -82,6 +82,15 @@ List alerts, newest first (max 500). Omit `status` for all.
     "old_version": "1.0.0",
     "new_version": "1.0.1",
     "severity": "CRITICAL",
+    "matched_rules": ["cloud-metadata", "new-outbound-connect", "secret-read"],
+    "evidence": [
+      {
+        "behavior": "READ /tmp/goodman-fake-secrets/credentials",
+        "rules": ["secret-read"],
+        "sensor": "node-01",
+        "first_seen": 1783453745485152329
+      }
+    ],
     "new_behaviors": [
       "READ /tmp/goodman-fake-secrets/credentials",
       "CONNECT 169.254.169.254:80"

@@ -139,6 +139,11 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	eventsIngested.Add(float64(len(batch.Events)))
+	for i := range batch.Events {
+		if batch.Events[i].Sensor == "" {
+			batch.Events[i].Sensor = batch.Sensor
+		}
+	}
 
 	ctx := r.Context()
 	updates, err := s.fpEng.Ingest(ctx, batch.Events)

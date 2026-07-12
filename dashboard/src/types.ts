@@ -1,6 +1,13 @@
 export type Severity = "INFO" | "WARN" | "CRITICAL";
 export type AlertStatus = "open" | "acknowledged" | "resolved";
 
+export interface AlertEvidence {
+  behavior: string;
+  rules?: string[];
+  sensor?: string;
+  first_seen?: number; // unix ns
+}
+
 export interface Alert {
   id: string;
   service: string;
@@ -10,6 +17,8 @@ export interface Alert {
   severity: Severity;
   baseline_behaviors?: string[];
   new_behaviors: string[];
+  matched_rules?: string[];
+  evidence?: AlertEvidence[];
   detected_at: number; // unix ns
   status: AlertStatus;
 }

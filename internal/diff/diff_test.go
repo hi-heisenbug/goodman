@@ -2,6 +2,7 @@ package diff
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -181,4 +182,170 @@ func sameStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+// TestAlwaysOnRules verifies trigger 0: a high-risk behavior alerts during
+// the learning window, before any baseline exists. Without this, a package
+// that is malicious from day one is silently baselined (poisoning).
+func TestAlwaysOnRules(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "alwayson.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 1000, MinAge: time.Hour})
+	rules, err := LoadRules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffEng := NewEngine(s, rules)
+
+	// Benign learning traffic must stay silent, even connects and execs:
+	// those rules are drift-only.
+	ups, err := fpEng.Ingest(ctx, []model.Attributed{
+		{Service: "web", Package: "fresh-pkg", Version: "1.0.0", Type: model.EventFileOpen,
+			Behavior: "READ /app/node_modules/fresh-pkg/**", Timestamp: 100, Sensor: "node-a"},
+		{Service: "web", Package: "fresh-pkg", Version: "1.0.0", Type: model.EventNetConnect,
+			Behavior: "CONNECT 10.0.0.9:443", Timestamp: 101, Sensor: "node-a"},
+		{Service: "web", Package: "fresh-pkg", Version: "1.0.0", Type: model.EventProcExec,
+			Behavior: "EXEC /usr/bin/git", Timestamp: 102, Sensor: "node-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, up := range ups {
+		if a, _ := diffEng.React(ctx, up); a != nil {
+			t.Fatalf("benign learning traffic alerted: %+v", a)
+		}
+	}
+
+	// A credential read with no baseline anywhere must alert immediately.
+	ups, err = fpEng.Ingest(ctx, []model.Attributed{
+		{Service: "web", Package: "fresh-pkg", Version: "1.0.0", Type: model.EventFileOpen,
+			Behavior: "READ /root/.npmrc", Timestamp: 200, Sensor: "node-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alert *model.Alert
+	for _, up := range ups {
+		if a, _ := diffEng.React(ctx, up); a != nil {
+			alert = a
+		}
+	}
+	if alert == nil {
+		t.Fatal("always-on rule did not fire during learning")
+	}
+	if alert.Severity != model.SeverityCritical {
+		t.Fatalf("severity = %s, want CRITICAL", alert.Severity)
+	}
+	if alert.OldVersion != "" {
+		t.Fatalf("old_version = %q, want empty (no baseline)", alert.OldVersion)
+	}
+	if !sameStrings(alert.NewBehaviors, []string{"READ /root/.npmrc"}) {
+		t.Fatalf("new_behaviors = %v; benign learning behaviors must not leak in", alert.NewBehaviors)
+	}
+	if !sameStrings(alert.MatchedRules, []string{"secret-read"}) {
+		t.Fatalf("matched_rules = %v, want [secret-read]", alert.MatchedRules)
+	}
+	if len(alert.Evidence) != 1 || alert.Evidence[0].Sensor != "node-a" || alert.Evidence[0].FirstSeen != 200 {
+		t.Fatalf("evidence = %+v, want sensor node-a first_seen 200", alert.Evidence)
+	}
+}
+
+// TestRuleExcludes verifies exclude patterns suppress a match without
+// disabling the rule.
+func TestRuleExcludes(t *testing.T) {
+	dir := t.TempDir()
+	rulesPath := filepath.Join(dir, "rules.json")
+	if err := os.WriteFile(rulesPath, []byte(`[
+		{"name": "secret-read", "pattern": "^READ .*(secret|\\.npmrc)", "always_on": true,
+		 "exclude": ["^READ /var/run/secrets/kubernetes\\.io/"]}
+	]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rules, err := LoadRules(rulesPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rules[0].matches("READ /root/.npmrc") {
+		t.Fatal("rule must match a non-excluded secret read")
+	}
+	if rules[0].matches("READ /var/run/secrets/kubernetes.io/serviceaccount/token") {
+		t.Fatal("excluded path must not match")
+	}
+
+	// Invalid exclude regexes must fail loudly, like invalid patterns.
+	if err := os.WriteFile(rulesPath, []byte(`[
+		{"name": "bad", "pattern": "^READ ", "exclude": ["("]}
+	]`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadRules(rulesPath); err == nil {
+		t.Fatal("invalid exclude regex must error")
+	}
+}
+
+// TestDriftAlertCarriesRulesAndEvidence verifies trigger-1 alerts include the
+// matched rule names and per-behavior evidence.
+func TestDriftAlertCarriesRulesAndEvidence(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "evidence.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 2, MinAge: time.Nanosecond})
+	rules, err := LoadRules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffEng := NewEngine(s, rules)
+
+	learn := []model.Attributed{
+		{Service: "web", Package: "pkg", Version: "1.0.0", Type: model.EventFileOpen,
+			Behavior: "READ /app/node_modules/pkg/**", Timestamp: 100, Sensor: "node-a"},
+		{Service: "web", Package: "pkg", Version: "1.0.0", Type: model.EventFileOpen,
+			Behavior: "READ /app/node_modules/pkg/**", Timestamp: 200, Sensor: "node-a"},
+	}
+	ups, err := fpEng.Ingest(ctx, learn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, up := range ups {
+		if !up.JustPromoted {
+			t.Fatal("expected immediate promotion with tiny window")
+		}
+	}
+
+	ups, err = fpEng.Ingest(ctx, []model.Attributed{
+		{Service: "web", Package: "pkg", Version: "1.0.1", Type: model.EventNetConnect,
+			Behavior: "CONNECT 169.254.169.254:80", Timestamp: 300, Sensor: "node-b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alert *model.Alert
+	for _, up := range ups {
+		if a, _ := diffEng.React(ctx, up); a != nil {
+			alert = a
+		}
+	}
+	if alert == nil {
+		t.Fatal("no drift alert")
+	}
+	if !sameStrings(alert.MatchedRules, []string{"cloud-metadata", "new-outbound-connect"}) {
+		t.Fatalf("matched_rules = %v", alert.MatchedRules)
+	}
+	if len(alert.Evidence) != 1 {
+		t.Fatalf("evidence = %+v, want 1 entry", alert.Evidence)
+	}
+	ev := alert.Evidence[0]
+	if ev.Behavior != "CONNECT 169.254.169.254:80" || ev.Sensor != "node-b" || ev.FirstSeen != 300 {
+		t.Fatalf("evidence = %+v", ev)
+	}
+	if !sameStrings(ev.Rules, []string{"cloud-metadata", "new-outbound-connect"}) {
+		t.Fatalf("evidence rules = %v", ev.Rules)
+	}
 }

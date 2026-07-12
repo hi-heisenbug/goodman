@@ -1,0 +1,2 @@
+ALTER TABLE alerts ADD COLUMN matched_rules TEXT NOT NULL DEFAULT '[]';
+ALTER TABLE alerts ADD COLUMN evidence TEXT NOT NULL DEFAULT '[]';
