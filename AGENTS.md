@@ -246,7 +246,10 @@ against the canonical behavior string (`READ …`, `CONNECT …`, `EXEC …`).
 
 **Add an API endpoint** — add the route in `internal/api/api.go` `Router()`,
 implement the handler, document it in [`docs/api.md`](docs/api.md), and add a
-`goodmanctl` subcommand if it's operator-facing.
+`goodmanctl` subcommand if it's operator-facing. Decide its auth class
+explicitly: ingest endpoints use `requireToken(s.Auth.IngestToken, …)`, operator
+endpoints use `requireToken(s.Auth.APIToken, …)`, and only probes/metrics/static
+UI stay open. Add matching cases to `internal/api/auth_test.go`.
 
 **Change attribution** — work in `internal/attribute/`; extend the simulated
 `/proc` fixtures in `attribute_test.go` to cover the new case. Do not weaken the
@@ -282,6 +285,13 @@ implement the handler, document it in [`docs/api.md`](docs/api.md), and add a
   configurable rule list so operators can tune behavior.
 - Do not change API response shapes without updating `docs/api.md`, the CLI if
   relevant, and the dashboard types.
+- Do not add a collector/sensor env var without updating all four surfaces
+  together: the flag in `cmd/…/main.go`, `docs/configuration.md`, the Helm
+  values/templates, and (if secret-shaped) the `<release>-auth` Secret. Auth,
+  TLS, webhook, and retention all follow this pattern; copy one of them.
+- Do not weaken the auth default in the Helm chart. `auth.enabled: true` and
+  the generated token Secret are the production posture; only local bare-binary
+  runs may be tokenless.
 
 ### Dashboard and frontend
 

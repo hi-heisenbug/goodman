@@ -5,7 +5,12 @@ Goodman is installed in namespace {{ .Release.Namespace }} (cluster: {{ .Values.
 
 Open the dashboard:
   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ .Release.Name }}-collector {{ .Values.collector.service.port }}:{{ .Values.collector.service.port }}
-  open http://127.0.0.1:{{ .Values.collector.service.port }}
+  open {{ include "goodman.collectorScheme" . }}://127.0.0.1:{{ .Values.collector.service.port }}
+{{- if .Values.auth.enabled }}
+
+The API requires a token (the dashboard prompts for it on first load):
+  kubectl -n {{ .Release.Namespace }} get secret {{ include "goodman.authSecretName" . }} -o jsonpath='{.data.api-token}' | base64 -d
+{{- end }}
 
 {{- if .Values.attribution.requireNodeOptions }}
 

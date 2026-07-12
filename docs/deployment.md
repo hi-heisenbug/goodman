@@ -117,6 +117,28 @@ and small (collector ~19 MB, sensor ~12 MB).
 
 ## Security posture
 
+- **API authentication is on by default.** The chart creates a
+  `<release>-auth` Secret with random `ingest-token` and `api-token` values on
+  first install (stable across upgrades). Sensors present the ingest token on
+  every batch; the dashboard, `goodmanctl`, and API clients need the API
+  token. Read it with:
+
+  ```bash
+  kubectl get secret goodman-auth -o jsonpath='{.data.api-token}' | base64 -d
+  ```
+
+  Bring your own tokens with `auth.ingestToken`/`auth.apiToken`, or point
+  `auth.existingSecret` at a Secret you manage (keys `ingest-token`,
+  `api-token`).
+- **TLS.** Set `collector.tls.secretName` to a `kubernetes.io/tls` Secret
+  (e.g. issued by cert-manager) and the collector serves HTTPS; the sensor
+  DaemonSet automatically switches to `https://` and pins the Secret's
+  `ca.crt`.
+- **Alert forwarding.** Set `notifications.webhookUrl` (plus
+  `notifications.format=slack` for Slack-compatible endpoints) to page on
+  drift without polling the API.
+- **Retention.** Set `retention` (e.g. `720h`) to prune resolved alerts and
+  bound datastore growth; open and acknowledged alerts are never pruned.
 - The **sensor** runs privileged because loading eBPF and reading host `/proc`
   requires it. The chart runs it as UID 0 inside a privileged DaemonSet. v2 will drop to the minimal capability set
   (`SYS_ADMIN`, `BPF`, `PERFMON`, `SYS_PTRACE`).

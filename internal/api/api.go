@@ -40,10 +40,21 @@ var (
 		Help: "Alerts emitted by the diff engine."}, []string{"severity"})
 )
 
+// Alerter receives every alert the diff engine emits. Implemented by
+// notify.Notifier; kept as an interface so api does not depend on delivery.
+type Alerter interface {
+	Notify(model.Alert)
+}
+
 type Server struct {
 	store   *store.Store
 	fpEng   *fingerprint.Engine
 	diffEng *diff.Engine
+
+	// Auth protects the HTTP surface; zero value leaves it open (local dev).
+	Auth AuthConfig
+	// Notifier, when set, receives every emitted alert (webhook delivery).
+	Notifier Alerter
 
 	mu   sync.Mutex
 	subs map[chan []byte]bool // SSE subscribers
@@ -61,12 +72,14 @@ func (s *Server) Router(ui fs.FS) http.Handler {
 	r.Get("/v1/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
-	r.Post("/v1/events", s.handleIngest)
-	r.Get("/v1/alerts", s.handleListAlerts)
-	r.Post("/v1/alerts/{id}/ack", s.alertStatusHandler(model.AlertAcknowledged))
-	r.Post("/v1/alerts/{id}/resolve", s.alertStatusHandler(model.AlertResolved))
-	r.Get("/v1/fingerprints", s.handleListFingerprints)
-	r.Get("/v1/stream", s.handleStream)
+	r.Get("/v1/readyz", s.handleReadyz)
+	r.Post("/v1/events", requireToken(s.Auth.IngestToken, false, s.handleIngest))
+	r.Get("/v1/alerts", requireToken(s.Auth.APIToken, false, s.handleListAlerts))
+	r.Post("/v1/alerts/{id}/ack", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertAcknowledged)))
+	r.Post("/v1/alerts/{id}/resolve", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertResolved)))
+	r.Get("/v1/fingerprints", requireToken(s.Auth.APIToken, false, s.handleListFingerprints))
+	// EventSource cannot set headers, so the stream also accepts ?token=.
+	r.Get("/v1/stream", requireToken(s.Auth.APIToken, true, s.handleStream))
 	r.Handle("/metrics", promhttp.Handler())
 
 	if ui != nil {
@@ -92,6 +105,19 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// handleReadyz reports whether the collector can serve traffic: unlike
+// healthz (process liveness) it fails when the database is unreachable, so
+// Kubernetes stops routing to a collector that cannot persist events.
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer cancel()
+	if err := s.store.Ping(ctx); err != nil {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]string{"status": "unavailable", "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
 // handleIngest accepts a (possibly gzipped) EventBatch from a sensor, runs
@@ -131,6 +157,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		if a != nil {
 			alerts = append(alerts, *a)
 			alertsEmitted.WithLabelValues(a.Severity).Inc()
+			if s.Notifier != nil {
+				s.Notifier.Notify(*a)
+			}
 		}
 	}
 	s.broadcast("events", batch.Events)
@@ -266,11 +295,27 @@ func (s *Server) broadcast(event string, v any) {
 	}
 }
 
-// Serve runs the HTTP server until ctx is cancelled.
-func Serve(ctx context.Context, addr string, h http.Handler) error {
+// TLSFiles points at a PEM certificate/key pair; both empty means plain HTTP.
+type TLSFiles struct {
+	CertFile string
+	KeyFile  string
+}
+
+// Serve runs the HTTP(S) server until ctx is cancelled. TLS is enabled when
+// tls has both files set; setting only one is a configuration error.
+func Serve(ctx context.Context, addr string, h http.Handler, tls TLSFiles) error {
+	if (tls.CertFile == "") != (tls.KeyFile == "") {
+		return fmt.Errorf("tls: certificate and key must both be set (cert=%q key=%q)", tls.CertFile, tls.KeyFile)
+	}
 	srv := &http.Server{Addr: addr, Handler: h}
 	errCh := make(chan error, 1)
-	go func() { errCh <- srv.ListenAndServe() }()
+	go func() {
+		if tls.CertFile != "" {
+			errCh <- srv.ListenAndServeTLS(tls.CertFile, tls.KeyFile)
+			return
+		}
+		errCh <- srv.ListenAndServe()
+	}()
 	select {
 	case <-ctx.Done():
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

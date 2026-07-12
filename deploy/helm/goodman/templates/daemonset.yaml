@@ -24,7 +24,7 @@ spec:
           image: {{ .Values.sensor.image | quote }}
           imagePullPolicy: {{ .Values.sensor.imagePullPolicy }}
           args:
-            - -collector=http://{{ .Release.Name }}-collector:{{ .Values.collector.service.port }}
+            - -collector={{ include "goodman.collectorScheme" . }}://{{ .Release.Name }}-collector:{{ .Values.collector.service.port }}
             - -proc-root=/host/proc
             - -metrics-addr=:{{ .Values.sensor.metricsPort }}
           env:
@@ -32,6 +32,16 @@ spec:
               valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
             - name: GOODMAN_EXTRA_COMMS
               value: {{ .Values.sensor.extraComms | quote }}
+{{- if .Values.auth.enabled }}
+            - name: GOODMAN_INGEST_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "goodman.authSecretName" . }}, key: ingest-token } }
+{{- end }}
+{{- if .Values.collector.tls.secretName }}
+            # kubernetes.io/tls Secrets carry the issuing CA in ca.crt; the
+            # sensor pins trust to it when connecting over HTTPS.
+            - name: GOODMAN_TLS_CA
+              value: /etc/goodman/tls/ca.crt
+{{- end }}
           securityContext:
             privileged: true   # simplest; v2 can drop to SYS_ADMIN,BPF,PERFMON,SYS_PTRACE
             runAsNonRoot: false
@@ -45,9 +55,17 @@ spec:
             - { name: sys, mountPath: /sys, readOnly: true }
             - { name: proc, mountPath: /host/proc }
             - { name: bpffs, mountPath: /sys/fs/bpf }
+{{- if .Values.collector.tls.secretName }}
+            - { name: tls, mountPath: /etc/goodman/tls, readOnly: true }
+{{- end }}
       volumes:
         - { name: sys, hostPath: { path: /sys } }
         - { name: proc, hostPath: { path: /proc } }
         - { name: bpffs, hostPath: { path: /sys/fs/bpf } }
+{{- if .Values.collector.tls.secretName }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.collector.tls.secretName }}
+{{- end }}
       tolerations:
         - operator: Exists   # run on every node incl. control-plane

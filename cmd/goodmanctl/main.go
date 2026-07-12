@@ -30,6 +30,9 @@ Usage:
   goodmanctl fingerprints  [-collector URL] [-service S] [-package P]
   goodmanctl attribute -pid N [-duration 15s] [-proc-root /proc]
                                                             live-attribute one pid (needs root)
+
+All collector commands accept -token (or GOODMAN_API_TOKEN) when the
+collector's API requires authentication.
 `
 
 func main() {
@@ -66,16 +69,42 @@ func collectorFlag(fs *flag.FlagSet) *string {
 	return fs.String("collector", def, "collector base URL")
 }
 
+func tokenFlag(fs *flag.FlagSet) *string {
+	return fs.String("token", os.Getenv("GOODMAN_API_TOKEN"), "API bearer token (when the collector requires one)")
+}
+
+// doRequest issues an HTTP request with the API token attached and fails the
+// command with a hint when the collector rejects the credentials.
+func doRequest(method, u, token string) *http.Response {
+	req, err := http.NewRequest(method, u, nil)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if resp.StatusCode == http.StatusUnauthorized {
+		resp.Body.Close()
+		log.Fatal("collector returned 401 unauthorized: set GOODMAN_API_TOKEN or pass -token")
+	}
+	return resp
+}
+
 func cmdTail(args []string) {
 	fs := flag.NewFlagSet("tail", flag.ExitOnError)
 	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
 	fs.Parse(args)
 
-	resp, err := http.Get(*collector + "/v1/stream")
-	if err != nil {
-		log.Fatalf("connect %s: %v", *collector, err)
-	}
+	resp := doRequest(http.MethodGet, *collector+"/v1/stream", *token)
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("collector returned %s", resp.Status)
+	}
 	log.Printf("connected to %s — streaming (Ctrl-C to stop)", *collector)
 
 	sc := bufio.NewScanner(resp.Body)
@@ -118,6 +147,7 @@ func cmdTail(args []string) {
 func cmdAlerts(args []string) {
 	fs := flag.NewFlagSet("alerts", flag.ExitOnError)
 	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
 	status := fs.String("status", "", "filter by status (open|acknowledged|resolved)")
 	asJSON := fs.Bool("json", false, "raw JSON output")
 	fs.Parse(args)
@@ -127,7 +157,7 @@ func cmdAlerts(args []string) {
 		u += "?status=" + url.QueryEscape(*status)
 	}
 	var alerts []model.Alert
-	getJSON(u, &alerts)
+	getJSON(u, *token, &alerts)
 	if *asJSON {
 		json.NewEncoder(os.Stdout).Encode(alerts)
 		return
@@ -158,14 +188,12 @@ func cmdResolve(args []string) {
 func postAlertAction(args []string, action, done string) {
 	fs := flag.NewFlagSet("ack", flag.ExitOnError)
 	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
 	fs.Parse(args)
 	if fs.NArg() != 1 {
 		log.Fatalf("usage: goodmanctl %s <alert-id>", action)
 	}
-	resp, err := http.Post(*collector+"/v1/alerts/"+url.PathEscape(fs.Arg(0))+"/"+action, "application/json", nil)
-	if err != nil {
-		log.Fatal(err)
-	}
+	resp := doRequest(http.MethodPost, *collector+"/v1/alerts/"+url.PathEscape(fs.Arg(0))+"/"+action, *token)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		log.Fatalf("collector returned %s", resp.Status)
@@ -176,6 +204,7 @@ func postAlertAction(args []string, action, done string) {
 func cmdFingerprints(args []string) {
 	fs := flag.NewFlagSet("fingerprints", flag.ExitOnError)
 	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
 	service := fs.String("service", "", "filter by service")
 	pkg := fs.String("package", "", "filter by package")
 	asJSON := fs.Bool("json", false, "raw JSON output")
@@ -183,7 +212,7 @@ func cmdFingerprints(args []string) {
 
 	u := *collector + "/v1/fingerprints?service=" + url.QueryEscape(*service) + "&package=" + url.QueryEscape(*pkg)
 	var fps []model.Fingerprint
-	getJSON(u, &fps)
+	getJSON(u, *token, &fps)
 	if *asJSON {
 		json.NewEncoder(os.Stdout).Encode(fps)
 		return
@@ -261,11 +290,8 @@ func cmdAttribute(args []string) {
 	}
 }
 
-func getJSON(u string, v any) {
-	resp, err := http.Get(u)
-	if err != nil {
-		log.Fatal(err)
-	}
+func getJSON(u, token string, v any) {
+	resp := doRequest(http.MethodGet, u, token)
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		log.Fatalf("collector returned %s", resp.Status)

@@ -5,6 +5,26 @@ metrics, and the dashboard. Base URL defaults to `http://<collector>:8844`.
 
 All request/response bodies are JSON. Types are defined in `internal/model`.
 
+## Authentication
+
+When the collector is started with tokens (the Helm chart does this by
+default), requests must carry a bearer token:
+
+```
+Authorization: Bearer <token>
+```
+
+| Endpoints | Token | 
+|---|---|
+| `POST /v1/events` | ingest token (`GOODMAN_INGEST_TOKEN`) |
+| `/v1/alerts*`, `/v1/fingerprints`, `/v1/stream` | API token (`GOODMAN_API_TOKEN`) |
+| `/v1/healthz`, `/v1/readyz`, `/metrics`, dashboard assets | none |
+
+`GET /v1/stream` also accepts `?token=<api-token>` because `EventSource`
+cannot set request headers. A missing or wrong token returns
+`401 {"error": "unauthorized"}`. With no tokens configured (bare local runs),
+all endpoints are open.
+
 ## Endpoints
 
 ### `GET /v1/healthz`
@@ -14,6 +34,12 @@ Liveness probe. Always `200` when the collector is up.
 ```json
 { "status": "ok" }
 ```
+
+### `GET /v1/readyz`
+
+Readiness probe. `200 {"status": "ready"}` when the datastore answers a ping;
+`503 {"status": "unavailable", "error": "…"}` when it does not. Kubernetes uses
+this to stop routing to a collector that cannot persist events.
 
 ### `POST /v1/events`
 
@@ -101,6 +127,8 @@ List learned fingerprints, optionally filtered. Both params optional.
 ```
 
 ### `GET /v1/stream`
+
+Requires the API token via header or `?token=` (see Authentication).
 
 Server-Sent Events. Two event types are pushed as they happen:
 

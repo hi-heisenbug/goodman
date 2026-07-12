@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Alert, AlertStatus, Fingerprint, Severity } from "./types";
-import { ackAlert, fetchAlerts, fetchFingerprints, resolveAlert, subscribe } from "./api";
+import { ackAlert, fetchAlerts, fetchFingerprints, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
 
 type Tab = "alerts" | "fingerprints";
 type Tone = "critical" | "warning" | "good" | "accent" | "neutral";
@@ -607,6 +607,49 @@ function FingerprintsView() {
   );
 }
 
+// TokenGate blocks the workspace when the collector requires an API token
+// (GOODMAN_API_TOKEN) and none, or a wrong one, is stored locally.
+function TokenGate() {
+  const [value, setValue] = useState("");
+  const hadToken = getToken() !== "";
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const token = value.trim();
+    if (!token) return;
+    setToken(token);
+    window.location.reload();
+  };
+
+  return (
+    <div className="token-gate">
+      <form className="token-card" onSubmit={submit}>
+        <div className="token-head">
+          <Icon name="lock" />
+          <h2>API token required</h2>
+        </div>
+        <p>
+          {hadToken
+            ? "The stored token was rejected by the collector. Enter the current API token to continue."
+            : "This collector requires an API token (GOODMAN_API_TOKEN). Ask your operator or read it from the goodman Kubernetes secret."}
+        </p>
+        <input
+          type="password"
+          autoFocus
+          placeholder="Paste API token"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          aria-label="API token"
+        />
+        <button type="submit" className="primary-action" disabled={!value.trim()}>
+          <Icon name="check" />
+          Unlock dashboard
+        </button>
+      </form>
+    </div>
+  );
+}
+
 export function App() {
   const getHashTab = (): Tab => {
     const h = window.location.hash.replace("#", "");
@@ -616,6 +659,11 @@ export function App() {
   const [openCount, setOpenCount] = useState(0);
   const [knownPackages, setKnownPackages] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<Date>(() => new Date());
+  const [authRequired, setAuthRequired] = useState(false);
+
+  useEffect(() => {
+    onUnauthorized(() => setAuthRequired(true));
+  }, []);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -644,6 +692,10 @@ export function App() {
       clearInterval(timer);
     };
   }, []);
+
+  if (authRequired) {
+    return <TokenGate />;
+  }
 
   return (
     <div className="app-shell">

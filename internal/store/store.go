@@ -64,6 +64,26 @@ func Open(dsn string) (*Store, error) {
 
 func (s *Store) Close() error { return s.db.Close() }
 
+// Ping verifies the backing database is reachable (readiness probes).
+func (s *Store) Ping(ctx context.Context) error { return s.db.PingContext(ctx) }
+
+// PruneResolvedAlerts deletes resolved alerts detected before cutoff and
+// returns how many rows were removed. Open and acknowledged alerts are never
+// pruned; an operator still has to act on them.
+func (s *Store) PruneResolvedAlerts(ctx context.Context, cutoff time.Time) (int64, error) {
+	cutoffNs := cutoff.UnixNano()
+	if cutoffNs < 0 { // pre-epoch cutoff would wrap the uint64 and delete everything
+		return 0, nil
+	}
+	res, err := s.db.ExecContext(ctx,
+		`DELETE FROM alerts WHERE status=$1 AND detected_at < $2`,
+		model.AlertResolved, uint64(cutoffNs))
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 func (s *Store) migrate(ctx context.Context) error {
 	entries, err := migrations.ReadDir("migrations")
 	if err != nil {

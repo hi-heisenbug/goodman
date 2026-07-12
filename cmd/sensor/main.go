@@ -7,6 +7,8 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -58,6 +60,8 @@ func main() {
 		metricsAddr   = flag.String("metrics-addr", envOr("GOODMAN_METRICS_ADDR", ":9478"), "Prometheus metrics listen address ('' to disable)")
 		extraComms    = flag.String("comms", os.Getenv("GOODMAN_EXTRA_COMMS"), "extra comm names to watch, comma-separated")
 		watchInterval = flag.Duration("watch-interval", 3*time.Second, "how often to rescan /proc for runtime processes")
+		ingestToken   = flag.String("ingest-token", os.Getenv("GOODMAN_INGEST_TOKEN"), "bearer token sent with event batches")
+		tlsCA         = flag.String("tls-ca", os.Getenv("GOODMAN_TLS_CA"), "PEM CA bundle to trust for an https collector (empty = system roots)")
 	)
 	flag.Parse()
 	log.SetPrefix("sensor: ")
@@ -168,11 +172,33 @@ func main() {
 		return
 	}
 
-	sendBatches(ctx, *collectorURL, sensorName, out, *batchEvery, &dropped)
+	client, err := newCollectorClient(*tlsCA)
+	if err != nil {
+		log.Fatalf("collector TLS: %v", err)
+	}
+	sendBatches(ctx, client, *collectorURL, *ingestToken, sensorName, out, *batchEvery, &dropped)
 }
 
-func sendBatches(ctx context.Context, baseURL, sensor string, in <-chan model.Attributed, every time.Duration, dropped *atomic.Uint64) {
+// newCollectorClient builds the HTTP client for collector POSTs; a non-empty
+// caFile pins trust to that CA bundle (self-signed / private-CA deployments).
+func newCollectorClient(caFile string) (*http.Client, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
+	if caFile == "" {
+		return client, nil
+	}
+	pem, err := os.ReadFile(caFile)
+	if err != nil {
+		return nil, fmt.Errorf("read CA bundle: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil, fmt.Errorf("no certificates found in %s", caFile)
+	}
+	client.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
+	return client, nil
+}
+
+func sendBatches(ctx context.Context, client *http.Client, baseURL, token, sensor string, in <-chan model.Attributed, every time.Duration, dropped *atomic.Uint64) {
 	var buf []model.Attributed
 	t := time.NewTicker(every)
 	defer t.Stop()
@@ -197,6 +223,9 @@ func sendBatches(ctx context.Context, baseURL, sensor string, in <-chan model.At
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "gzip")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
 		resp, err := client.Do(req)
 		if err != nil {
 			mBatches.WithLabelValues("error").Inc()

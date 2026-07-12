@@ -27,6 +27,34 @@ collector:
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
+  # Serve the collector API over HTTPS from a kubernetes.io/tls Secret
+  # (keys tls.crt / tls.key). When the Secret also carries ca.crt, sensors
+  # automatically trust it. Empty = plain HTTP inside the cluster.
+  tls:
+    secretName: ""
+
+# Bearer-token authentication for the collector API.
+#   ingest-token: required from sensors on POST /v1/events
+#   api-token:    required from the dashboard, goodmanctl, and API clients
+# Tokens are generated on first install and stay stable across upgrades.
+# Set explicit values to override, or point existingSecret at a Secret that
+# already has both keys.
+auth:
+  enabled: true
+  ingestToken: ""
+  apiToken: ""
+  existingSecret: ""
+
+# Forward alerts to a webhook (Slack-compatible or generic JSON POST).
+notifications:
+  webhookUrl: ""            # empty = disabled
+  format: generic           # generic | slack
+  minSeverity: WARN         # INFO | WARN | CRITICAL
+  token: ""                 # optional bearer token sent to the webhook
+
+# Prune resolved alerts older than this Go duration (e.g. 720h = 30 days).
+# Empty keeps resolved alerts forever. Open/acknowledged alerts are never pruned.
+retention: ""
 
 # Datastore. Provide a Postgres DSN in production; the default embedded SQLite
 # file is fine for a pilot / kind cluster (data lives on the collector pod).

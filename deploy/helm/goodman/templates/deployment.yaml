@@ -45,14 +45,52 @@ spec:
               valueFrom: { configMapKeyRef: { name: {{ .Release.Name }}-config, key: learn_obs } }
             - name: GOODMAN_LEARN_MIN_AGE
               valueFrom: { configMapKeyRef: { name: {{ .Release.Name }}-config, key: learn_min_age } }
+{{- if .Values.auth.enabled }}
+            - name: GOODMAN_INGEST_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "goodman.authSecretName" . }}, key: ingest-token } }
+            - name: GOODMAN_API_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "goodman.authSecretName" . }}, key: api-token } }
+{{- end }}
+{{- if .Values.collector.tls.secretName }}
+            - name: GOODMAN_TLS_CERT
+              value: /etc/goodman/tls/tls.crt
+            - name: GOODMAN_TLS_KEY
+              value: /etc/goodman/tls/tls.key
+{{- end }}
+{{- if .Values.notifications.webhookUrl }}
+            - name: GOODMAN_WEBHOOK_URL
+              value: {{ .Values.notifications.webhookUrl | quote }}
+            - name: GOODMAN_WEBHOOK_FORMAT
+              value: {{ .Values.notifications.format | quote }}
+            - name: GOODMAN_WEBHOOK_MIN_SEVERITY
+              value: {{ .Values.notifications.minSeverity | quote }}
+{{- if .Values.notifications.token }}
+            - name: GOODMAN_WEBHOOK_TOKEN
+              valueFrom: { secretKeyRef: { name: {{ include "goodman.authSecretName" . }}, key: webhook-token } }
+{{- end }}
+{{- end }}
+{{- if .Values.retention }}
+            - name: GOODMAN_RETENTION
+              value: {{ .Values.retention | quote }}
+{{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.collector.service.port }}
           readinessProbe:
-            httpGet: { path: /v1/healthz, port: http }
+            httpGet:
+              path: /v1/readyz
+              port: http
+{{- if .Values.collector.tls.secretName }}
+              scheme: HTTPS
+{{- end }}
             initialDelaySeconds: 2
           livenessProbe:
-            httpGet: { path: /v1/healthz, port: http }
+            httpGet:
+              path: /v1/healthz
+              port: http
+{{- if .Values.collector.tls.secretName }}
+              scheme: HTTPS
+{{- end }}
             initialDelaySeconds: 5
           resources: {{- toYaml .Values.collector.resources | nindent 12 }}
           volumeMounts:
@@ -61,6 +99,11 @@ spec:
 {{- if .Values.rules }}
             - name: config
               mountPath: /etc/goodman
+{{- end }}
+{{- if .Values.collector.tls.secretName }}
+            - name: tls
+              mountPath: /etc/goodman/tls
+              readOnly: true
 {{- end }}
       volumes:
         - name: data
@@ -72,6 +115,11 @@ spec:
             items:
               - key: rules.json
                 path: rules.json
+{{- end }}
+{{- if .Values.collector.tls.secretName }}
+        - name: tls
+          secret:
+            secretName: {{ .Values.collector.tls.secretName }}
 {{- end }}
 ---
 apiVersion: v1
