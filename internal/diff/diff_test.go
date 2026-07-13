@@ -394,3 +394,59 @@ func TestWarnActionWouldBlock(t *testing.T) {
 		t.Fatalf("persisted WouldBlock = %+v err=%v", got, err)
 	}
 }
+
+func TestDriftAgainstImportedBaseline(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "imported-drift.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	baseline := []string{
+		"READ /app/node_modules/pkg/**",
+		"CONNECT 10.0.0.5:5432",
+	}
+	behaviors := map[string]model.BehaviorStat{}
+	for _, b := range baseline {
+		behaviors[b] = model.BehaviorStat{Count: 20, FirstSeen: 1, LastSeen: 2}
+	}
+	if _, err := s.ImportFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "pkg", Version: "1.0.0",
+		Behaviors: behaviors, FirstSeen: 1, LastSeen: 2, ObsCount: 20, IsBaseline: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 1000, MinAge: time.Hour})
+	rules, err := LoadRules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffEng := NewEngine(s, rules)
+
+	ups, err := fpEng.Ingest(ctx, []model.Attributed{
+		{Service: "web", Package: "pkg", Version: "1.0.1", Type: model.EventNetConnect,
+			Behavior: "CONNECT 169.254.169.254:80", Timestamp: 300, Sensor: "node-b"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alert *model.Alert
+	for _, up := range ups {
+		if a, err := diffEng.React(ctx, up); err != nil {
+			t.Fatal(err)
+		} else if a != nil {
+			alert = a
+		}
+	}
+	if alert == nil {
+		t.Fatal("no drift alert against imported baseline")
+	}
+	if alert.OldVersion != "1.0.0" || alert.NewVersion != "1.0.1" {
+		t.Fatalf("versions = %s -> %s", alert.OldVersion, alert.NewVersion)
+	}
+	if alert.Severity != model.SeverityCritical {
+		t.Fatalf("severity = %s, want CRITICAL", alert.Severity)
+	}
+}

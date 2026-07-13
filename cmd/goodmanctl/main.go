@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"net/url"
@@ -33,6 +34,8 @@ Usage:
   goodmanctl ack ID        [-collector URL]                acknowledge an alert
   goodmanctl resolve ID    [-collector URL]                resolve an alert
   goodmanctl fingerprints  [-collector URL] [-service S] [-package P]
+  goodmanctl fingerprints export [-collector URL] [-token T]
+  goodmanctl fingerprints import <file> [-collector URL] [-token T]
   goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]
                                                             runtime reachability report
   goodmanctl demo          [-host 127.0.0.1] [-port 8844] [-attack-delay 12s]
@@ -61,6 +64,16 @@ func main() {
 	case "resolve":
 		cmdResolve(args)
 	case "fingerprints":
+		if len(args) > 0 {
+			switch args[0] {
+			case "export":
+				cmdFingerprintsExport(args[1:])
+				return
+			case "import":
+				cmdFingerprintsImport(args[1:])
+				return
+			}
+		}
 		cmdFingerprints(args)
 	case "report":
 		cmdReport(args)
@@ -259,6 +272,67 @@ func cmdFingerprints(args []string) {
 			fmt.Printf("    %-60s x%d\n", b, st.Count)
 		}
 	}
+}
+
+func cmdFingerprintsExport(args []string) {
+	fs := flag.NewFlagSet("fingerprints export", flag.ExitOnError)
+	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
+	fs.Parse(args)
+
+	resp := doRequest(http.MethodGet, *collector+"/v1/fingerprints/export", *token)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("collector returned %s", resp.Status)
+	}
+	if _, err := io.Copy(os.Stdout, resp.Body); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func cmdFingerprintsImport(args []string) {
+	fs := flag.NewFlagSet("fingerprints import", flag.ExitOnError)
+	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
+	fs.Parse(args)
+	if fs.NArg() != 1 {
+		log.Fatal("usage: goodmanctl fingerprints import <file>")
+	}
+	data, err := os.ReadFile(fs.Arg(0))
+	if err != nil {
+		log.Fatalf("read file: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodPost, *collector+"/v1/fingerprints/import", strings.NewReader(string(data)))
+	if err != nil {
+		log.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if *token != "" {
+		req.Header.Set("Authorization", "Bearer "+*token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		log.Fatal("collector returned 401 unauthorized: set GOODMAN_API_TOKEN or pass -token")
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		log.Fatalf("collector returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	var result struct {
+		Imported           int `json:"imported"`
+		SkippedLocal       int `json:"skipped_local"`
+		Replaced           int `json:"replaced"`
+		IgnoredNonBaseline int `json:"ignored_non_baseline"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Printf("imported=%d skipped_local=%d replaced=%d ignored_non_baseline=%d\n",
+		result.Imported, result.SkippedLocal, result.Replaced, result.IgnoredNonBaseline)
 }
 
 // cmdReport builds the runtime reachability report: declared dependencies

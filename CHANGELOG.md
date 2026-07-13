@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Multi-cluster baseline export/import (deferred Phase 4): `GET
+  /v1/fingerprints/export` and `POST /v1/fingerprints/import` (API token);
+  `goodmanctl fingerprints export|import`; `origin` provenance on fingerprints
+  (`local` | `imported`); dashboard "Imported" tag; import conflict matrix
+  never clobbers locally learned baselines.
 - Transactional fingerprint merge (deferred Phase 5a): `store.MergeFingerprint`
   wraps read-modify-write in a transaction (Postgres `SELECT FOR UPDATE`;
   SQLite tx-only). `fingerprint.Engine.Ingest` uses it so concurrent ingests

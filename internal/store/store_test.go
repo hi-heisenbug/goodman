@@ -41,6 +41,9 @@ func TestFingerprintRoundTrip(t *testing.T) {
 	if got == nil || got.ObsCount != 2 || len(got.Behaviors) != 1 {
 		t.Fatalf("round trip mismatch: %+v", got)
 	}
+	if got.Origin != model.OriginLocal {
+		t.Fatalf("origin = %q, want local", got.Origin)
+	}
 
 	// Upsert must update, not duplicate.
 	fp.ObsCount = 5
@@ -351,5 +354,129 @@ func TestLockfileAndReportPersistence(t *testing.T) {
 	}
 	if got.PreviousReport != `{"declared_count":5,"executed_count":1}` || got.PreviousComputedAt != 300 {
 		t.Fatalf("previous not preserved: %+v", got)
+	}
+}
+
+func baselineFP(service, pkg, version string, learning bool) *model.Fingerprint {
+	fp := &model.Fingerprint{
+		Service: service, Package: pkg, Version: version,
+		Behaviors: map[string]model.BehaviorStat{
+			"READ /app/node_modules/" + pkg + "/**": {Count: 10, FirstSeen: 1, LastSeen: 2},
+		},
+		FirstSeen: 1, LastSeen: 2, ObsCount: 10,
+		IsBaseline: !learning,
+	}
+	return fp
+}
+
+func TestImportFingerprintConflictMatrix(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	imported := baselineFP("web", "left-pad", "1.3.0", false)
+	imported.IsBaseline = true
+
+	outcome, err := s.ImportFingerprint(ctx, imported)
+	if err != nil || outcome != ImportImported {
+		t.Fatalf("fresh import = (%v, %v), want imported", outcome, err)
+	}
+	got, err := s.GetFingerprint(ctx, "web", "left-pad", "1.3.0")
+	if err != nil || got == nil || got.Origin != model.OriginImported || !got.IsBaseline {
+		t.Fatalf("imported row = %+v err=%v", got, err)
+	}
+
+	// Local learning row must not be clobbered.
+	if err := s.UpsertFingerprint(ctx, baselineFP("web", "pkg-a", "1.0.0", true)); err != nil {
+		t.Fatal(err)
+	}
+	outcome, err = s.ImportFingerprint(ctx, baselineFP("web", "pkg-a", "1.0.0", false))
+	if err != nil || outcome != ImportSkippedLocal {
+		t.Fatalf("local learning skip = (%v, %v)", outcome, err)
+	}
+
+	// Local baseline row must not be clobbered.
+	if err := s.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "pkg-b", Version: "2.0.0",
+		Behaviors: map[string]model.BehaviorStat{"READ /local": {Count: 1}},
+		IsBaseline: true, Origin: model.OriginLocal,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	replacement := baselineFP("web", "pkg-b", "2.0.0", false)
+	replacement.Behaviors = map[string]model.BehaviorStat{"READ /file": {Count: 99}}
+	outcome, err = s.ImportFingerprint(ctx, replacement)
+	if err != nil || outcome != ImportSkippedLocal {
+		t.Fatalf("local baseline skip = (%v, %v)", outcome, err)
+	}
+	got, _ = s.GetFingerprint(ctx, "web", "pkg-b", "2.0.0")
+	if got.Behaviors["READ /local"].Count != 1 {
+		t.Fatalf("local baseline mutated: %+v", got.Behaviors)
+	}
+
+	// Re-import replaces an existing imported row.
+	first := baselineFP("web", "pkg-d", "4.0.0", false)
+	first.IsBaseline = true
+	if _, err := s.ImportFingerprint(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	reimport := baselineFP("web", "pkg-d", "4.0.0", false)
+	reimport.IsBaseline = true
+	reimport.Behaviors = map[string]model.BehaviorStat{"READ /new": {Count: 5}}
+	outcome, err = s.ImportFingerprint(ctx, reimport)
+	if err != nil || outcome != ImportReplaced {
+		t.Fatalf("imported replace = (%v, %v)", outcome, err)
+	}
+	got, _ = s.GetFingerprint(ctx, "web", "pkg-d", "4.0.0")
+	if got.Origin != model.OriginImported || got.Behaviors["READ /new"].Count != 5 {
+		t.Fatalf("replaced imported row = %+v", got)
+	}
+
+	// Non-baseline incoming rows are ignored.
+	learning := baselineFP("web", "pkg-c", "3.0.0", true)
+	outcome, err = s.ImportFingerprint(ctx, learning)
+	if err != nil || outcome != ImportIgnoredNonBaseline {
+		t.Fatalf("non-baseline ignore = (%v, %v)", outcome, err)
+	}
+	if got, _ := s.GetFingerprint(ctx, "web", "pkg-c", "3.0.0"); got != nil {
+		t.Fatalf("non-baseline row written: %+v", got)
+	}
+}
+
+func TestListBaselinesExcludesLearning(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	if err := s.UpsertFingerprint(ctx, baselineFP("web", "a", "1.0.0", false)); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpsertFingerprint(ctx, baselineFP("web", "b", "1.0.0", true)); err != nil {
+		t.Fatal(err)
+	}
+	baselines, err := s.ListBaselines(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(baselines) != 1 || baselines[0].Package != "a" {
+		t.Fatalf("baselines = %+v, want only promoted row", baselines)
+	}
+}
+
+func TestUpsertFingerprintPreservesImportedOrigin(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	fp := baselineFP("web", "pkg", "1.0.0", false)
+	fp.IsBaseline = true
+	if _, err := s.ImportFingerprint(ctx, fp); err != nil {
+		t.Fatal(err)
+	}
+	fp.ObsCount = 20
+	st := fp.Behaviors["READ /app/node_modules/pkg/**"]
+	st.Count = 20
+	fp.Behaviors["READ /app/node_modules/pkg/**"] = st
+	if err := s.UpsertFingerprint(ctx, fp); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetFingerprint(ctx, "web", "pkg", "1.0.0")
+	if err != nil || got.Origin != model.OriginImported || got.ObsCount != 20 {
+		t.Fatalf("origin not preserved through upsert: %+v err=%v", got, err)
 	}
 }

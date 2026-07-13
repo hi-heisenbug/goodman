@@ -473,9 +473,14 @@ function FingerprintCard({ fp }: { fp: Fingerprint }) {
             <span>{entries.length} behaviors</span>
           </div>
         </div>
-        <span className={`state-chip ${fp.is_baseline ? "baseline" : "learning"}`}>
-          {fp.is_baseline ? "Baseline" : "Learning"}
-        </span>
+        <div className="fingerprint-chips">
+          <span className={`state-chip ${fp.is_baseline ? "baseline" : "learning"}`}>
+            {fp.is_baseline ? "Baseline" : "Learning"}
+          </span>
+          {fp.origin === "imported" && (
+            <span className="origin-chip imported">Imported</span>
+          )}
+        </div>
       </div>
 
       <div className="behavior-table">

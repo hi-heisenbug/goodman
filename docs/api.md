@@ -131,9 +131,59 @@ List learned fingerprints, optionally filtered. Both params optional.
     "first_seen": 1783453740000000000,
     "last_seen": 1783453760000000000,
     "obs_count": 16,
-    "is_baseline": true
+    "is_baseline": true,
+    "origin": "local"
   }
 ]
+```
+
+### `GET /v1/fingerprints/export`
+
+Export promoted baselines for multi-cluster seeding. Requires the API token.
+Only rows with `is_baseline=true` are included; learning fingerprints are
+omitted.
+
+```json
+{
+  "schema": "goodman.fingerprints.export/v1",
+  "exported_at": 1783453745485152329,
+  "collector": "goodman-collector-0",
+  "fingerprints": [
+    {
+      "service": "web",
+      "package": "good-pkg",
+      "version": "1.0.0",
+      "behaviors": { "READ /app/node_modules/good-pkg/**": { "count": 8, "first": 0, "last": 0 } },
+      "first_seen": 0,
+      "last_seen": 0,
+      "obs_count": 8,
+      "is_baseline": true,
+      "origin": "local"
+    }
+  ]
+}
+```
+
+`schema` is a hard version gate: import rejects unknown values with `400`.
+
+### `POST /v1/fingerprints/import`
+
+Import baselines from an export file. Requires the API token. Request body is
+the same envelope as export. Conflict rules (key = `service` + `package` +
+`version`):
+
+| Local state | Result |
+|---|---|
+| no row | insert with `origin=imported` → `imported` |
+| row with `origin=local` (learning or baseline) | skip, keep local row → `skipped_local` |
+| row with `origin=imported` | replace (idempotent re-import) → `replaced` |
+| incoming `is_baseline=false` | never written → `ignored_non_baseline` |
+
+Local observation always outranks a file; import never clobbers a locally
+learned baseline.
+
+```json
+{ "imported": 41, "skipped_local": 3, "replaced": 0, "ignored_non_baseline": 0 }
 ```
 
 ### `POST /v1/report`
@@ -290,6 +340,8 @@ being shed under load — investigate before trusting completeness.
 | `goodmanctl alerts [-status S] [-json]` | `GET /v1/alerts` |
 | `goodmanctl ack <id>` | `POST /v1/alerts/{id}/ack` |
 | `goodmanctl fingerprints [-service S] [-package P] [-json]` | `GET /v1/fingerprints` |
+| `goodmanctl fingerprints export` | `GET /v1/fingerprints/export` |
+| `goodmanctl fingerprints import <file>` | `POST /v1/fingerprints/import` |
 | `goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]` | `GET /v1/fingerprints` + OSV.dev (the dashboard Reachability tab uses `POST /v1/report`) |
 | `goodmanctl attribute -pid N [-stacks]` | loads eBPF directly (needs root) |
 

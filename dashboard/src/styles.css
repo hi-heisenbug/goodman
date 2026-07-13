@@ -844,6 +844,25 @@ button {
   background: var(--warning-bg);
 }
 
+.fingerprint-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.origin-chip {
+  padding: 5px 9px;
+  font-size: 12px;
+}
+
+.origin-chip.imported {
+  color: var(--accent);
+  background: var(--accent-bg);
+}
+
 .behavior-table {
   display: grid;
   gap: 4px;

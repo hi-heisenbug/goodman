@@ -8,7 +8,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/hi-heisenbug/goodman/internal/diff"
+	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/model"
 	"github.com/hi-heisenbug/goodman/internal/store"
 )
@@ -216,5 +219,194 @@ func TestReportPersistAndGet(t *testing.T) {
 	}
 	if env.Delta == nil || env.Delta.Executed != 1 {
 		t.Fatalf("expected executed delta +1, got %+v body=%s", env.Delta, rec.Body.String())
+	}
+}
+
+func TestExportFingerprintsOnlyBaselines(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "export.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "baseline-pkg", Version: "1.0.0",
+		Behaviors: map[string]model.BehaviorStat{"READ /a": {Count: 1}},
+		IsBaseline: true, Origin: model.OriginLocal,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "learning-pkg", Version: "1.0.0",
+		Behaviors: map[string]model.BehaviorStat{"READ /b": {Count: 1}},
+		IsBaseline: false,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/fingerprints/export", nil)
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var env struct {
+		Schema       string              `json:"schema"`
+		ExportedAt   uint64              `json:"exported_at"`
+		Collector    string              `json:"collector"`
+		Fingerprints []model.Fingerprint `json:"fingerprints"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.Schema != "goodman.fingerprints.export/v1" {
+		t.Fatalf("schema = %q", env.Schema)
+	}
+	if env.ExportedAt == 0 || env.Collector == "" {
+		t.Fatalf("missing envelope fields: %+v", env)
+	}
+	if len(env.Fingerprints) != 1 || env.Fingerprints[0].Package != "baseline-pkg" {
+		t.Fatalf("fingerprints = %+v, want only baseline", env.Fingerprints)
+	}
+}
+
+func TestImportFingerprintsValidatesSchemaAndCounts(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "import.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "local-pkg", Version: "1.0.0",
+		Behaviors: map[string]model.BehaviorStat{"READ /local": {Count: 1}},
+		IsBaseline: true, Origin: model.OriginLocal,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	router := NewServer(st, nil, nil).Router(nil)
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/fingerprints/import",
+		strings.NewReader(`{"schema":"wrong/v9","fingerprints":[]}`)))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad schema = %d, want 400", rec.Code)
+	}
+
+	body := `{"schema":"goodman.fingerprints.export/v1","fingerprints":[
+		{"service":"web","package":"new-pkg","version":"1.0.0","behaviors":{"READ /x":{"count":1}},"is_baseline":true},
+		{"service":"web","package":"local-pkg","version":"1.0.0","behaviors":{"READ /x":{"count":1}},"is_baseline":true},
+		{"service":"web","package":"learning","version":"1.0.0","behaviors":{},"is_baseline":false}
+	]}`
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/fingerprints/import", strings.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var result struct {
+		Imported           int `json:"imported"`
+		SkippedLocal       int `json:"skipped_local"`
+		IgnoredNonBaseline int `json:"ignored_non_baseline"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+	if result.Imported != 1 || result.SkippedLocal != 1 || result.IgnoredNonBaseline != 1 {
+		t.Fatalf("counts = %+v, want imported=1 skipped_local=1 ignored_non_baseline=1", result)
+	}
+	got, err := st.GetFingerprint(ctx, "web", "new-pkg", "1.0.0")
+	if err != nil || got == nil || got.Origin != model.OriginImported {
+		t.Fatalf("imported row = %+v err=%v", got, err)
+	}
+}
+
+func TestExportImportDriftWithoutLearning(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	stA, err := store.Open(filepath.Join(dir, "a.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stA.Close()
+	stB, err := store.Open(filepath.Join(dir, "b.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stB.Close()
+
+	baseline := []string{
+		"READ /app/node_modules/good-pkg/**",
+		"CONNECT 10.0.0.5:5432",
+	}
+	behaviors := map[string]model.BehaviorStat{}
+	for _, b := range baseline {
+		behaviors[b] = model.BehaviorStat{Count: 12, FirstSeen: 1, LastSeen: 2}
+	}
+	if err := stA.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "good-pkg", Version: "1.0.0",
+		Behaviors: behaviors, FirstSeen: 1, LastSeen: 2, ObsCount: 12,
+		IsBaseline: true, Origin: model.OriginLocal,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	NewServer(stA, nil, nil).Router(nil).ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/v1/fingerprints/export", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatal(rec.Body.String())
+	}
+	exportBody := rec.Body.Bytes()
+
+	rec = httptest.NewRecorder()
+	NewServer(stB, nil, nil).Router(nil).ServeHTTP(rec,
+		httptest.NewRequest(http.MethodPost, "/v1/fingerprints/import", strings.NewReader(string(exportBody))))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("import B = %d %s", rec.Code, rec.Body.String())
+	}
+
+	fps, err := stB.ListFingerprints(ctx, "web", "good-pkg")
+	if err != nil || len(fps) != 1 || fps[0].Origin != model.OriginImported {
+		t.Fatalf("imported provenance = %+v err=%v", fps, err)
+	}
+
+	fpEng := fingerprint.NewEngine(stB, fingerprint.LearningWindow{MinObs: 1000, MinAge: time.Hour})
+	rules, err := diff.LoadRules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffEng := diff.NewEngine(stB, rules)
+	drift := append(baseline,
+		"READ /var/run/secrets/kubernetes.io/serviceaccount/token",
+		"CONNECT 169.254.169.254:80",
+	)
+	var evs []model.Attributed
+	for i, b := range drift {
+		evs = append(evs, model.Attributed{
+			Service: "web", Package: "good-pkg", Version: "1.0.1",
+			Type: model.EventFileOpen, Behavior: b, Timestamp: uint64(100 + i),
+		})
+	}
+	ups, err := fpEng.Ingest(ctx, evs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alert *model.Alert
+	for _, up := range ups {
+		if a, err := diffEng.React(ctx, up); err != nil {
+			t.Fatal(err)
+		} else if a != nil {
+			alert = a
+		}
+	}
+	if alert == nil {
+		t.Fatal("no drift alert against imported baseline")
+	}
+	if alert.OldVersion != "1.0.0" || alert.NewVersion != "1.0.1" {
+		t.Fatalf("versions = %s -> %s", alert.OldVersion, alert.NewVersion)
+	}
+	if alert.Severity != model.SeverityCritical {
+		t.Fatalf("severity = %s", alert.Severity)
 	}
 }

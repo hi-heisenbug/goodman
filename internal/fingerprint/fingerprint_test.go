@@ -150,3 +150,30 @@ func TestAgeGateBlocksPromotion(t *testing.T) {
 		t.Fatal("promoted despite age gate (span 1ns < 1h)")
 	}
 }
+
+func TestIngestPreservesImportedOrigin(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	if _, err := s.ImportFingerprint(ctx, &model.Fingerprint{
+		Service: "svc", Package: "p", Version: "1.0.0",
+		Behaviors: map[string]model.BehaviorStat{"READ /a/**": {Count: 500, FirstSeen: 1, LastSeen: 2}},
+		FirstSeen: 1, LastSeen: 2, ObsCount: 500, IsBaseline: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng := NewEngine(s, LearningWindow{MinObs: 4, MinAge: time.Nanosecond})
+	ups, err := eng.Ingest(ctx, []model.Attributed{
+		{Service: "svc", Package: "p", Version: "1.0.0", Behavior: "READ /a/**", Timestamp: 10},
+		{Service: "svc", Package: "p", Version: "1.0.0", Behavior: "CONNECT 1.2.3.4:80", Timestamp: 11},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ups[0].JustPromoted {
+		t.Fatal("imported baseline must not be re-promoted")
+	}
+	fp, err := s.GetFingerprint(ctx, "svc", "p", "1.0.0")
+	if err != nil || fp.Origin != model.OriginImported || fp.ObsCount != 502 {
+		t.Fatalf("imported origin/merge = %+v err=%v", fp, err)
+	}
+}

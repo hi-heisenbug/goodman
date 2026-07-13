@@ -96,6 +96,12 @@ type BehaviorStat struct {
 	LastSeen  uint64 `json:"last"`  // unix ns
 }
 
+// Fingerprint origin values (provenance for multi-cluster baseline import).
+const (
+	OriginLocal    = "local"
+	OriginImported = "imported"
+)
+
 // Fingerprint is the set of behaviors seen for one (service, package, version).
 type Fingerprint struct {
 	Service    string                  `json:"service"`
@@ -106,6 +112,7 @@ type Fingerprint struct {
 	LastSeen   uint64                  `json:"last_seen"`
 	ObsCount   int                     `json:"obs_count"`
 	IsBaseline bool                    `json:"is_baseline"`
+	Origin     string                  `json:"origin"` // local | imported
 }
 
 // Evidence is the triage context for one new behavior on an alert: which

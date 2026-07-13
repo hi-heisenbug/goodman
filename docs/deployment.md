@@ -195,3 +195,41 @@ A collector restart or brief outage should not wipe a pilot:
   flush tick. Watch `goodman_sensor_spool_depth` and
   `goodman_sensor_spool_dropped_total` if the collector is down for longer
   than the spool can absorb.
+
+## Multi-cluster: seeding baselines
+
+When you run Goodman in more than one cluster, you can seed a new cluster with
+baselines learned in a mature one — without collector-to-collector networking or
+a shared database.
+
+**On the source cluster** (where baselines are already promoted):
+
+```bash
+export GOODMAN_API_TOKEN=$(kubectl get secret goodman-auth -o jsonpath='{.data.api-token}' | base64 -d)
+export GOODMAN_COLLECTOR_URL=https://goodman-collector.example.svc:8443
+
+goodmanctl fingerprints export > baselines.json
+```
+
+**On the destination cluster** (fresh collector, no learning window needed):
+
+```bash
+goodmanctl fingerprints import baselines.json
+# imported=41 skipped_local=0 replaced=0 ignored_non_baseline=0
+```
+
+What this does:
+
+- Only **promoted baselines** are exported; learning fingerprints stay behind.
+- Imported rows carry `origin=imported` in the API and dashboard so you can
+  distinguish "we observed this here" from "a file gave us this."
+- **Local observation wins:** if cluster B has already learned a fingerprint
+  itself (`origin=local`), import skips that row. A file never clobbers local
+  data.
+- Re-importing the same file **refreshes imported rows only** (`replaced`
+  count); locally learned baselines are untouched.
+- The diff engine treats imported baselines like promoted ones: version drift
+  alerts fire immediately with no learning window.
+
+Move `baselines.json` yourself (copy, object store, CI artifact — whatever
+fits your ops model). Goodman does not ship a sync daemon.

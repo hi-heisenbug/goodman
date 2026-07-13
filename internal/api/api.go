@@ -14,6 +14,7 @@ import (
 	"io/fs"
 	"log"
 	"net/http"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -94,6 +95,8 @@ func (s *Server) Router(ui fs.FS) http.Handler {
 	r.Post("/v1/alerts/{id}/ack", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertAcknowledged)))
 	r.Post("/v1/alerts/{id}/resolve", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertResolved)))
 	r.Get("/v1/fingerprints", requireToken(s.Auth.APIToken, false, s.handleListFingerprints))
+	r.Get("/v1/fingerprints/export", requireToken(s.Auth.APIToken, false, s.handleExportFingerprints))
+	r.Post("/v1/fingerprints/import", requireToken(s.Auth.APIToken, false, s.handleImportFingerprints))
 	r.Post("/v1/report", requireToken(s.Auth.APIToken, false, s.handleReport))
 	r.Get("/v1/report", requireToken(s.Auth.APIToken, false, s.handleGetReport))
 	// EventSource cannot set headers, so the stream also accepts ?token=.
@@ -268,6 +271,74 @@ func (s *Server) handleListFingerprints(w http.ResponseWriter, r *http.Request) 
 		fps = []model.Fingerprint{}
 	}
 	writeJSON(w, http.StatusOK, fps)
+}
+
+const fingerprintExportSchema = "goodman.fingerprints.export/v1"
+
+type fingerprintExportEnvelope struct {
+	Schema       string              `json:"schema"`
+	ExportedAt   uint64              `json:"exported_at"`
+	Collector    string              `json:"collector"`
+	Fingerprints []model.Fingerprint `json:"fingerprints"`
+}
+
+type fingerprintImportResult struct {
+	Imported           int `json:"imported"`
+	SkippedLocal       int `json:"skipped_local"`
+	Replaced           int `json:"replaced"`
+	IgnoredNonBaseline int `json:"ignored_non_baseline"`
+}
+
+func (s *Server) handleExportFingerprints(w http.ResponseWriter, r *http.Request) {
+	fps, err := s.store.ListBaselines(r.Context())
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if fps == nil {
+		fps = []model.Fingerprint{}
+	}
+	host, _ := os.Hostname()
+	if host == "" {
+		host = "goodman-collector"
+	}
+	writeJSON(w, http.StatusOK, fingerprintExportEnvelope{
+		Schema:       fingerprintExportSchema,
+		ExportedAt:   uint64(time.Now().UnixNano()),
+		Collector:    host,
+		Fingerprints: fps,
+	})
+}
+
+func (s *Server) handleImportFingerprints(w http.ResponseWriter, r *http.Request) {
+	var body fingerprintExportEnvelope
+	if err := json.NewDecoder(io.LimitReader(r.Body, 64<<20)).Decode(&body); err != nil {
+		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.Schema != fingerprintExportSchema {
+		http.Error(w, "unsupported schema: "+body.Schema, http.StatusBadRequest)
+		return
+	}
+	var result fingerprintImportResult
+	for i := range body.Fingerprints {
+		outcome, err := s.store.ImportFingerprint(r.Context(), &body.Fingerprints[i])
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		switch outcome {
+		case store.ImportImported:
+			result.Imported++
+		case store.ImportSkippedLocal:
+			result.SkippedLocal++
+		case store.ImportReplaced:
+			result.Replaced++
+		case store.ImportIgnoredNonBaseline:
+			result.IgnoredNonBaseline++
+		}
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // handleReport builds the runtime reachability report from an uploaded npm

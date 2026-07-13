@@ -344,7 +344,7 @@ both dialects migrate cleanly; all gates green.
 
 ---
 
-## Phase 4: Multi-cluster fingerprint sharing (per-customer)
+## Phase 4: Multi-cluster fingerprint sharing (per-customer) — DONE
 
 **Gate:** first customer with 3+ clusters complains about re-learning
 baselines per cluster. Per-customer sharing only — cross-customer community
@@ -369,31 +369,6 @@ Design — keep it boring, file-shaped, and operator-driven:
 - Diff engine treats imported baselines exactly like promoted ones (drift
   against them alerts normally).
 - Dashboard: small "imported" origin tag on fingerprint rows.
-
-**File touch list**
-
-- `internal/api/api.go` (+ auth classes in `internal/api/auth_test.go` —
-  operator endpoints use `requireToken(s.Auth.APIToken, …)`)
-- `internal/store/store.go`, `migrations/006_fingerprint_origin.postgres.sql` + `.sqlite.sql`
-- `cmd/goodmanctl/` — export/import subcommands
-- `internal/fingerprint/` — promotion logic respects imported rows
-- `docs/api.md`, `docs/deployment.md` (multi-cluster runbook section),
-  `dashboard/src/` origin tag (+ `make dashboard`), `CHANGELOG.md`
-
-**Verification**
-
-```bash
-make vet && make test && make smoke && make replay
-make dashboard && make build    # if the origin tag lands in the UI
-```
-
-**Anti-patterns**
-
-- New endpoints get explicit auth classes and `auth_test.go` cases — no
-  accidentally open operator endpoints.
-- Import never clobbers a locally learned baseline; local observation is
-  higher-trust than an imported file.
-- No cross-customer anything; no anonymization work; no central service.
 
 **DoD:** export from collector A, import into fresh collector B, replay a
 drift scenario against B → alert fires without a learning window; imported

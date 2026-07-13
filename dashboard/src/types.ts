@@ -39,6 +39,7 @@ export interface Fingerprint {
   last_seen: number;
   obs_count: number;
   is_baseline: boolean;
+  origin?: "local" | "imported";
 }
 
 export interface AttributedEvent {
