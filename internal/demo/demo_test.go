@@ -145,6 +145,7 @@ func TestGuidedScriptMentionsTabs(t *testing.T) {
 		"http://127.0.0.1:8844",
 		"#alerts",
 		"#reachability",
+		"#coverage",
 		"flatmap-stream",
 		"1,400",
 		"240",

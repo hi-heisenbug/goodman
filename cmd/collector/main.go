@@ -78,6 +78,7 @@ func main() {
 	diffEng := diff.NewEngine(st, rules)
 	srv := api.NewServer(st, fpEng, diffEng)
 	srv.Auth = api.AuthConfig{IngestToken: *ingestToken, APIToken: *apiToken}
+	srv.SetAlertBudget(*digestBudget)
 	if !srv.Auth.Enabled() {
 		log.Printf("WARNING: no GOODMAN_INGEST_TOKEN / GOODMAN_API_TOKEN set; the API is unauthenticated (fine locally, not in production)")
 	}

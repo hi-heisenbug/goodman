@@ -25,6 +25,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
+	"github.com/hi-heisenbug/goodman/internal/coverage"
 	"github.com/hi-heisenbug/goodman/internal/diff"
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/model"
@@ -51,6 +52,7 @@ type Server struct {
 	store   *store.Store
 	fpEng   *fingerprint.Engine
 	diffEng *diff.Engine
+	cover   *coverage.Registry
 
 	// Auth protects the HTTP surface; zero value leaves it open (local dev).
 	Auth AuthConfig
@@ -62,7 +64,18 @@ type Server struct {
 }
 
 func NewServer(s *store.Store, fpEng *fingerprint.Engine, diffEng *diff.Engine) *Server {
-	return &Server{store: s, fpEng: fpEng, diffEng: diffEng, subs: map[chan []byte]bool{}}
+	return &Server{
+		store: s, fpEng: fpEng, diffEng: diffEng,
+		cover: coverage.NewRegistry(),
+		subs:  map[chan []byte]bool{},
+	}
+}
+
+// SetAlertBudget configures the Coverage panel's soft daily alert target.
+func (s *Server) SetAlertBudget(n int) {
+	if s.cover != nil {
+		s.cover.SetAlertBudget(n)
+	}
 }
 
 func (s *Server) Router(ui fs.FS) http.Handler {
@@ -75,6 +88,8 @@ func (s *Server) Router(ui fs.FS) http.Handler {
 	})
 	r.Get("/v1/readyz", s.handleReadyz)
 	r.Post("/v1/events", requireToken(s.Auth.IngestToken, false, s.handleIngest))
+	r.Post("/v1/coverage", requireToken(s.Auth.IngestToken, false, s.handlePostCoverage))
+	r.Get("/v1/coverage", requireToken(s.Auth.APIToken, false, s.handleGetCoverage))
 	r.Get("/v1/alerts", requireToken(s.Auth.APIToken, false, s.handleListAlerts))
 	r.Post("/v1/alerts/{id}/ack", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertAcknowledged)))
 	r.Post("/v1/alerts/{id}/resolve", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertResolved)))
@@ -147,8 +162,16 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 			batch.Events[i].Sensor = batch.Sensor
 		}
 	}
+	if s.cover != nil {
+		s.cover.ObserveIngest(batch.Sensor, batch.Events, time.Now())
+	}
 
 	ctx := r.Context()
+	if len(batch.Events) == 0 {
+		// Heartbeat: sensor is alive but quiet.
+		writeJSON(w, http.StatusOK, map[string]any{"ingested": 0, "alerts": 0})
+		return
+	}
 	updates, err := s.fpEng.Ingest(ctx, batch.Events)
 	if err != nil {
 		log.Printf("api: ingest: %v", err)
@@ -333,6 +356,36 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// handleGetCoverage returns the Coverage and trust panel snapshot.
+func (s *Server) handleGetCoverage(w http.ResponseWriter, r *http.Request) {
+	now := time.Now()
+	since := uint64(now.Add(-24 * time.Hour).UnixNano())
+	n, err := s.store.CountAlertsSince(r.Context(), since)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.cover.Snapshot(now, n))
+}
+
+// handlePostCoverage accepts a namespace injection coverage report from a sensor.
+func (s *Server) handlePostCoverage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Sensor     string                       `json:"sensor"`
+		Namespaces []coverage.NamespaceCoverage `json:"namespaces"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&body); err != nil {
+		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if body.Sensor == "" {
+		http.Error(w, "sensor is required", http.StatusBadRequest)
+		return
+	}
+	s.cover.SetNamespaces(body.Sensor, body.Namespaces, time.Now())
+	writeJSON(w, http.StatusOK, map[string]any{"accepted": len(body.Namespaces)})
 }
 
 // handleStream is a server-sent-events feed of live events and alerts,

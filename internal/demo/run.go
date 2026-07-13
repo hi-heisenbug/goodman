@@ -2,7 +2,9 @@ package demo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -47,6 +49,7 @@ func GuidedScript(url string, attackDelay time.Duration) string {
 Dashboard:      %s
 Alerts:         %s/#alerts
 Reachability:   %s/#reachability
+Coverage:       %s/#coverage
 
 ── 60-second guided script ──────────────────────────────────
  0–10s  Open the Alerts tab. You already have CRITICAL drifts
@@ -62,12 +65,12 @@ Reachability:   %s/#reachability
         exfil connect. Watch the new CRITICAL row appear with
         secret-read and new-outbound-connect chips.
 
-%d+     Click the flatmap-stream alert. Evidence shows the
-        sensor, first-seen times, and matched rules — enough
-        to triage without leaving the page.
+%d+     Open Coverage: staging shows as an injection gap
+        (unlabeled, pods without NODE_OPTIONS). Attribution
+        success and alert-budget burn rate are on the KPI strip.
 ─────────────────────────────────────────────────────────────
 Press Ctrl-C to stop.
-`, url, url, url, int(attackDelay.Seconds())+25, attackDelay, int(attackDelay.Seconds())+25)
+`, url, url, url, url, int(attackDelay.Seconds())+25, attackDelay, int(attackDelay.Seconds())+25)
 }
 
 // Run starts a local collector, seeds the wow state, optionally fires the
@@ -154,6 +157,10 @@ func Run(ctx context.Context, opt Options) error {
 		return fmt.Errorf("reachability seed counts: declared=%d executed=%d (want %d/%d)",
 			rep.DeclaredCount, rep.ExecutedCount, DeclaredCount, ExecutedCount)
 	}
+	fmt.Fprintln(opt.Stdout, "Seeding coverage panel (incl. unlabeled staging gap)…")
+	if err := SeedCoverage(ctx, c); err != nil {
+		return err
+	}
 
 	if opt.Check {
 		return runCheck(ctx, c, opt)
@@ -193,6 +200,45 @@ func runCheck(ctx context.Context, c *Client, opt Options) error {
 	if stored.DeclaredCount != DeclaredCount || stored.ExecutedCount != ExecutedCount {
 		return fmt.Errorf("stored report: declared=%d executed=%d (want %d/%d)",
 			stored.DeclaredCount, stored.ExecutedCount, DeclaredCount, ExecutedCount)
+	}
+
+	covReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v1/coverage", nil)
+	if err != nil {
+		return err
+	}
+	covResp, err := c.HTTP.Do(covReq)
+	if err != nil {
+		return err
+	}
+	defer covResp.Body.Close()
+	if covResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("GET /v1/coverage: %s", covResp.Status)
+	}
+	var cov struct {
+		Namespaces []struct {
+			Name        string `json:"name"`
+			InjectLabel bool   `json:"inject_label"`
+			PodsWithout int    `json:"pods_without"`
+		} `json:"namespaces"`
+		Sensors []struct {
+			Name string `json:"name"`
+		} `json:"sensors"`
+	}
+	if err := json.NewDecoder(covResp.Body).Decode(&cov); err != nil {
+		return err
+	}
+	gapOK := false
+	for _, ns := range cov.Namespaces {
+		if ns.Name == "staging" && !ns.InjectLabel && ns.PodsWithout > 0 {
+			gapOK = true
+			break
+		}
+	}
+	if !gapOK {
+		return fmt.Errorf("check: staging injection gap missing from coverage: %+v", cov.Namespaces)
+	}
+	if len(cov.Sensors) == 0 {
+		return fmt.Errorf("check: expected demo sensor in coverage")
 	}
 
 	if err := FireEventStreamAttack(ctx, c); err != nil {

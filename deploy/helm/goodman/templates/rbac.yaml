@@ -11,9 +11,10 @@ metadata:
   name: {{ .Release.Name }}-sensor
   labels: {{- include "goodman.labels" . | nindent 4 }}
 rules:
-  # The sensor reads pod metadata to map cgroups -> service names.
+  # The sensor reads pod metadata to map cgroups -> service names, and lists
+  # namespaces to report injection coverage (goodman.io/inject label gaps).
   - apiGroups: [""]
-    resources: ["pods", "nodes"]
+    resources: ["pods", "nodes", "namespaces"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

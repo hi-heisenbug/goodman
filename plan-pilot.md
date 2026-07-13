@@ -6,10 +6,10 @@
 > partner into the first paid pilot. Work the phases **in order**; each has a
 > Definition of Done (DoD).
 
-## Status (2026-07-13): Phases 1–8 DONE; next is Phase 9
+## Status (2026-07-13): Phases 1–9 DONE — pilot path complete
 
-Phases 1–7 (detection quality + five-minute wow) and Phase 8 (pilot heartbeat)
-are built and tested on `main`.
+Phases 1–9 are built and tested on `main`. Remaining work is the release gate
+and GTM, not product gaps.
 
 | Phase | Shipped as |
 |---|---|
@@ -21,6 +21,7 @@ are built and tested on `main`.
 | 6. Perf benchmark + attribution KPI | `make bench` + `docs/performance.md` |
 | 7. Five-minute wow | `make demo` / `goodmanctl demo` / `make demo-check` |
 | 8. Pilot heartbeat | WoW deltas + weekly digest + Slack evidence |
+| 9. Coverage and trust panel | `GET /v1/coverage` + Coverage tab |
 
 Shipped beyond the plan this cycle:
 
@@ -35,8 +36,7 @@ Shipped beyond the plan this cycle:
 
 1. **Release gate** (see section below): push, tag `v0.2.0`, `sudo make e2e`
    on a real kernel.
-2. **Phase 9 below**: coverage and trust panel.
-3. **GTM execution.** Outreach, design-partner conversations, and the pilot
+2. **GTM execution.** Outreach, design-partner conversations, and the pilot
    agreement, tracked in the separate `gtm/` repo.
 
 ## Strategic frame
@@ -205,23 +205,24 @@ zero manual steps; the Reachability tab shows a trend, not just a point-in-time
 table; a CRITICAL alert in Slack contains enough evidence to triage without
 opening the dashboard.
 
-## Phase 9: Coverage and trust panel
+## Phase 9: Coverage and trust panel (DONE)
 
 Pilots die on silent gaps discovered late ("the service that mattered was
-never instrumented"). Give the champion a page that answers "is Goodman
-watching my workloads and can I trust its numbers" at a glance:
+never instrumented"). Shipped as the dashboard Coverage tab + `GET /v1/coverage`:
 
-- per-node sensor health (running, event rate, last seen)
-- per-namespace injection coverage: pods with and without NODE_OPTIONS, with
-  the webhook label state, so gaps are visible and fixable
-- live attribution KPI: `package` vs `<app>` vs `<unknown>` rates, plus the
-  top unattributed processes so `<unknown>` is actionable
-- alert budget: alerts per day against a stated target (default < 5), the
-  number a security lead uses to justify keeping the DaemonSet
+- per-node sensor health from ingest + empty-batch heartbeats (running /
+  stale, event rate, last seen)
+- per-namespace injection coverage: sensors list namespaces + pods (stdlib
+  in-cluster client; Helm RBAC now includes `namespaces`) and POST gaps;
+  unlabeled namespaces / pods without NODE_OPTIONS sort first with a gap chip
+- live attribution KPI: `package` vs `<app>` vs `<unknown>` success rate plus
+  top unattributed services (same shape as `docs/performance.md`)
+- alert budget: alerts in the last 24h vs target (default 5)
+- `make demo` seeds an unlabeled `staging` gap so the tab is never empty
 
-**DoD:** the dashboard has a Coverage tab; a deliberately uninstrumented
-namespace shows up as a gap; the attribution KPI matches the numbers in
-`docs/performance.md`; screenshots of this tab go into the pilot deck.
+**DoD:** Coverage tab shows a deliberate staging gap in `make demo-check`;
+attribution KPI matches the performance.md ratio shape; sensor heartbeats keep
+quiet nodes visible.
 
 ## Release gate (before the first pilot install)
 

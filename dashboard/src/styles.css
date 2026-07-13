@@ -1192,6 +1192,15 @@ button {
   background: var(--critical-bg);
 }
 
+.reach-table tr.gap-row td {
+  background: color-mix(in srgb, #c9a227 10%, transparent);
+}
+
+.reach-table td .rule-chip {
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
 .reach-table td.mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;

@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Alert, AlertStatus, Fingerprint, Report, ReportDelta, ReportRow, Severity } from "./types";
-import { ackAlert, buildReport, fetchAlerts, fetchFingerprints, fetchStoredReport, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
+import type { Alert, AlertStatus, CoverageSnapshot, Fingerprint, Report, ReportDelta, ReportRow, Severity } from "./types";
+import { ackAlert, buildReport, fetchAlerts, fetchCoverage, fetchFingerprints, fetchStoredReport, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
 
-type Tab = "alerts" | "fingerprints" | "reachability";
+type Tab = "alerts" | "fingerprints" | "reachability" | "coverage";
 type Tone = "critical" | "warning" | "good" | "accent" | "neutral";
 type IconName =
   | "activity"
@@ -818,6 +818,195 @@ function ReachabilityView() {
   );
 }
 
+function CoverageView() {
+  const [data, setData] = useState<CoverageSnapshot | null>(null);
+  const [err, setErr] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(() => {
+    fetchCoverage()
+      .then(setData)
+      .catch((e) => setErr(String(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  useEffect(() => {
+    load();
+    const id = setInterval(load, 5000);
+    return () => clearInterval(id);
+  }, [load]);
+
+  if (loading && !data) {
+    return (
+      <section className="view">
+        <EmptyState icon="activity" title="Loading coverage" body="Reading sensor health and injection state…" />
+      </section>
+    );
+  }
+  if (err && !data) {
+    return (
+      <section className="view">
+        <div className="error-banner">{err}</div>
+      </section>
+    );
+  }
+  if (!data) return null;
+
+  const atr = data.attribution;
+  const budget = data.alert_budget;
+  const successPct = Math.round(atr.success_rate * 1000) / 10;
+  const overBudget = budget.alerts_last_24h > budget.target_per_day;
+  const gaps = data.namespaces.filter((n) => !n.inject_label || n.pods_without > 0);
+
+  return (
+    <section className="view">
+      {err && <div className="error-banner">{err}</div>}
+      <div className="toolbar">
+        <div>
+          <h2>Coverage and trust</h2>
+          <p>Is Goodman watching your workloads, and can you trust the numbers?</p>
+        </div>
+      </div>
+
+      <div className="metrics-grid">
+        <MetricCard
+          label="Attribution success"
+          value={`${successPct}%`}
+          tone={successPct >= 80 ? "good" : successPct >= 50 ? "warning" : "critical"}
+          icon="shield"
+          detail={`${atr.package.toLocaleString()} pkg · ${atr.app.toLocaleString()} app · ${atr.unknown.toLocaleString()} unknown`}
+        />
+        <MetricCard
+          label="Alert budget"
+          value={budget.alerts_last_24h}
+          tone={overBudget ? "critical" : "good"}
+          icon="alert"
+          detail={`${budget.alerts_last_24h} / ${budget.target_per_day} target per day`}
+        />
+        <MetricCard
+          label="Sensors"
+          value={data.sensors.length}
+          tone={data.sensors.some((s) => s.status === "stale") ? "warning" : "accent"}
+          icon="activity"
+          detail={data.sensors.filter((s) => s.status === "running").length + " running"}
+        />
+        <MetricCard
+          label="Injection gaps"
+          value={gaps.length}
+          tone={gaps.length ? "warning" : "good"}
+          icon="cube"
+          detail={`${data.namespaces.length} namespaces reported`}
+        />
+      </div>
+
+      <div className="toolbar">
+        <div>
+          <h2>Sensor health</h2>
+          <p>Per-node last seen and event rate from heartbeats and ingest.</p>
+        </div>
+      </div>
+      {data.sensors.length === 0 ? (
+        <EmptyState icon="activity" title="No sensors yet" body="Sensors appear after the first event or heartbeat batch." />
+      ) : (
+        <div className="reach-table-wrap">
+          <table className="reach-table">
+            <thead>
+              <tr>
+                <th>Node</th>
+                <th>Status</th>
+                <th>Events/s</th>
+                <th>Total</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.sensors.map((s) => (
+                <tr key={s.name}>
+                  <td>
+                    <code>{s.name}</code>
+                  </td>
+                  <td>
+                    <span className={`rule-chip ${s.status === "running" ? "neutral" : "warning"}`}>{s.status}</span>
+                  </td>
+                  <td>{s.events_per_sec.toFixed(1)}</td>
+                  <td>{s.events_total.toLocaleString()}</td>
+                  <td>{s.last_seen ? new Date(s.last_seen / 1e6).toLocaleString() : "—"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <div className="toolbar">
+        <div>
+          <h2>Namespace injection</h2>
+          <p>
+            Namespaces labeled <code>goodman.io/inject=enabled</code> should have NODE_OPTIONS on every pod. Unlabeled
+            namespaces are coverage gaps.
+          </p>
+        </div>
+      </div>
+      {data.namespaces.length === 0 ? (
+        <EmptyState
+          icon="cube"
+          title="No namespace report yet"
+          body="In-cluster sensors POST coverage every few minutes. Local demo seeds a staging gap."
+        />
+      ) : (
+        <div className="reach-table-wrap">
+          <table className="reach-table">
+            <thead>
+              <tr>
+                <th>Namespace</th>
+                <th>Inject label</th>
+                <th>Pods</th>
+                <th>With NODE_OPTIONS</th>
+                <th>Without</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.namespaces.map((n) => {
+                const gap = !n.inject_label || n.pods_without > 0;
+                return (
+                  <tr key={n.name} className={gap ? "gap-row" : undefined}>
+                    <td>
+                      <code>{n.name}</code>
+                      {gap && <span className="rule-chip warning">gap</span>}
+                    </td>
+                    <td>{n.inject_label ? "enabled" : "missing"}</td>
+                    <td>{n.pods_total}</td>
+                    <td>{n.pods_with_node_options}</td>
+                    <td>{n.pods_without}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      {atr.top_unknown.length > 0 && (
+        <>
+          <div className="toolbar">
+            <div>
+              <h2>Top unattributed services</h2>
+              <p>Services producing the most <code>&lt;unknown&gt;</code> frames — actionable Tier-1 gaps.</p>
+            </div>
+          </div>
+          <div className="idle-list">
+            {atr.top_unknown.map((u) => (
+              <span className="idle-chip" key={u.service}>
+                {u.service} <em>×{u.count}</em>
+              </span>
+            ))}
+          </div>
+        </>
+      )}
+    </section>
+  );
+}
+
 // TokenGate blocks the workspace when the collector requires an API token
 // (GOODMAN_API_TOKEN) and none, or a wrong one, is stored locally.
 function TokenGate() {
@@ -863,8 +1052,8 @@ function TokenGate() {
 
 export function App() {
   const getHashTab = (): Tab => {
-    const h = window.location.hash.replace("#", "");
-    if (h === "fingerprints" || h === "reachability") return h;
+    const h = window.location.hash.replace("#", "").split("?")[0];
+    if (h === "fingerprints" || h === "reachability" || h === "coverage") return h;
     return "alerts";
   };
   const [tab, setTab] = useState<Tab>(getHashTab);
@@ -936,6 +1125,10 @@ export function App() {
             <Icon name="cube" />
             <span>Reachability</span>
           </button>
+          <button className={tab === "coverage" ? "active" : ""} onClick={() => setTab("coverage")}>
+            <Icon name="shield" />
+            <span>Coverage</span>
+          </button>
         </nav>
 
         <div className="side-panel">
@@ -960,7 +1153,9 @@ export function App() {
                 ? "Dependency drift review"
                 : tab === "fingerprints"
                   ? "Behavior fingerprint library"
-                  : "Runtime reachability report"}
+                  : tab === "coverage"
+                    ? "Coverage and trust"
+                    : "Runtime reachability report"}
             </h2>
           </div>
           <div className="monitor-pill">
@@ -970,7 +1165,15 @@ export function App() {
           </div>
         </header>
 
-        {tab === "alerts" ? <AlertsView /> : tab === "fingerprints" ? <FingerprintsView /> : <ReachabilityView />}
+        {tab === "alerts" ? (
+          <AlertsView />
+        ) : tab === "fingerprints" ? (
+          <FingerprintsView />
+        ) : tab === "coverage" ? (
+          <CoverageView />
+        ) : (
+          <ReachabilityView />
+        )}
       </main>
     </div>
   );

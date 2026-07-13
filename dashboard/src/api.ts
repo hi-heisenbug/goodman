@@ -1,4 +1,4 @@
-import type { Alert, Fingerprint, Report, StoredReport } from "./types";
+import type { Alert, CoverageSnapshot, Fingerprint, Report, StoredReport } from "./types";
 
 // The collector can require a bearer token on the API (GOODMAN_API_TOKEN).
 // The token is kept in localStorage; a 401 triggers the registered handler so
@@ -81,6 +81,12 @@ export async function fetchStoredReport(service?: string): Promise<StoredReport 
   const r = await request(u);
   if (r.status === 404) return null;
   if (!r.ok) throw new Error(`stored report: ${r.status}`);
+  return r.json();
+}
+
+export async function fetchCoverage(): Promise<CoverageSnapshot> {
+  const r = await request("/v1/coverage");
+  if (!r.ok) throw new Error(`coverage: ${r.status}`);
   return r.json();
 }
 

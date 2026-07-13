@@ -29,6 +29,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/hi-heisenbug/goodman/internal/attribute"
+	"github.com/hi-heisenbug/goodman/internal/coverage"
 	"github.com/hi-heisenbug/goodman/internal/loader"
 	"github.com/hi-heisenbug/goodman/internal/model"
 )
@@ -179,6 +180,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("collector TLS: %v", err)
 	}
+	go reportCoverageLoop(ctx, client, *collectorURL, *ingestToken, sensorName)
 	sendBatches(ctx, client, *collectorURL, *ingestToken, sensorName, out, *batchEvery, &dropped)
 }
 
@@ -207,10 +209,8 @@ func sendBatches(ctx context.Context, client *http.Client, baseURL, token, senso
 	defer t.Stop()
 
 	flush := func() {
-		if len(buf) == 0 {
-			return
-		}
 		batch := model.EventBatch{Sensor: sensor, Events: buf}
+		n := len(buf)
 		buf = nil
 		var body bytes.Buffer
 		gz := gzip.NewWriter(&body)
@@ -232,7 +232,7 @@ func sendBatches(ctx context.Context, client *http.Client, baseURL, token, senso
 		resp, err := client.Do(req)
 		if err != nil {
 			mBatches.WithLabelValues("error").Inc()
-			log.Printf("send batch (%d events): %v", len(batch.Events), err)
+			log.Printf("send batch (%d events): %v", n, err)
 			return
 		}
 		resp.Body.Close()
@@ -290,4 +290,48 @@ func envDurOr(k string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+// reportCoverageLoop posts namespace injection coverage to the collector when
+// running in-cluster. Outside a cluster it is a no-op (ScanClusterCoverage fails).
+func reportCoverageLoop(ctx context.Context, client *http.Client, baseURL, token, sensor string) {
+	interval := envDurOr("GOODMAN_COVERAGE_INTERVAL", 5*time.Minute)
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	report := func() {
+		rows, err := coverage.ScanClusterCoverage(sensor)
+		if err != nil {
+			return // not in cluster, or transient API error
+		}
+		body, err := json.Marshal(map[string]any{"sensor": sensor, "namespaces": rows})
+		if err != nil {
+			return
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/v1/coverage", bytes.NewReader(body))
+		if err != nil {
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			log.Printf("coverage report: %v", err)
+			return
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			log.Printf("coverage report: collector returned %s", resp.Status)
+		}
+	}
+	report()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			report()
+		}
+	}
 }

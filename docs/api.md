@@ -195,7 +195,41 @@ includes a week-over-week `delta`.
 }
 ```
 
+### `GET /v1/coverage`
+
+Requires the API token.
+
+Returns the Coverage and trust panel snapshot: per-node sensor health,
+attribution KPI (`package` / `<app>` / `<unknown>`), namespace injection gaps,
+and alert-budget burn rate (alerts in the last 24h vs target).
+
+```jsonc
+{
+  "sensors": [
+    {"name": "node-a", "status": "running", "last_seen": 1720000000000000000, "events_per_sec": 12.4, "events_total": 900}
+  ],
+  "attribution": {
+    "package": 1200, "app": 80, "unknown": 40,
+    "success_rate": 0.909,
+    "top_unknown": [{"service": "payments", "count": 22}]
+  },
+  "namespaces": [
+    {"name": "staging", "inject_label": false, "pods_total": 3, "pods_with_node_options": 0, "pods_without": 3}
+  ],
+  "alert_budget": {"target_per_day": 5, "alerts_last_24h": 2}
+}
+```
+
+### `POST /v1/coverage`
+
+Requires the ingest token. Sensors POST namespace injection coverage:
+
+```json
+{"sensor": "node-a", "namespaces": [{"name": "staging", "inject_label": false, "pods_total": 3, "pods_with_node_options": 0, "pods_without": 3}]}
+```
+
 ### `GET /v1/stream`
+
 
 Requires the API token via header or `?token=` (see Authentication).
 

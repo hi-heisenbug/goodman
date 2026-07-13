@@ -92,3 +92,34 @@ export interface StoredReport {
   };
   delta?: ReportDelta;
 }
+
+export interface CoverageSnapshot {
+  sensors: Array<{
+    name: string;
+    status: string;
+    last_seen: number;
+    events_per_sec: number;
+    events_total: number;
+  }>;
+  attribution: {
+    package: number;
+    app: number;
+    unknown: number;
+    success_rate: number;
+    top_unknown: Array<{ service: string; count: number }>;
+  };
+  namespaces: Array<{
+    name: string;
+    inject_label: boolean;
+    pods_total: number;
+    pods_with_node_options: number;
+    pods_without: number;
+    reported_by?: string;
+    reported_at?: number;
+  }>;
+  alert_budget: {
+    target_per_day: number;
+    alerts_last_24h: number;
+  };
+}
+

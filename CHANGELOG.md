@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Coverage and trust panel (Phase 9): `GET /v1/coverage` + dashboard Coverage
+  tab with sensor health, attribution KPI, namespace injection gaps, and
+  alert-budget burn rate. Sensors heartbeat on empty batches and POST
+  in-cluster namespace coverage; Helm sensor RBAC includes `namespaces`.
 - Pilot heartbeat (Phase 8): week-over-week reachability deltas on
   `GET /v1/report`, weekly digest delivery via the existing webhook
   (`-digest-interval`, Helm `notifications.digestInterval=168h`), and Slack

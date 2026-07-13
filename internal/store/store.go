@@ -430,6 +430,15 @@ func (s *Store) ListAlerts(ctx context.Context, status string) ([]model.Alert, e
 	return out, rows.Err()
 }
 
+// CountAlertsSince returns how many alerts (any status) were detected at or
+// after sinceNs. Used by the Coverage panel's alert-budget burn rate.
+func (s *Store) CountAlertsSince(ctx context.Context, sinceNs uint64) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM alerts WHERE detected_at >= $1`, sinceNs).Scan(&n)
+	return n, err
+}
+
 func (s *Store) SetAlertStatus(ctx context.Context, id, status string) error {
 	res, err := s.db.ExecContext(ctx, `UPDATE alerts SET status=$1 WHERE id=$2`, status, id)
 	if err != nil {
