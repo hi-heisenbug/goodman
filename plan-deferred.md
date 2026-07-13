@@ -6,19 +6,20 @@
 > Work the phases **in order**; each has a Definition of Done (DoD). Read
 > `AGENTS.md` before touching anything — every invariant there applies here.
 
-## Status (2026-07-13): Phases 0–3 DONE; Phase 2 build DONE; Phase 5a DONE; Phase 5 HA codepath DONE
+## Status (2026-07-13): Phases 1–4 DONE; Phase 5a + Phase 5 HA codepath DONE; Phase 6 scaffold DONE
 
 | Phase | Outcome |
 |---|---|
 | 0. Tier-2 research spike | **PARK (year-scale)** — `docs/research/tier2-attribution.md` |
-| 1. Collector durability | PVC + sensor RAM spool + recovery test |
+| 1. Collector durability | **DONE** — PVC + sensor RAM spool + recovery test |
 | 2. Python Tier-1 | **DONE** — shipped on `main`; `docs/attribution.md` + `docs/research/python-attribution-impl.md` |
-| 3. enforce=warn | `action` on rules + `would_block` + Coverage/digest |
+| 3. enforce=warn | **DONE** — `action` on rules + `would_block` + Coverage/digest |
+| 4. Multi-cluster fingerprint sharing | **DONE** — export/import + provenance |
 | 5a. Transactional fingerprint merge | **DONE** — `store.MergeFingerprint` + concurrency test |
 | 5. True HA collector | **DONE (codepath)** — advisory locks, transactional `UpsertAlert`, Helm HA; two-replica Postgres proof is human/CI follow-up — `docs/research/collector-ha.md`, `docs/release.md` |
-| 6 scaffold | **DONE** — `block` rule rejection, doctor LSM checks; kernel enforcement **PARK** — `docs/research/lsm-enforcement.md` |
+| 6 scaffold | **DONE** — `block` rule rejection, doctor LSM checks; kernel enforcement **PARK** until evidence gates — `docs/research/lsm-enforcement.md` |
 
-Next ungated product work: Phases 4–6 (full builds) stay trigger-gated (`plan-deferred.md`).
+Next: deferred product code is complete except Phase 6 kernel enforcement (gated); remaining work is the release gate (`docs/release.md`), GTM, and live HA / `sudo make e2e` proof.
 
 ## Sequencing rationale
 
