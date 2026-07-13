@@ -1,0 +1,78 @@
+{{- if .Values.webhook.enabled }}
+{{/*
+Self-signed serving cert for the admission webhook, valid for the in-cluster
+Service DNS name. The CA cert is injected into the webhook caBundle so the API
+server trusts it. On upgrade the existing Secret is reused (lookup) so the CA
+and serving cert stay stable; only a first install generates them. The CA is
+stored alongside the cert so the caBundle can be reconstructed on upgrade
+without regenerating (which would break the running webhook).
+*/}}
+{{- $svc := printf "%s-webhook" .Release.Name }}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (printf "%s-webhook-tls" .Release.Name) | default dict }}
+{{- $data := $existing.data | default dict }}
+{{- $tlsCrt := "" }}{{- $tlsKey := "" }}{{- $caCrt := "" }}
+{{- if and (index $data "tls.crt") (index $data "ca.crt") }}
+  {{- $tlsCrt = index $data "tls.crt" }}
+  {{- $tlsKey = index $data "tls.key" }}
+  {{- $caCrt = index $data "ca.crt" }}
+{{- else }}
+  {{- $altNames := list (printf "%s.%s.svc" $svc .Release.Namespace) (printf "%s.%s.svc.cluster.local" $svc .Release.Namespace) }}
+  {{- $ca := genCA (printf "%s-webhook-ca" .Release.Name) 3650 }}
+  {{- $cert := genSignedCert $svc nil $altNames 3650 $ca }}
+  {{- $tlsCrt = $cert.Cert | b64enc }}
+  {{- $tlsKey = $cert.Key | b64enc }}
+  {{- $caCrt = $ca.Cert | b64enc }}
+{{- end }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-webhook-tls
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $tlsCrt }}
+  tls.key: {{ $tlsKey }}
+  ca.crt: {{ $caCrt }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $svc }}
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/name: goodman
+    app.kubernetes.io/component: collector
+  ports:
+    - name: webhook
+      port: 443
+      targetPort: webhook
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{ .Release.Name }}-node-options
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+webhooks:
+  - name: node-options.goodman.io
+    admissionReviewVersions: ["v1"]
+    sideEffects: None
+    failurePolicy: {{ .Values.webhook.failurePolicy }}
+    # Only namespaces the operator opts in are touched.
+    namespaceSelector:
+      matchLabels:
+        goodman.io/inject: enabled
+    rules:
+      - apiGroups: [""]
+        apiVersions: ["v1"]
+        operations: ["CREATE"]
+        resources: ["pods"]
+        scope: Namespaced
+    clientConfig:
+      caBundle: {{ $caCrt }}
+      service:
+        name: {{ $svc }}
+        namespace: {{ .Release.Namespace }}
+        path: /mutate
+        port: 443
+{{- end }}

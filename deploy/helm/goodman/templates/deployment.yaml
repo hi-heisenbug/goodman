@@ -38,6 +38,11 @@ spec:
 {{- if .Values.rules }}
             - -rules=/etc/goodman/rules.json
 {{- end }}
+{{- if .Values.webhook.enabled }}
+            - -admission-listen=:{{ .Values.webhook.port }}
+            - -admission-tls-cert=/etc/goodman/webhook-tls/tls.crt
+            - -admission-tls-key=/etc/goodman/webhook-tls/tls.key
+{{- end }}
           env:
             - name: GOODMAN_DSN
               value: {{ include "goodman.collectorDSN" . | quote }}
@@ -76,6 +81,10 @@ spec:
           ports:
             - name: http
               containerPort: {{ .Values.collector.service.port }}
+{{- if .Values.webhook.enabled }}
+            - name: webhook
+              containerPort: {{ .Values.webhook.port }}
+{{- end }}
           readinessProbe:
             httpGet:
               path: /v1/readyz
@@ -105,6 +114,11 @@ spec:
               mountPath: /etc/goodman/tls
               readOnly: true
 {{- end }}
+{{- if .Values.webhook.enabled }}
+            - name: webhook-tls
+              mountPath: /etc/goodman/webhook-tls
+              readOnly: true
+{{- end }}
       volumes:
         - name: data
           emptyDir: {}
@@ -120,6 +134,11 @@ spec:
         - name: tls
           secret:
             secretName: {{ .Values.collector.tls.secretName }}
+{{- end }}
+{{- if .Values.webhook.enabled }}
+        - name: webhook-tls
+          secret:
+            secretName: {{ .Release.Name }}-webhook-tls
 {{- end }}
 ---
 apiVersion: v1

@@ -73,3 +73,36 @@ func TestHelmDefaultsUseReleaseImagesAndActionableNotes(t *testing.T) {
 		}
 	}
 }
+
+func TestHelmWebhookOnlyRendersWhenEnabled(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	// Default: no admission webhook objects.
+	out, err := exec.Command("helm", "template", "goodman", ".").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "MutatingWebhookConfiguration") {
+		t.Fatal("webhook must not render when disabled")
+	}
+
+	// Enabled: webhook config, TLS secret, service, and injected flags render.
+	out, err = exec.Command("helm", "template", "goodman", ".", "--set", "webhook.enabled=true").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template webhook: %v\n%s", err, out)
+	}
+	rendered := string(out)
+	for _, want := range []string{
+		"kind: MutatingWebhookConfiguration",
+		"goodman.io/inject: enabled",
+		"path: /mutate",
+		"-admission-listen=:8443",
+		"name: goodman-webhook-tls",
+		"caBundle:",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("enabled webhook missing %q\n%s", want, rendered)
+		}
+	}
+}

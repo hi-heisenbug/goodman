@@ -158,6 +158,9 @@ in [`deploy/helm/goodman/values.yaml`](../deploy/helm/goodman/values.yaml).
 | `notifications.minSeverity` | `WARN` | Lowest severity forwarded. |
 | `notifications.token` | `""` | Bearer token sent to the webhook. |
 | `retention` | `""` | Prune resolved alerts older than this Go duration (e.g. `720h`). |
+| `webhook.enabled` | `false` | Enable the NODE_OPTIONS mutating admission webhook (injects the perf-map flags into pods in namespaces labeled `goodman.io/inject=enabled`). |
+| `webhook.port` | `8443` | Port the collector serves the webhook on. |
+| `webhook.failurePolicy` | `Ignore` | `Ignore` never blocks pod creation if the collector is down; `Fail` is stricter. |
 
 Example production install:
 

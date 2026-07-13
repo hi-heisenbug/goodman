@@ -298,6 +298,11 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 - Do not weaken the auth default in the Helm chart. `auth.enabled: true` and
   the generated token Secret are the production posture; only local bare-binary
   runs may be tokenless.
+- The admission webhook (`internal/admission`) must fail open: a decode error
+  or unexpected object returns an allowed AdmissionReview, never a block. Its
+  mutation logic is pure and unit-tested; keep it that way (no cluster calls in
+  `Mutate`). The chart's webhook cert must stay stable across `helm upgrade`
+  (reused via `lookup`), or the running webhook breaks mid-upgrade.
 
 ### Dashboard and frontend
 

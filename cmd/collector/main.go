@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/hi-heisenbug/goodman/internal/admission"
 	"github.com/hi-heisenbug/goodman/internal/api"
 	"github.com/hi-heisenbug/goodman/internal/api/ui"
 	"github.com/hi-heisenbug/goodman/internal/diff"
@@ -41,6 +42,10 @@ func main() {
 		webhookMinSev = flag.String("webhook-min-severity", envOr("GOODMAN_WEBHOOK_MIN_SEVERITY", "WARN"), "lowest severity forwarded to the webhook (INFO|WARN|CRITICAL)")
 
 		retention = flag.Duration("retention", envDurOr("GOODMAN_RETENTION", 0), "prune resolved alerts older than this (0 = keep forever)")
+
+		admissionListen = flag.String("admission-listen", os.Getenv("GOODMAN_ADMISSION_LISTEN"), "serve the NODE_OPTIONS mutating webhook on this address (empty = disabled)")
+		admissionCert   = flag.String("admission-tls-cert", os.Getenv("GOODMAN_ADMISSION_TLS_CERT"), "PEM cert for the admission webhook (required when -admission-listen is set)")
+		admissionKey    = flag.String("admission-tls-key", os.Getenv("GOODMAN_ADMISSION_TLS_KEY"), "PEM key for the admission webhook")
 	)
 	flag.Parse()
 	log.SetPrefix("collector: ")
@@ -85,6 +90,16 @@ func main() {
 	if *retention > 0 {
 		go pruneLoop(ctx, st, *retention)
 		log.Printf("retention enabled: resolved alerts pruned after %s", *retention)
+	}
+
+	if *admissionListen != "" {
+		go func() {
+			log.Printf("admission webhook listening on %s (injects %s=%s)",
+				*admissionListen, admission.NodeOptionsEnv, admission.InjectedNodeOptions)
+			if err := admission.Serve(ctx, *admissionListen, *admissionCert, *admissionKey, admission.Handler()); err != nil && ctx.Err() == nil {
+				log.Fatalf("admission webhook: %v", err)
+			}
+		}()
 	}
 
 	var uiFS fs.FS

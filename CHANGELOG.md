@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event-stream, eslint-scope, ua-parser-js, and node-ipc npm supply-chain
   attacks, each asserting Goodman raises the expected CRITICAL alert. See
   `docs/replay-corpus.md`.
+- NODE_OPTIONS mutating admission webhook (`webhook.enabled=true`): injects the
+  Tier-1 perf-map flags into pods in namespaces labeled
+  `goodman.io/inject=enabled`, so no application manifest change is needed. It
+  appends to an existing NODE_OPTIONS, is idempotent, leaves valueFrom vars
+  alone, and serves over HTTPS with a chart-generated CA stable across upgrades.
 - `goodmanctl report`: the runtime reachability report. Parses a
   `package-lock.json` (v1/v2/v3), joins declared dependencies against packages
   Goodman observed executing, and optionally enriches with OSV.dev. Ranks
