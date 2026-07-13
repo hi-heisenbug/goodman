@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -478,5 +480,61 @@ func TestUpsertFingerprintPreservesImportedOrigin(t *testing.T) {
 	got, err := s.GetFingerprint(ctx, "web", "pkg", "1.0.0")
 	if err != nil || got.Origin != model.OriginImported || got.ObsCount != 20 {
 		t.Fatalf("origin not preserved through upsert: %+v err=%v", got, err)
+	}
+}
+
+func TestWithLeaderSQLiteAlwaysRuns(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	ran := false
+	if err := s.WithLeader(ctx, LockRetention, func(ctx context.Context) error {
+		ran = true
+		return nil
+	}); err != nil || !ran {
+		t.Fatalf("WithLeader on SQLite = (ran %v, err %v), want fn executed", ran, err)
+	}
+}
+
+func TestUpsertAlertConcurrentMerge(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	const N = 32
+	var wg sync.WaitGroup
+	wg.Add(N)
+	errCh := make(chan error, N)
+	for i := 0; i < N; i++ {
+		go func(i int) {
+			defer wg.Done()
+			b := fmt.Sprintf("READ /concurrent/%d/**", i)
+			rule := fmt.Sprintf("rule-%d", i)
+			_, err := s.UpsertAlert(ctx, &model.Alert{
+				ID: "concurrent-alert", Service: "web", Package: "pkg",
+				OldVersion: "1.0.0", NewVersion: "1.0.1",
+				Severity:     model.SeverityWarn,
+				NewBehaviors: []string{b},
+				MatchedRules: []string{rule},
+				DetectedAt:   uint64(i + 1), Status: model.AlertOpen,
+			})
+			if err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetAlert(ctx, "concurrent-alert")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.NewBehaviors) != N {
+		t.Fatalf("behaviors = %d, want union of %d", len(got.NewBehaviors), N)
+	}
+	if len(got.MatchedRules) != N {
+		t.Fatalf("matched_rules = %d, want union of %d", len(got.MatchedRules), N)
 	}
 }

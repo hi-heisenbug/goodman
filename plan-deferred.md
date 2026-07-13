@@ -6,7 +6,7 @@
 > Work the phases **in order**; each has a Definition of Done (DoD). Read
 > `AGENTS.md` before touching anything — every invariant there applies here.
 
-## Status (2026-07-13): Phases 0–3 DONE; Phase 2 build DONE; Phase 5a DONE
+## Status (2026-07-13): Phases 0–3 DONE; Phase 2 build DONE; Phase 5a DONE; Phase 5 HA codepath DONE
 
 | Phase | Outcome |
 |---|---|
@@ -14,7 +14,8 @@
 | 1. Collector durability | PVC + sensor RAM spool + recovery test |
 | 2. Python Tier-1 | **DONE** — shipped on `main`; `docs/attribution.md` + `docs/research/python-attribution-impl.md` |
 | 3. enforce=warn | `action` on rules + `would_block` + Coverage/digest |
-| 5a. Transactional fingerprint merge | **DONE** — `store.MergeFingerprint` + concurrency test; full HA still **PARK** — `docs/research/collector-ha.md` |
+| 5a. Transactional fingerprint merge | **DONE** — `store.MergeFingerprint` + concurrency test |
+| 5. True HA collector | **DONE (codepath)** — advisory locks, transactional `UpsertAlert`, Helm HA; two-replica Postgres proof is human/CI follow-up — `docs/research/collector-ha.md`, `docs/release.md` |
 | 6 scaffold | **DONE** — `block` rule rejection, doctor LSM checks; kernel enforcement **PARK** — `docs/research/lsm-enforcement.md` |
 
 Next ungated product work: Phases 4–6 (full builds) stay trigger-gated (`plan-deferred.md`).
@@ -376,16 +377,19 @@ rows carry provenance in API and UI; both dialects migrate; all gates green.
 
 ---
 
-## Phase 5: True HA collector (trigger-gated)
+## Phase 5: True HA collector
 
 > **Sub-step 5a (transactional fingerprint merge) is DONE** — see
-> `docs/research/collector-ha.md`. Full HA below remains **PARK** until the
-> annual-contract security-review trigger fires.
+> `docs/research/collector-ha.md`.
+>
+> **Phase 5 HA codepath is DONE (2026-07-13).** N replicas behind the Service,
+> Postgres required for `replicas > 1`, advisory-lock leader election for
+> singleton loops, transactional `UpsertAlert`, Helm PDB/anti-affinity. **Live
+> two-replica proof** against real Postgres remains a human/CI follow-up —
+> `docs/release.md`.
 
-**Gate:** a production (annual) contract's security review demands no single
-point of failure. Do not start this on a calendar. Phase 1 already bought the
-pilot-grade story ("restarts lose nothing, sensors buffer and retry, recovery
-is seconds") — lead with that in security reviews first.
+**Gate (historical):** a production (annual) contract's security review demands no single
+point of failure.
 
 **Goal.** `collector.replicas: N` behind the existing Service, Postgres
 required (SQLite is single-writer by design and stays the single-replica
@@ -443,6 +447,9 @@ CI or documented as a human step).
 **DoD:** 2 replicas ingest a replay corpus concurrently with identical final
 fingerprints and exactly one alert per scenario; killing either replica
 mid-ingest loses nothing; single-replica SQLite path still green end to end.
+
+**DoD status:** codepath shipped; two-replica Postgres proof documented as
+release gate in `docs/release.md` (not automated in CI).
 
 ---
 

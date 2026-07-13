@@ -451,40 +451,103 @@ func (s *Store) LatestBaseline(ctx context.Context, service, pkg, excludeVersion
 }
 
 // UpsertAlert inserts a new alert or merges new behaviors into an existing
-// open alert with the same deterministic id.
+// open alert with the same deterministic id. The merge runs inside a
+// transaction (Postgres SELECT FOR UPDATE) so concurrent replicas do not
+// lose merged behaviors.
 func (s *Store) UpsertAlert(ctx context.Context, a *model.Alert) (created bool, err error) {
-	existing, err := s.GetAlert(ctx, a.ID)
+	const maxAttempts = 4
+	for i := 0; i < maxAttempts; i++ {
+		var retry bool
+		created, retry, err = s.upsertAlertTx(ctx, a)
+		if err != nil || !retry {
+			return created, err
+		}
+	}
+	created, _, err = s.upsertAlertTx(ctx, a)
+	return created, err
+}
+
+func (s *Store) upsertAlertTx(ctx context.Context, a *model.Alert) (created bool, retry bool, err error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return false, err
+		return false, false, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	existing, err := s.getAlertForUpdate(ctx, tx, a.ID)
+	if err != nil {
+		return false, false, err
 	}
 	if existing != nil {
-		merged := mergeBehaviors(existing.NewBehaviors, a.NewBehaviors)
-		sev := maxSeverity(existing.Severity, a.Severity)
-		rules := mergeBehaviors(existing.MatchedRules, a.MatchedRules)
-		evidence := mergeEvidence(existing.Evidence, a.Evidence)
-		wouldBlock := existing.WouldBlock || a.WouldBlock
-		nbJSON, _ := json.Marshal(merged)
-		ruJSON, _ := json.Marshal(orEmpty(rules))
-		evJSON, _ := json.Marshal(evidence)
-		_, err := s.db.ExecContext(ctx,
-			`UPDATE alerts SET new_behaviors=$1, severity=$2, matched_rules=$3, evidence=$4, would_block=$5 WHERE id=$6`,
-			string(nbJSON), sev, string(ruJSON), string(evJSON), wouldBlock, a.ID)
-		a.WouldBlock = wouldBlock
-		a.MatchedRules = rules
-		a.NewBehaviors = merged
-		a.Evidence = evidence
-		a.Severity = sev
-		return false, err
+		mergeIntoAlert(existing, a)
+		if err := s.updateAlertRow(ctx, tx, a); err != nil {
+			return false, false, err
+		}
+		if err := tx.Commit(); err != nil {
+			return false, false, err
+		}
+		return false, false, nil
 	}
+
+	if err := s.insertAlertRow(ctx, tx, a); err != nil {
+		if isUniqueViolation(err) {
+			return false, true, nil
+		}
+		return false, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return false, false, err
+	}
+	return true, false, nil
+}
+
+func (s *Store) getAlertForUpdate(ctx context.Context, tx *sql.Tx, id string) (*model.Alert, error) {
+	q := `SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, would_block, detected_at, status
+	      FROM alerts WHERE id=$1`
+	if s.dialect == "postgres" {
+		q += ` FOR UPDATE`
+	}
+	return scanAlert(tx.QueryRowContext(ctx, q, id))
+}
+
+func mergeIntoAlert(existing, incoming *model.Alert) {
+	incoming.WouldBlock = existing.WouldBlock || incoming.WouldBlock
+	incoming.MatchedRules = mergeBehaviors(existing.MatchedRules, incoming.MatchedRules)
+	incoming.NewBehaviors = mergeBehaviors(existing.NewBehaviors, incoming.NewBehaviors)
+	incoming.Evidence = mergeEvidence(existing.Evidence, incoming.Evidence)
+	incoming.Severity = maxSeverity(existing.Severity, incoming.Severity)
+}
+
+func (s *Store) updateAlertRow(ctx context.Context, tx *sql.Tx, a *model.Alert) error {
 	nbJSON, _ := json.Marshal(a.NewBehaviors)
 	ruJSON, _ := json.Marshal(orEmpty(a.MatchedRules))
 	evJSON, _ := json.Marshal(orEmptyEvidence(a.Evidence))
-	_, err = s.db.ExecContext(ctx, `
+	_, err := tx.ExecContext(ctx,
+		`UPDATE alerts SET new_behaviors=$1, severity=$2, matched_rules=$3, evidence=$4, would_block=$5 WHERE id=$6`,
+		string(nbJSON), a.Severity, string(ruJSON), string(evJSON), a.WouldBlock, a.ID)
+	return err
+}
+
+func (s *Store) insertAlertRow(ctx context.Context, tx *sql.Tx, a *model.Alert) error {
+	nbJSON, _ := json.Marshal(a.NewBehaviors)
+	ruJSON, _ := json.Marshal(orEmpty(a.MatchedRules))
+	evJSON, _ := json.Marshal(orEmptyEvidence(a.Evidence))
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO alerts (id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, would_block, detected_at, status)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		a.ID, a.Service, a.Package, a.OldVersion, a.NewVersion, a.Severity,
 		string(nbJSON), string(ruJSON), string(evJSON), a.WouldBlock, a.DetectedAt, a.Status)
-	return err == nil, err
+	return err
+}
+
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "UNIQUE constraint") ||
+		strings.Contains(msg, "duplicate key") ||
+		strings.Contains(msg, "23505")
 }
 
 func orEmpty(s []string) []string {

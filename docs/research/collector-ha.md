@@ -1,14 +1,10 @@
-# Research: true HA collector (Phase 5) — PARK, except sub-step 5a
+# Research: true HA collector (Phase 5)
 
-> **Status:** research decision (2026-07-13) for `plan-deferred.md` Phase 5.
-> **Decision: PARK full HA** — the trigger (an annual contract's security
-> review demanding no single point of failure) has not fired. Phase 1 already
-> bought the pilot-grade story: PVC-backed store, sensor RAM spool + retry,
-> recovery in seconds. Lead with that in security reviews.
->
-> **Exception pulled forward: sub-step 5a** — the fingerprint
-> read-modify-write race is a *current* single-replica correctness bug, not
-> an HA feature. Fix it now; it also happens to be the first brick of HA.
+> **Status (2026-07-13):** Phase 5 HA **scaffolding shipped** — N replicas,
+> Postgres advisory-lock leader election, transactional alert upsert, Helm PDB +
+> anti-affinity. Sub-step 5a (`MergeFingerprint`) was the first brick. **Two-
+> replica live proof** against real Postgres still needs a human or staging CI
+> run — see `docs/release.md`.
 
 ## 5a. The fingerprint ingest race (exists today, single replica)
 
@@ -85,19 +81,19 @@ Helm changes.
 (plus `make bench` to confirm no ingest regression — the transaction adds
 one round trip per touched key per batch).
 
-## Full HA (parked; design direction for when the trigger fires)
+## Full HA (shipped codepath; live proof pending)
 
-Recorded so the estimate is honest when a security review asks.
+Recorded design — now implemented except the dockerized two-replica proof.
 
-| Piece | Design | Size |
+| Piece | Design | Status |
 |---|---|---|
-| N replicas | `collector.replicas: N` behind the existing Service; **Postgres required** — fail fast at startup when replicas>1 is implied and the DSN is SQLite (single-writer by design, stays the single-replica path) | 2–3 d incl. Helm (replicas guard, PDB, anti-affinity) |
-| Concurrent ingest | 5a's `MergeFingerprint` already correct cross-replica on Postgres (`FOR UPDATE`); add the create-race retry loop; `UpsertAlert` → transactional or `ON CONFLICT` merge keyed on the deterministic `alertID` | 2–3 d |
-| Singleton background loops | `pruneLoop`, `reachabilityLoop`, `digestLoop` (`cmd/collector/main.go`) must not double-fire (double webhooks/digests). Postgres advisory-lock leader election — no new dependency | 3–4 d |
-| SSE | per-replica streams: a client sees events ingested by *its* replica only. Acceptable as a documented round-one limitation (the dashboard polls REST for state; SSE is live flavor) | 0.5 d (docs) or 1 wk (store-tailing fan-out) — start with docs |
-| readyz | unchanged semantics (DB ping) work per-replica already | 0 |
-| Migrations | `migrate()` already tolerates concurrent replica startup (`ON CONFLICT (name) DO NOTHING` on `schema_migrations`) — verify with a two-replica startup test | 0.5 d |
-| Proof | two replicas ingest the replay corpus concurrently → identical final fingerprints, exactly one alert per scenario; kill either replica mid-ingest → nothing lost; SQLite single-replica path still green | 3–4 d |
+| N replicas | `collector.replicas: N` behind the existing Service; **Postgres required** — fail fast at startup when replicas>1 is implied and the DSN is SQLite (single-writer by design, stays the single-replica path) | **Shipped** — Helm guard, `GOODMAN_HA_REPLICAS`, collector fatals on SQLite+N>1 |
+| Concurrent ingest | 5a's `MergeFingerprint` already correct cross-replica on Postgres (`FOR UPDATE`); `UpsertAlert` transactional merge keyed on deterministic `alertID` | **Shipped** — create-race retry loop in `UpsertAlert`; concurrency test on SQLite |
+| Singleton background loops | `pruneLoop`, `reachabilityLoop`, `digestLoop` (`cmd/collector/main.go`) must not double-fire (double webhooks/digests). Postgres advisory-lock leader election — no new dependency | **Shipped** — `store.WithLeader`, lock keys 1/2/3 |
+| SSE | per-replica streams: a client sees events ingested by *its* replica only. Acceptable as a documented round-one limitation (the dashboard polls REST for state; SSE is live flavor) | **Shipped (docs)** — `docs/deployment.md` HA section |
+| readyz | unchanged semantics (DB ping) work per-replica already | **Shipped** |
+| Migrations | `migrate()` already tolerates concurrent replica startup (`ON CONFLICT (name) DO NOTHING` on `schema_migrations`) — verify with a two-replica startup test | **Shipped** (codepath); explicit two-replica startup test not added |
+| Proof | two replicas ingest the replay corpus concurrently → identical final fingerprints, exactly one alert per scenario; kill either replica mid-ingest → nothing lost; SQLite single-replica path still green | **Human/CI follow-up** — `docs/release.md` |
 
 **Total: 2–4 weeks**, matching plan-deferred. DoD as written there.
 

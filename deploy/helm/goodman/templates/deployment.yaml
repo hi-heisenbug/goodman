@@ -1,3 +1,6 @@
+{{- if and (gt (int .Values.collector.replicas) 1) (not .Values.postgres.dsn) }}
+{{- fail "collector.replicas > 1 requires postgres.dsn (SQLite is single-replica only)" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -15,6 +18,18 @@ spec:
         app.kubernetes.io/name: goodman
         app.kubernetes.io/component: collector
     spec:
+{{- if gt (int .Values.collector.replicas) 1 }}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels:
+                    app.kubernetes.io/name: goodman
+                    app.kubernetes.io/component: collector
+{{- end }}
       securityContext:
         runAsNonRoot: true
         runAsUser: 65532
@@ -46,6 +61,8 @@ spec:
           env:
             - name: GOODMAN_DSN
               value: {{ include "goodman.collectorDSN" . | quote }}
+            - name: GOODMAN_HA_REPLICAS
+              value: {{ .Values.collector.replicas | quote }}
             - name: GOODMAN_LEARN_OBS
               valueFrom: { configMapKeyRef: { name: {{ .Release.Name }}-config, key: learn_obs } }
             - name: GOODMAN_LEARN_MIN_AGE
@@ -139,7 +156,7 @@ spec:
 {{- end }}
       volumes:
         - name: data
-{{- if and .Values.store.persistence.enabled (not .Values.postgres.dsn) }}
+{{- if and .Values.store.persistence.enabled (not .Values.postgres.dsn) (le (int .Values.collector.replicas) 1) }}
 {{- if .Values.store.persistence.existingClaim }}
           persistentVolumeClaim:
             claimName: {{ .Values.store.persistence.existingClaim | quote }}

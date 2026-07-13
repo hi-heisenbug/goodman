@@ -65,8 +65,14 @@ Runs on every node (a privileged DaemonSet in Kubernetes, or as root locally).
 
 ### Collector (`cmd/collector`)
 
-One replica (stateless except for the store). Serves everything the outside world
-touches.
+Serves everything the outside world touches: ingest, fingerprint aggregation,
+diff, alerts API, SSE stream, embedded dashboard, and Prometheus metrics. In
+production you may run **N replicas** behind the existing Service when backed
+by Postgres (`GOODMAN_HA_REPLICAS` / `collector.replicas`); SQLite remains the
+single-replica dev/pilot path. Singleton side-effecting loops (retention prune,
+reachability refresh, weekly digest) use Postgres advisory-lock leader election
+so only one replica fires per tick. Concurrent ingest uses transactional
+`MergeFingerprint` and `UpsertAlert` (row locks on Postgres).
 
 - `POST /v1/events` ingests batches, runs fingerprint aggregation
   (`internal/fingerprint`), then the diff engine (`internal/diff`).

@@ -233,3 +233,41 @@ What this does:
 
 Move `baselines.json` yourself (copy, object store, CI artifact — whatever
 fits your ops model). Goodman does not ship a sync daemon.
+
+## High availability (N collector replicas)
+
+Run multiple collector replicas when a security review demands no single point
+of failure. **Postgres is required** — SQLite is single-writer and the
+collector fails fast at startup when `GOODMAN_HA_REPLICAS` (or `-ha-replicas`)
+is greater than 1 and the DSN is SQLite.
+
+```bash
+helm upgrade goodman deploy/helm/goodman \
+  --set collector.replicas=2 \
+  --set postgres.dsn='postgres://goodman:secret@db:5432/goodman?sslmode=require'
+```
+
+The chart enforces `postgres.dsn` when `collector.replicas > 1`, sets
+`GOODMAN_HA_REPLICAS` to the replica count, renders a PodDisruptionBudget
+(`minAvailable: 1`), and prefers spreading collector pods across nodes. SQLite
+PVC persistence is not used when replicas exceed 1.
+
+**Concurrent ingest.** Fingerprint merges and alert upserts are transactional
+(`MergeFingerprint`, hardened `UpsertAlert`) so two replicas ingesting the same
+package converge instead of last-writer-wins.
+
+**Singleton background work.** Retention prune, reachability refresh, and the
+weekly digest acquire Postgres advisory locks (`store.LockRetention`,
+`LockReachability`, `LockDigest`) so only one replica runs each loop per tick.
+Non-leaders skip that tick and retry on the next — digests and webhooks are not
+doubled.
+
+**SSE limitation.** Each replica tails its own in-process ingest stream. A client
+connected to replica A sees live events ingested by A only. The dashboard also
+polls REST (`/v1/alerts`, `/v1/fingerprints`) for authoritative state, so
+operational workflows stay correct; SSE is live flavor, not the source of truth.
+
+**Proof still human/CI.** A two-replica concurrent replay against real Postgres
+(dockerized or staging) remains the release gate — see `docs/release.md`. SQLite
+single-replica paths stay fully green in CI (`make test`, `make smoke`,
+`make replay`).

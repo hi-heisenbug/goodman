@@ -29,6 +29,7 @@ variables take precedence over built-in defaults.
 | `-reachability-osv` | `GOODMAN_REACHABILITY_OSV` | `false` | Enrich scheduled reachability recomputes with OSV.dev (needs egress). |
 | `-digest-interval` | `GOODMAN_DIGEST_INTERVAL` | `0` | Emit a weekly digest to the webhook on this cadence (`168h` = weekly). `0` = disabled. Requires `-webhook-url`. Fires once at startup. |
 | `-digest-alert-budget` | `GOODMAN_DIGEST_ALERT_BUDGET` | `5` | Soft open-alert noise target quoted in the digest. |
+| `-ha-replicas` | `GOODMAN_HA_REPLICAS` | `1` | Expected collector replica count. When `>1`, Postgres is required and singleton background loops use advisory-lock leader election. Helm sets this from `collector.replicas`. |
 
 **Learning window.** A `(service, package, version)` fingerprint becomes a
 baseline only when it has been observed `learn-obs` times **and** spans at least
@@ -176,7 +177,7 @@ in [`deploy/helm/goodman/values.yaml`](../deploy/helm/goodman/values.yaml).
 | `sensor.extraComms` | `""` | Extra process names to watch. |
 | `sensor.spoolEvents` | `50000` | Sensor in-memory retry spool when the collector is down. |
 | `sensor.metricsPort` | `9478` | Sensor Prometheus port. |
-| `collector.replicas` | `1` | Collector replica count. |
+| `collector.replicas` | `1` | Collector replica count. Values `>1` require `postgres.dsn`, set `GOODMAN_HA_REPLICAS`, render a PodDisruptionBudget (`minAvailable: 1`), and prefer spreading collectors across nodes. SQLite PVC persistence is disabled when replicas `>1`. |
 | `collector.service.type` / `.port` | `ClusterIP` / `8844` | Collector service. |
 | `postgres.dsn` | `""` | Postgres DSN; empty → embedded SQLite. |
 | `postgres.sqlitePath` | `/data/goodman.db` | SQLite path (when `dsn` is empty). |

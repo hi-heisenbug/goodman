@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- True HA collector (deferred Phase 5): `GOODMAN_HA_REPLICAS` / `-ha-replicas`
+  with Postgres required when `>1`; `store.WithLeader` Postgres advisory locks
+  for retention/reachability/digest loops; transactional `UpsertAlert` with
+  concurrency test; Helm fails when `collector.replicas > 1` without
+  `postgres.dsn`, sets HA env, PodDisruptionBudget, and pod anti-affinity.
+  SSE per-replica limitation documented. Two-replica live Postgres proof is a
+  human/CI follow-up — `docs/release.md`. Redis not added.
 - Multi-cluster baseline export/import (deferred Phase 4): `GET
   /v1/fingerprints/export` and `POST /v1/fingerprints/import` (API token);
   `goodmanctl fingerprints export|import`; `origin` provenance on fingerprints
@@ -18,8 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   wraps read-modify-write in a transaction (Postgres `SELECT FOR UPDATE`;
   SQLite tx-only). `fingerprint.Engine.Ingest` uses it so concurrent ingests
   union behaviors and sum `obs_count` instead of last-writer-wins. Concurrency
-  test in `internal/fingerprint`. Full HA (replicas, leader election, Redis)
-  remains parked — `docs/research/collector-ha.md`.
+  test in `internal/fingerprint`. Full HA replicas + leader election shipped
+  in Phase 5 — `docs/research/collector-ha.md`, `docs/deployment.md`.
 - Phase 6 scaffold (no `bpf/` changes): `action: "block"` fails rule loading
   with an explicit enforcement-not-shipped message; `make doctor` adds warn-level
   `CONFIG_BPF_LSM` and active-LSM checks; posture documented in

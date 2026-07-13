@@ -148,3 +148,45 @@ func TestHelmSQLitePersistencePVC(t *testing.T) {
 		t.Fatal("PVC must not render when postgres.dsn is set")
 	}
 }
+
+func TestHelmHAReplicasRequirePostgres(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	out, err := exec.Command("helm", "template", "goodman", ".",
+		"--set", "collector.replicas=2").CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected helm template to fail without postgres.dsn:\n%s", out)
+	}
+	if !strings.Contains(string(out), "postgres.dsn") {
+		t.Fatalf("expected postgres.dsn error, got:\n%s", out)
+	}
+}
+
+func TestHelmHAReplicasWithPostgres(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	out, err := exec.Command("helm", "template", "goodman", ".",
+		"--set", "collector.replicas=2",
+		"--set", "postgres.dsn=postgres://goodman:secret@db:5432/goodman").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template HA: %v\n%s", err, out)
+	}
+	rendered := string(out)
+	for _, want := range []string{
+		"kind: PodDisruptionBudget",
+		"minAvailable: 1",
+		"GOODMAN_HA_REPLICAS",
+		`value: "2"`,
+		"podAntiAffinity:",
+		"kubernetes.io/hostname",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("HA render missing %q\n%s", want, rendered)
+		}
+	}
+	if strings.Contains(rendered, "kind: PersistentVolumeClaim") {
+		t.Fatal("PVC must not render when replicas>1 even without postgres.dsn guard path")
+	}
+}

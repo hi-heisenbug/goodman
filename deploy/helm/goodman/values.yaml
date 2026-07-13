@@ -23,6 +23,8 @@ collector:
   image: ghcr.io/hi-heisenbug/collector:0.1.0
   imagePullPolicy: IfNotPresent
   replicas: 1
+  # Values >1 require postgres.dsn (chart fails otherwise). Sets GOODMAN_HA_REPLICAS,
+  # renders a PodDisruptionBudget, and prefers spreading collectors across nodes.
   service:
     type: ClusterIP
     port: 8844

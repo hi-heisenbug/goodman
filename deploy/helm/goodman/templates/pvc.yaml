@@ -1,4 +1,4 @@
-{{- if and .Values.store.persistence.enabled (not .Values.postgres.dsn) (not .Values.store.persistence.existingClaim) }}
+{{- if and .Values.store.persistence.enabled (not .Values.postgres.dsn) (not .Values.store.persistence.existingClaim) (le (int .Values.collector.replicas) 1) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:

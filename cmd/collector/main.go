@@ -53,6 +53,8 @@ func main() {
 		digestInterval = flag.Duration("digest-interval", envDurOr("GOODMAN_DIGEST_INTERVAL", 0), "emit a weekly digest to the webhook on this cadence (0 = disabled; requires -webhook-url)")
 		digestBudget   = flag.Int("digest-alert-budget", envIntOr("GOODMAN_DIGEST_ALERT_BUDGET", digest.DefaultAlertBudget), "soft open-alert budget quoted in the digest")
 
+		haReplicas = flag.Int("ha-replicas", envIntOr("GOODMAN_HA_REPLICAS", 1), "expected collector replica count for HA (Postgres required when >1)")
+
 		admissionListen = flag.String("admission-listen", os.Getenv("GOODMAN_ADMISSION_LISTEN"), "serve the NODE_OPTIONS mutating webhook on this address (empty = disabled)")
 		admissionCert   = flag.String("admission-tls-cert", os.Getenv("GOODMAN_ADMISSION_TLS_CERT"), "PEM cert for the admission webhook (required when -admission-listen is set)")
 		admissionKey    = flag.String("admission-tls-key", os.Getenv("GOODMAN_ADMISSION_TLS_KEY"), "PEM key for the admission webhook")
@@ -68,6 +70,13 @@ func main() {
 		log.Fatalf("open store: %v", err)
 	}
 	defer st.Close()
+
+	if *haReplicas > 1 && st.Dialect() != "postgres" {
+		log.Fatalf("HA collector (%d replicas) requires Postgres; SQLite is single-replica only (set GOODMAN_DSN=postgres://...)", *haReplicas)
+	}
+	if *haReplicas > 1 {
+		log.Printf("HA mode: %d replicas expected; singleton loops use Postgres advisory locks", *haReplicas)
+	}
 
 	rules, err := diff.LoadRules(*rulesPath)
 	if err != nil {
@@ -103,12 +112,12 @@ func main() {
 
 	if *retention > 0 {
 		go pruneLoop(ctx, st, *retention)
-		log.Printf("retention enabled: resolved alerts pruned after %s", *retention)
+		log.Printf("retention enabled: resolved alerts pruned after %s (leader-elected when HA)", *retention)
 	}
 
 	if *reachInterval > 0 {
 		go reachabilityLoop(ctx, st, *reachInterval, *reachOSV)
-		log.Printf("reachability refresh enabled: every %s (osv=%t)", *reachInterval, *reachOSV)
+		log.Printf("reachability refresh enabled: every %s (osv=%t; leader-elected when HA)", *reachInterval, *reachOSV)
 	}
 
 	if *digestInterval > 0 {
@@ -116,7 +125,7 @@ func main() {
 			log.Printf("WARNING: -digest-interval set but -webhook-url is empty; digest delivery disabled")
 		} else {
 			go digestLoop(ctx, st, notifier, *digestInterval, *digestBudget, *publicURL)
-			log.Printf("weekly digest enabled: every %s (alert budget %d)", *digestInterval, *digestBudget)
+			log.Printf("weekly digest enabled: every %s (alert budget %d; leader-elected when HA)", *digestInterval, *digestBudget)
 		}
 	}
 
@@ -154,13 +163,19 @@ func pruneLoop(ctx context.Context, st *store.Store, retention time.Duration) {
 	defer t.Stop()
 	for {
 		pruneCtx, cancel := context.WithTimeout(ctx, time.Minute)
-		n, err := st.PruneResolvedAlerts(pruneCtx, time.Now().Add(-retention))
+		err := st.WithLeader(pruneCtx, store.LockRetention, func(runCtx context.Context) error {
+			n, err := st.PruneResolvedAlerts(runCtx, time.Now().Add(-retention))
+			switch {
+			case err != nil && ctx.Err() == nil:
+				log.Printf("retention: prune failed: %v", err)
+			case n > 0:
+				log.Printf("retention: pruned %d resolved alerts older than %s", n, retention)
+			}
+			return err
+		})
 		cancel()
-		switch {
-		case err != nil && ctx.Err() == nil:
-			log.Printf("retention: prune failed: %v", err)
-		case n > 0:
-			log.Printf("retention: pruned %d resolved alerts older than %s", n, retention)
+		if err != nil && ctx.Err() == nil {
+			log.Printf("retention: leader lock: %v", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -180,29 +195,35 @@ func reachabilityLoop(ctx context.Context, st *store.Store, interval time.Durati
 		func() {
 			runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
 			defer cancel()
-			lockfiles, err := st.ListLockfiles(runCtx)
-			if err != nil {
-				if ctx.Err() == nil {
-					log.Printf("reachability: list lockfiles: %v", err)
+			err := st.WithLeader(runCtx, store.LockReachability, func(leaderCtx context.Context) error {
+				lockfiles, err := st.ListLockfiles(leaderCtx)
+				if err != nil {
+					if ctx.Err() == nil {
+						log.Printf("reachability: list lockfiles: %v", err)
+					}
+					return err
 				}
-				return
-			}
-			if len(lockfiles) == 0 {
-				return
-			}
-			refresh := make([]report.Lockfile, len(lockfiles))
-			for i, lf := range lockfiles {
-				refresh[i] = report.Lockfile{Service: lf.Service, Content: lf.Content}
-			}
-			var osvClient *report.OSVClient
-			if osv {
-				osvClient = report.NewOSVClient()
-			}
-			n, err := report.RefreshAll(runCtx, st, refresh, osvClient, uint64(time.Now().UnixNano()))
+				if len(lockfiles) == 0 {
+					return nil
+				}
+				refresh := make([]report.Lockfile, len(lockfiles))
+				for i, lf := range lockfiles {
+					refresh[i] = report.Lockfile{Service: lf.Service, Content: lf.Content}
+				}
+				var osvClient *report.OSVClient
+				if osv {
+					osvClient = report.NewOSVClient()
+				}
+				n, err := report.RefreshAll(leaderCtx, st, refresh, osvClient, uint64(time.Now().UnixNano()))
+				if err != nil && ctx.Err() == nil {
+					log.Printf("reachability: refresh: %v", err)
+				} else if n > 0 {
+					log.Printf("reachability: refreshed %d service report(s)", n)
+				}
+				return err
+			})
 			if err != nil && ctx.Err() == nil {
-				log.Printf("reachability: refresh: %v", err)
-			} else if n > 0 {
-				log.Printf("reachability: refreshed %d service report(s)", n)
+				log.Printf("reachability: leader lock: %v", err)
 			}
 		}()
 		select {
@@ -222,28 +243,34 @@ func digestLoop(ctx context.Context, st *store.Store, n *notify.Notifier, interv
 		func() {
 			runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 			defer cancel()
-			d, err := digest.Build(runCtx, st, budget, publicURL)
-			if err != nil {
-				if ctx.Err() == nil {
-					log.Printf("digest: build: %v", err)
+			err := st.WithLeader(runCtx, store.LockDigest, func(leaderCtx context.Context) error {
+				d, err := digest.Build(leaderCtx, st, budget, publicURL)
+				if err != nil {
+					if ctx.Err() == nil {
+						log.Printf("digest: build: %v", err)
+					}
+					return err
 				}
-				return
+				var payload []byte
+				if n.Format() == notify.FormatSlack {
+					payload, err = json.Marshal(d.SlackPayload())
+				} else {
+					payload, err = json.Marshal(d.GenericPayload())
+				}
+				if err != nil {
+					log.Printf("digest: encode: %v", err)
+					return err
+				}
+				if err := n.PostJSON(leaderCtx, payload); err != nil && ctx.Err() == nil {
+					log.Printf("digest: deliver: %v", err)
+					return err
+				}
+				log.Printf("digest: delivered (open alerts=%d, executed=%d)", d.OpenAlerts, d.ExecutedCount)
+				return nil
+			})
+			if err != nil && ctx.Err() == nil {
+				log.Printf("digest: leader lock: %v", err)
 			}
-			var payload []byte
-			if n.Format() == notify.FormatSlack {
-				payload, err = json.Marshal(d.SlackPayload())
-			} else {
-				payload, err = json.Marshal(d.GenericPayload())
-			}
-			if err != nil {
-				log.Printf("digest: encode: %v", err)
-				return
-			}
-			if err := n.PostJSON(runCtx, payload); err != nil && ctx.Err() == nil {
-				log.Printf("digest: deliver: %v", err)
-				return
-			}
-			log.Printf("digest: delivered (open alerts=%d, executed=%d)", d.OpenAlerts, d.ExecutedCount)
 		}()
 		select {
 		case <-ctx.Done():
