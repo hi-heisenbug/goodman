@@ -83,6 +83,10 @@ smoke: build ## Backend-only smoke test (no root needed)
 replay: ## Replay real npm supply-chain attacks and assert each is caught (no root)
 	go test ./test/replay/ -v -count=1
 
+.PHONY: bench
+bench: ## Benchmark the collector ingest pipeline and canonicalization (no root)
+	go test -run='^$$' -bench=. -benchmem ./internal/fingerprint/ ./internal/attribute/
+
 .PHONY: demo
 demo: build ## Start a no-root local product demo with seeded alerts and fingerprints
 	bash scripts/demo.sh

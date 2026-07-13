@@ -149,6 +149,7 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make test` | `go test ./...` (unit tests, all packages) | no |
 | `make smoke` | Backend end-to-end via synthetic events → asserts one CRITICAL alert | **no** |
 | `make replay` | Replay real npm attacks (event-stream, eslint-scope, ua-parser-js, node-ipc); assert each is caught | **no** |
+| `make bench` | Benchmark the collector ingest pipeline and canonicalization | **no** |
 | `make demo` | No-root interactive product demo with seeded alerts/fingerprints | **no** |
 | `make e2e` | **Real eBPF** drift replay: sensor + Node workload → alert | **yes** |
 | `make docker` | Build both container images | no (docker daemon) |

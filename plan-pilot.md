@@ -20,7 +20,7 @@ from the same telemetry.
 - **Pilot survival** depends on evidence-rich, low-noise alerts that produce
   value from minute one, not after a 24-hour learning window.
 
-## Phase 1: Attack replay corpus
+## Phase 1: Attack replay corpus (DONE)
 
 Reproduce famous npm supply-chain attacks as benign, self-contained replay
 scenarios that drive the full collector pipeline (store, fingerprint, diff,
@@ -60,7 +60,7 @@ baseline; every alert lists matched rule names; both SQL dialects migrated;
 dashboard shows the rule; docs and CHANGELOG updated; `make smoke` and the
 Phase 1 replay corpus still pass.
 
-## Phase 3: Runtime reachability report
+## Phase 3: Runtime reachability report (DONE)
 
 `goodmanctl report`: parse the customer's `package-lock.json`, join declared
 packages against observed fingerprints from the collector, optionally enrich
@@ -78,7 +78,7 @@ markdown report offline; `-osv` adds OSV enrichment when the network allows;
 unit tests cover lockfile parsing (v2/v3) and report assembly; documented in
 `docs/api.md` and the README.
 
-## Phase 4: NODE_OPTIONS admission webhook
+## Phase 4: NODE_OPTIONS admission webhook (DONE)
 
 Tier-1 attribution needs `NODE_OPTIONS=--perf-basic-prof
 --interpreted-frames-native-stack` on workloads. Manual injection is the
@@ -92,7 +92,7 @@ MutatingWebhookConfiguration with a generated CA; a labeled namespace gets
 NODE_OPTIONS injected on pod create; unlabeled namespaces are untouched; unit
 tests cover the JSON-patch logic; documented in `docs/deployment.md`.
 
-## Phase 5: Noise controls
+## Phase 5: Noise controls (DONE)
 
 `new-outbound-connect` as a default CRITICAL rule will drown in CDN and DNS
 rotation. Ship:
@@ -107,7 +107,7 @@ rotation. Ship:
 `docs/configuration.md`; CIDR aggregation is opt-in via sensor flag; unit
 tests for both.
 
-## Phase 6: Performance benchmark + attribution quality
+## Phase 6: Performance benchmark + attribution quality (DONE)
 
 Security teams will not deploy a privileged DaemonSet without overhead
 numbers.
