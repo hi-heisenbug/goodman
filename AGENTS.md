@@ -374,7 +374,7 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 |---|---|
 | [`docs/getting-started.md`](docs/getting-started.md) | Local setup, first run, first alert |
 | [`docs/architecture.md`](docs/architecture.md) | Components, data flow, design decisions |
-| [`docs/attribution.md`](docs/attribution.md) | The stack→package algorithm (Tier 1 npm/PyPI; Tier 2 PARK) |
+| [`docs/attribution.md`](docs/attribution.md) | Why npm/PyPI first; stack→package (Tier 1; Tier 2 PARK) |
 | [`docs/enforcement.md`](docs/enforcement.md) | Optional LSM block mode (fail-open, off by default) |
 | [`docs/pilot-runbook.md`](docs/pilot-runbook.md) | Pilot install, noise, digest, rollback |
 | [`docs/release.md`](docs/release.md) | Release gate checklist |

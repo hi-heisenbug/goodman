@@ -7,6 +7,30 @@ the algorithm, the two tiers, and the guarantees.
 
 All the code lives in `internal/attribute/`.
 
+## Why npm and PyPI (not every ecosystem yet)
+
+Other package ecosystems matter — RubyGems, Maven/Gradle, Go modules, Cargo,
+NuGet, Composer, system packages, and so on. Goodman focuses on **npm and PyPI
+first** on purpose; that is a product wedge, not a claim that only those
+registries exist.
+
+1. **Where the attacks land.** High-profile runtime supply-chain incidents
+   (malicious postinstalls, dependency hijacks, typosquats) have concentrated on
+   Node/npm and Python/PyPI. That is the market the first wedge sells into.
+2. **Attribution is per-runtime.** The kernel only sees syscalls plus a user
+   stack. Naming `package@version` needs a language-specific path: V8 perf maps
+   → `node_modules` → `package.json` for npm; CPython `PYTHONPERFSUPPORT` /
+   `py::` symbols → `site-packages` → `.dist-info` for PyPI. There is no free
+   “support all registries” switch.
+3. **Correctness over breadth.** A wrong package name destroys trust (see
+   [never misattribute](#the-guarantee-never-misattribute)). Shipping two solid
+   Tier-1 stories beats a half-working soup of ecosystems.
+
+**Later expansion** looks the same for each new ecosystem: watch the right
+process names → resolve frames to source paths → map path to package+version →
+reuse the existing baseline / drift / alert pipeline. Add a registry when
+customers pull for it and a credible Tier-1 resolution path exists.
+
 ## The problem
 
 When the eBPF program fires, it calls:

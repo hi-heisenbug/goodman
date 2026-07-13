@@ -6,6 +6,10 @@ not know which of the process's dozens of npm/PyPI packages was on the call stac
 when it happened. Goodman closes that gap and turns it into a behavioral security
 signal.
 
+npm and PyPI are the first wedge (not the only ecosystems that could matter
+later). See [Why npm and PyPI](attribution.md#why-npm-and-pypi-not-every-ecosystem-yet)
+in the attribution doc.
+
 ## The four steps
 
 ```
