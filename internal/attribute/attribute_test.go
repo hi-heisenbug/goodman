@@ -57,6 +57,8 @@ func TestCanonicalize(t *testing.T) {
 		{model.EventFileOpen, "/home/u/.aws/credentials", "READ /home/u/.aws/credentials"},
 		{model.EventFileOpen, "/app/certs/server.pem", "READ /app/certs/server.pem"},
 		{model.EventFileOpen, "/app/node_modules/express/lib/view.js", "READ /app/node_modules/express/**"},
+		{model.EventFileOpen, "/app/venv/lib/python3.13/site-packages/requests/adapters.py", "READ /app/venv/lib/python3.13/site-packages/requests/**"},
+		{model.EventFileOpen, "/usr/lib/python3/dist-packages/yaml/loader.py", "READ /usr/lib/python3/dist-packages/yaml/**"},
 		{model.EventFileOpen, "/etc/hosts", "READ /etc/hosts"},
 		{model.EventNetConnect, "140.82.113.6:443", "CONNECT 140.82.113.6:443"},
 		{model.EventProcExec, "/usr/bin/curl", "EXEC curl"},
@@ -238,5 +240,91 @@ func TestAttributeUsesOpenedPackagePathAndShortThreadContext(t *testing.T) {
 	got = r.Attribute(expired, 0)
 	if got.Package != "<unknown>" {
 		t.Fatalf("expired context attributed %q, want <unknown>", got.Package)
+	}
+}
+
+func TestSourcePathOfPython(t *testing.T) {
+	src, ok := sourcePathOf("py::<module>:/app/venv/lib/python3.13/site-packages/requests/__init__.py")
+	if !ok || src != "/app/venv/lib/python3.13/site-packages/requests/__init__.py" {
+		t.Fatalf("got %q,%v", src, ok)
+	}
+	if _, ok := sourcePathOf("py::_find_and_load:<frozen importlib._bootstrap>"); ok {
+		t.Fatal("frozen symbols must not resolve")
+	}
+	if _, ok := sourcePathOf("py::tick:work.py"); ok {
+		t.Fatal("relative paths must not resolve")
+	}
+}
+
+func TestPathToPyPackage(t *testing.T) {
+	root := t.TempDir()
+	site := filepath.Join(root, "app/venv/lib/python3.13/site-packages")
+	writeFile(t, filepath.Join(site, "requests/__init__.py"), "")
+	writeFile(t, filepath.Join(site, "requests-2.34.2.dist-info/METADATA"), "Name: requests\nVersion: 2.34.2\n")
+	writeFile(t, filepath.Join(site, "requests-2.34.2.dist-info/top_level.txt"), "requests\n")
+	writeFile(t, filepath.Join(site, "yaml/loader.py"), "")
+	writeFile(t, filepath.Join(site, "PyYAML-6.0.dist-info/METADATA"), "Name: PyYAML\nVersion: 6.0\n")
+	writeFile(t, filepath.Join(site, "PyYAML-6.0.dist-info/top_level.txt"), "yaml\n")
+	writeFile(t, filepath.Join(site, "six.py"), "")
+	writeFile(t, filepath.Join(site, "six-1.16.0.dist-info/METADATA"), "Name: six\nVersion: 1.16.0\n")
+	writeFile(t, filepath.Join(site, "six-1.16.0.dist-info/top_level.txt"), "six\n")
+
+	pkg, ver, ok := PathToPyPackage(root, "/app/venv/lib/python3.13/site-packages/requests/adapters.py")
+	if !ok || pkg != "requests" || ver != "2.34.2" {
+		t.Fatalf("requests = (%q,%q,%v)", pkg, ver, ok)
+	}
+	pkg, ver, ok = PathToPyPackage(root, "/app/venv/lib/python3.13/site-packages/yaml/loader.py")
+	if !ok || pkg != "PyYAML" || ver != "6.0" {
+		t.Fatalf("yaml→PyYAML = (%q,%q,%v)", pkg, ver, ok)
+	}
+	pkg, ver, ok = PathToPyPackage(root, "/app/venv/lib/python3.13/site-packages/six.py")
+	if !ok || pkg != "six" || ver != "1.16.0" {
+		t.Fatalf("six.py = (%q,%q,%v)", pkg, ver, ok)
+	}
+	FlushVersionCache()
+	_ = os.RemoveAll(filepath.Join(site, "requests-2.34.2.dist-info"))
+	pkg, ver, ok = PathToPyPackage(root, "/app/venv/lib/python3.13/site-packages/requests/adapters.py")
+	if ok || pkg != "" && ver != "" && ok {
+		// ok must be false without dist-info
+	}
+	if ok {
+		t.Fatalf("missing dist-info must not ok, got (%q,%q)", pkg, ver)
+	}
+}
+
+func TestAttributePythonEndToEnd(t *testing.T) {
+	proc := t.TempDir()
+	pid := 5252
+	pidDir := fmt.Sprintf("%s/%d", proc, pid)
+	site := pidDir + "/root/app/venv/lib/python3.13/site-packages"
+	writeFile(t, site+"/requests/__init__.py", "")
+	writeFile(t, site+"/requests-2.34.2.dist-info/METADATA", "Name: requests\nVersion: 2.34.2\n")
+	writeFile(t, site+"/requests-2.34.2.dist-info/top_level.txt", "requests\n")
+	writeFile(t, pidDir+"/root/tmp/perf-5252.map", ""+
+		"5000 100 py::<module>:/app/venv/lib/python3.13/site-packages/requests/__init__.py\n"+
+		"6000 100 py::_find_and_load:<frozen importlib._bootstrap>\n"+
+		"7000 100 py::<module>:/app/work.py\n")
+	writeFile(t, pidDir+"/status", "Name:\tpython3\nNSpid:\t5252\n")
+	writeFile(t, pidDir+"/maps", "00400000-00500000 r-xp 00000000 08:01 1 /usr/bin/python3\n")
+	writeFile(t, pidDir+"/cgroup", "0::/user.slice\n")
+	_ = os.Symlink("/work/pysvc", pidDir+"/cwd")
+
+	r := NewResolver(proc)
+	ev := &model.RawEvent{PID: uint32(pid), TID: 1, Type: uint8(model.EventFileOpen), Timestamp: 1, StackLen: 2}
+	ev.Stack[0] = 0x5000 + 1
+	ev.Stack[1] = 0x7000 + 1
+	copy(ev.Arg[:], "/tmp/x")
+	got := r.Attribute(ev, 0)
+	if got.Package != "requests" || got.Version != "2.34.2" {
+		t.Fatalf("got %q@%q, want requests@2.34.2", got.Package, got.Version)
+	}
+
+	// Frozen-only + app frame → <app>
+	ev2 := &model.RawEvent{PID: uint32(pid), TID: 2, Type: uint8(model.EventFileOpen), Timestamp: 2, StackLen: 2}
+	ev2.Stack[0] = 0x6000 + 1
+	ev2.Stack[1] = 0x7000 + 1
+	got = r.Attribute(ev2, 0)
+	if got.Package != "<app>" {
+		t.Fatalf("app-only stack = %q, want <app>", got.Package)
 	}
 }

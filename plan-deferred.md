@@ -6,17 +6,16 @@
 > Work the phases **in order**; each has a Definition of Done (DoD). Read
 > `AGENTS.md` before touching anything — every invariant there applies here.
 
-## Status (2026-07-13): Phases 0–3 DONE; Phase 2 spike GO (build gated)
+## Status (2026-07-13): Phases 0–3 DONE; Phase 2 build DONE
 
 | Phase | Outcome |
 |---|---|
 | 0. Tier-2 research spike | **PARK (year-scale)** — `docs/research/tier2-attribution.md` |
 | 1. Collector durability | PVC + sensor RAM spool + recovery test |
-| 2. Python Tier-1 | **spike GO (~1 week build)** — `docs/research/python-attribution.md`; product merge still needs named customer |
+| 2. Python Tier-1 | **DONE** — shipped on `main`; `docs/attribution.md` + `docs/research/python-attribution-impl.md` |
 | 3. enforce=warn | `action` on rules + `would_block` + Coverage/digest |
 
-Next ungated product work is thin: Phases 4–6 stay trigger-gated. Prefer
-pilot release gate / GTM over speculative Phase 2 code.
+Next ungated product work: Phases 4–6 stay trigger-gated (`plan-deferred.md`).
 
 ## Sequencing rationale
 
@@ -205,9 +204,9 @@ make smoke` green.
 
 ---
 
-## Phase 2: Python/PyPI Tier-1 attribution (perf trampoline)
+## Phase 2: Python/PyPI Tier-1 attribution (perf trampoline) — **build DONE**
 
-**Gate:** a signed pilot with a meaningful Python footprint or 30%+ of
+**Gate (historical):** a signed pilot with a meaningful Python footprint or 30%+ of
 qualified pipeline stalling on "we're mostly Python." Do the 3-day spike the
 moment the trigger looks likely; the build half only for a named customer.
 

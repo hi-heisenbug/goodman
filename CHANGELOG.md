@@ -14,9 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `goodman_enforce_would_block_total{rule}`, surfaces a dashboard chip +
   Coverage “Would block” KPI, and appears in the weekly digest. Nothing is
   blocked. Replay scenario `enforce-warn` covers the path.
-- Python Tier-1 research (`docs/research/python-attribution.md`): live
-  CPython 3.13.14 + `PYTHONPERFSUPPORT=1` confirms reusable perf maps and
-  site-packages symbols; build remains customer-gated (~1 week estimate).
+- Python Tier-1 attribution (deferred Phase 2): CPython 3.12+ perf
+  trampolines via `PYTHONPERFSUPPORT=1`; reuse perf-map resolution for `py::`
+  symbols, `PathToPyPackage` + `*.dist-info` versions, admission webhook env
+  injection, extended `WatchedComms`, and `-comms` / `GOODMAN_EXTRA_COMMS` for
+  renamed worker comms. Research: `docs/research/python-attribution.md`.
 - Collector durability (deferred Phase 1): Helm `store.persistence` mounts a
   PVC for SQLite by default; sensors buffer failed collector POSTs in a
   bounded RAM spool (`-spool-events` / `GOODMAN_SPOOL_EVENTS`, metrics

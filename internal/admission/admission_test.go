@@ -34,6 +34,9 @@ func TestMutateNoEnv(t *testing.T) {
 	if !strings.Contains(string(val), InjectedNodeOptions) {
 		t.Fatalf("value missing node options: %s", val)
 	}
+	if !strings.Contains(string(val), PythonPerfSupportEnv) || !strings.Contains(string(val), `"1"`) {
+		t.Fatalf("value missing PYTHONPERFSUPPORT=1: %s", val)
+	}
 }
 
 func TestMutateExistingEnvNoNodeOptions(t *testing.T) {
@@ -43,8 +46,13 @@ func TestMutateExistingEnvNoNodeOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops := decodeOps(t, patch)
-	if len(ops) != 1 || ops[0]["path"] != "/spec/containers/0/env/-" {
-		t.Fatalf("expected append to env array, got %v", ops)
+	if len(ops) != 2 {
+		t.Fatalf("expected append NODE_OPTIONS + PYTHONPERFSUPPORT, got %v", ops)
+	}
+	for _, op := range ops {
+		if op["path"] != "/spec/containers/0/env/-" {
+			t.Fatalf("expected append to env array, got %v", ops)
+		}
 	}
 }
 
@@ -56,24 +64,43 @@ func TestMutateAppendsToExistingNodeOptions(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops := decodeOps(t, patch)
-	if len(ops) != 1 || ops[0]["op"] != "replace" || ops[0]["path"] != "/spec/containers/0/env/0/value" {
-		t.Fatalf("expected replace of existing value, got %v", ops)
+	if len(ops) != 2 {
+		t.Fatalf("expected replace NODE_OPTIONS + add PYTHONPERFSUPPORT, got %v", ops)
 	}
-	v := ops[0]["value"].(string)
-	if !strings.Contains(v, "--max-old-space-size=4096") || !strings.Contains(v, PerfBasicProf) || !strings.Contains(v, InterpretedNativ) {
-		t.Fatalf("merged value wrong: %q", v)
+	var merged string
+	for _, op := range ops {
+		if op["op"] == "replace" {
+			merged = op["value"].(string)
+		}
+	}
+	if !strings.Contains(merged, "--max-old-space-size=4096") || !strings.Contains(merged, PerfBasicProf) || !strings.Contains(merged, InterpretedNativ) {
+		t.Fatalf("merged value wrong: %q", merged)
 	}
 }
 
 func TestMutateIdempotent(t *testing.T) {
 	pod := json.RawMessage(`{"spec":{"containers":[{"name":"app","env":[
-		{"name":"NODE_OPTIONS","value":"--perf-basic-prof --interpreted-frames-native-stack"}]}]}}`)
+		{"name":"NODE_OPTIONS","value":"--perf-basic-prof --interpreted-frames-native-stack"},
+		{"name":"PYTHONPERFSUPPORT","value":"1"}]}]}}`)
 	patch, err := Mutate(pod)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if patch != nil {
 		t.Fatalf("already-injected pod must not be patched, got %s", patch)
+	}
+}
+
+func TestMutatePythonPerfSupportZeroUntouched(t *testing.T) {
+	pod := json.RawMessage(`{"spec":{"containers":[{"name":"app","env":[
+		{"name":"NODE_OPTIONS","value":"--perf-basic-prof --interpreted-frames-native-stack"},
+		{"name":"PYTHONPERFSUPPORT","value":"0"}]}]}}`)
+	patch, err := Mutate(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if patch != nil {
+		t.Fatalf("explicit PYTHONPERFSUPPORT=0 must not be rewritten, got %s", patch)
 	}
 }
 
@@ -84,8 +111,16 @@ func TestMutateValueFromLeftAlone(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if patch != nil {
-		t.Fatalf("valueFrom NODE_OPTIONS must not be rewritten, got %s", patch)
+	ops := decodeOps(t, patch)
+	// NODE_OPTIONS valueFrom is left alone; PYTHONPERFSUPPORT may still be added.
+	for _, op := range ops {
+		v, _ := json.Marshal(op["value"])
+		if strings.Contains(string(v), NodeOptionsEnv) && op["op"] == "replace" {
+			t.Fatalf("valueFrom NODE_OPTIONS must not be rewritten, got %v", ops)
+		}
+	}
+	if len(ops) != 1 {
+		t.Fatalf("expected only PYTHONPERFSUPPORT append, got %v", ops)
 	}
 }
 
@@ -98,8 +133,17 @@ func TestMutateMultipleContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops := decodeOps(t, patch)
-	if len(ops) != 2 {
-		t.Fatalf("expected one op per container, got %v", ops)
+	// Container without env: one add with both vars; container with env: two appends.
+	if len(ops) != 3 {
+		t.Fatalf("expected three ops (1 + 2), got %v", ops)
+	}
+	if ops[0]["path"] != "/spec/containers/0/env" {
+		t.Fatalf("first container should get full env array, got %v", ops[0])
+	}
+	for _, op := range ops[1:] {
+		if op["path"] != "/spec/containers/1/env/-" {
+			t.Fatalf("second container should append env entries, got %v", ops)
+		}
 	}
 }
 
@@ -196,8 +240,8 @@ func TestMutateInitContainers(t *testing.T) {
 		t.Fatal(err)
 	}
 	ops := decodeOps(t, patch)
-	if len(ops) != 2 {
-		t.Fatalf("expected one op for the container and one for the initContainer, got %v", ops)
+	if len(ops) != 3 {
+		t.Fatalf("expected three ops (container env + two init appends), got %v", ops)
 	}
 	paths := map[string]bool{}
 	for _, o := range ops {
@@ -205,5 +249,8 @@ func TestMutateInitContainers(t *testing.T) {
 	}
 	if !paths["/spec/containers/0/env"] || !paths["/spec/initContainers/0/env/-"] {
 		t.Fatalf("initContainer not patched: %v", paths)
+	}
+	if len(paths) != 2 {
+		t.Fatalf("expected two distinct paths, got %v", paths)
 	}
 }

@@ -1,8 +1,8 @@
 // Package admission implements a Kubernetes mutating admission webhook that
-// injects NODE_OPTIONS into pods so Tier-1 attribution works without any app
-// change. The API server only calls this webhook for namespaces selected by
-// the MutatingWebhookConfiguration (label goodman.io/inject=enabled), so the
-// webhook injects into every pod it receives.
+// injects NODE_OPTIONS and PYTHONPERFSUPPORT into pods so Tier-1 attribution
+// works without any app change. The API server only calls this webhook for
+// namespaces selected by the MutatingWebhookConfiguration (label
+// goodman.io/inject=enabled), so the webhook injects into every pod it receives.
 //
 // The AdmissionReview types are hand-rolled (a tiny subset of
 // admission.k8s.io/v1) to avoid pulling in the k8s.io/api dependency tree.
@@ -14,11 +14,14 @@ import (
 	"strings"
 )
 
-// The env var and flags that enable V8 perf-map output for Tier-1 attribution.
+// The env vars and flags that enable runtime perf-map output for Tier-1
+// attribution (V8 for Node, trampoline for CPython 3.12+).
 const (
-	NodeOptionsEnv   = "NODE_OPTIONS"
-	PerfBasicProf    = "--perf-basic-prof"
-	InterpretedNativ = "--interpreted-frames-native-stack"
+	NodeOptionsEnv       = "NODE_OPTIONS"
+	PythonPerfSupportEnv = "PYTHONPERFSUPPORT"
+	PythonPerfSupportVal = "1"
+	PerfBasicProf        = "--perf-basic-prof"
+	InterpretedNativ     = "--interpreted-frames-native-stack"
 )
 
 // InjectedNodeOptions is the value the webhook ensures is present.
@@ -58,9 +61,9 @@ type envVar struct {
 }
 
 // Mutate returns the JSON-patch operations that ensure NODE_OPTIONS carries
-// the perf-map flags on every container in the pod object. It is pure and
-// unit-testable: no network, no cluster. Returns nil when nothing needs to
-// change (idempotent re-admission).
+// the perf-map flags and PYTHONPERFSUPPORT=1 is set on every container in the
+// pod object. It is pure and unit-testable: no network, no cluster. Returns
+// nil when nothing needs to change (idempotent re-admission).
 func Mutate(podObject json.RawMessage) ([]byte, error) {
 	type container struct {
 		Env []envVar `json:"env"`
@@ -76,8 +79,8 @@ func Mutate(podObject json.RawMessage) ([]byte, error) {
 	}
 
 	var ops []patchOp
-	// Node workloads may run in regular containers or in initContainers
-	// (migrations, warmups); both need NODE_OPTIONS for attribution.
+	// Node/Python workloads may run in regular containers or in initContainers
+	// (migrations, warmups); both need the env injection for attribution.
 	add := func(field string, containers []container) {
 		for i, c := range containers {
 			ops = append(ops, containerOps(field, i, c.Env)...)
@@ -92,41 +95,67 @@ func Mutate(podObject json.RawMessage) ([]byte, error) {
 	return json.Marshal(ops)
 }
 
-// containerOps returns the patch ops (0 or 1) that ensure NODE_OPTIONS carries
-// the perf-map flags for one container at /spec/<field>/<i>.
+// containerOps returns the patch ops that ensure NODE_OPTIONS and
+// PYTHONPERFSUPPORT for one container at /spec/<field>/<i>.
 func containerOps(field string, i int, env []envVar) []patchOp {
-	idx, cur := findEnv(env, NodeOptionsEnv)
-	switch {
-	case idx < 0 && len(env) == 0:
-		// No env array at all: create it with our var.
+	needNode, needPy := true, true
+	if idx, cur := findEnv(env, NodeOptionsEnv); idx >= 0 {
+		if cur.ValueFrom != nil {
+			needNode = false // cannot merge valueFrom
+		} else if appendFlags(cur.Value) == cur.Value {
+			needNode = false
+		}
+	}
+	if idx, cur := findEnv(env, PythonPerfSupportEnv); idx >= 0 {
+		// Any existing value (including "0") or valueFrom is an operator
+		// choice — leave untouched.
+		_ = cur
+		needPy = false
+	}
+
+	if !needNode && !needPy {
+		return nil
+	}
+
+	if len(env) == 0 {
+		var vars []envVar
+		if needNode {
+			vars = append(vars, envVar{Name: NodeOptionsEnv, Value: InjectedNodeOptions})
+		}
+		if needPy {
+			vars = append(vars, envVar{Name: PythonPerfSupportEnv, Value: PythonPerfSupportVal})
+		}
 		return []patchOp{{
 			Op:    "add",
 			Path:  fmt.Sprintf("/spec/%s/%d/env", field, i),
-			Value: []envVar{{Name: NodeOptionsEnv, Value: InjectedNodeOptions}},
-		}}
-	case idx < 0:
-		// Has env, but no NODE_OPTIONS: append.
-		return []patchOp{{
-			Op:    "add",
-			Path:  fmt.Sprintf("/spec/%s/%d/env/-", field, i),
-			Value: envVar{Name: NodeOptionsEnv, Value: InjectedNodeOptions},
-		}}
-	default:
-		// NODE_OPTIONS present: append our flags if missing. A valueFrom
-		// NODE_OPTIONS is left untouched (we cannot safely merge it).
-		if cur.ValueFrom != nil {
-			return nil
-		}
-		merged := appendFlags(cur.Value)
-		if merged == cur.Value {
-			return nil // already has both flags
-		}
-		return []patchOp{{
-			Op:    "replace",
-			Path:  fmt.Sprintf("/spec/%s/%d/env/%d/value", field, i, idx),
-			Value: merged,
+			Value: vars,
 		}}
 	}
+
+	var ops []patchOp
+	if needNode {
+		if idx, cur := findEnv(env, NodeOptionsEnv); idx >= 0 {
+			ops = append(ops, patchOp{
+				Op:    "replace",
+				Path:  fmt.Sprintf("/spec/%s/%d/env/%d/value", field, i, idx),
+				Value: appendFlags(cur.Value),
+			})
+		} else {
+			ops = append(ops, patchOp{
+				Op:    "add",
+				Path:  fmt.Sprintf("/spec/%s/%d/env/-", field, i),
+				Value: envVar{Name: NodeOptionsEnv, Value: InjectedNodeOptions},
+			})
+		}
+	}
+	if needPy {
+		ops = append(ops, patchOp{
+			Op:    "add",
+			Path:  fmt.Sprintf("/spec/%s/%d/env/-", field, i),
+			Value: envVar{Name: PythonPerfSupportEnv, Value: PythonPerfSupportVal},
+		})
+	}
+	return ops
 }
 
 func findEnv(env []envVar, name string) (int, envVar) {

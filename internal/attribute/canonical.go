@@ -102,6 +102,9 @@ func canonicalPath(p string) string {
 	if pkg, dir, _ := splitNodeModules(p); pkg != "" {
 		return dir + "/node_modules/" + pkg + "/**"
 	}
+	if importRoot, siteParent, marker, ok := splitSitePackages(p); ok && importRoot != "" {
+		return siteParent + "/" + marker + "/" + importRoot + "/**"
+	}
 	// Shallow paths (/etc/hosts, /etc/passwd) stay verbatim: low cardinality,
 	// high signal. Only collapse the variable tail of deeper paths.
 	if strings.Count(p, "/") <= 2 {

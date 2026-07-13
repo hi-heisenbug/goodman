@@ -29,6 +29,8 @@ var bpfObject []byte
 var WatchedComms = map[string]bool{
 	"node": true, "nodejs": true, "MainThread": true,
 	"python3": true, "python": true,
+	"python3.12": true, "python3.13": true,
+	"gunicorn": true, "celery": true, "uwsgi": true, "uvicorn": true,
 }
 
 type Loader struct {

@@ -40,16 +40,26 @@ on the host (or a privileged DaemonSet with `hostPID`).
 
 **`goodmanctl tail` shows nothing**
 1. Is the sensor watching the process? It traces built-in runtime comm names
-   (`node`, `nodejs`, `MainThread`, `python`, `python3`) and `-comms` extras.
+   (`node`, `nodejs`, `MainThread`, `python`, `python3`, `python3.12`,
+   `python3.13`, `gunicorn`, `celery`, `uwsgi`, `uvicorn`) and `-comms` extras.
    Check `goodman_sensor_watched_pids` > 0.
 2. Is the process actually making file-open, `connect`, or `execve` calls? Drive traffic.
 3. In k8s, is `-proc-root=/host/proc` set and `/proc` mounted?
+
+**Python workload produces no events**
+1. Read the worker's comm: `cat /proc/<pid>/comm` (truncated to 15 bytes). If
+   it is not in the default list, add it via sensor `-comms` or
+   `GOODMAN_EXTRA_COMMS` (common with `setproctitle` on Gunicorn/Celery).
+2. Confirm `PYTHONPERFSUPPORT=1` is set (webhook or env) and CPython is 3.12+.
+3. Then apply the checks above (`goodman_sensor_watched_pids`, traffic, `-proc-root`).
 
 **Events show `<unknown>` or `<app>` instead of a package**
 This is attribution falling back honestly, not a crash. Common causes:
 - The Node process wasn't started with
   `--perf-basic-prof --interpreted-frames-native-stack`, so there's no
-  `/tmp/perf-<pid>.map` for JIT frames. This is the **most common** cause.
+  `/tmp/perf-<pid>.map` for JIT frames. This is the **most common** cause on Node.
+- Python: missing `PYTHONPERFSUPPORT=1` (or CPython < 3.12) — no `py::` entries
+  in the perf map; attribution falls back to `<app>` / `<unknown>`.
 - The syscall genuinely came from the app's own code (`<app>`) or from native
   code with no `node_modules` frame (`<unknown>`).
 - The perf map exists but is stale — Goodman refreshes on mtime/size change; give

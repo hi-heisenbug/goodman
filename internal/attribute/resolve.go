@@ -72,13 +72,23 @@ func (r *Resolver) Forget(pid int) {
 // "LazyCompile:*handleRequest /app/node_modules/pkg/dist/router.js:412:19"
 var jsPathRe = regexp.MustCompile(`\s(\/[^\s]+?\.[cm]?js)(?::\d+)?(?::\d+)?$`)
 
-// sourcePathOf extracts the JS source file path from a perf-map symbol name.
+// CPython 3.12+ perf trampoline: "py::<qualname>:<filename>".
+// Accept only absolute .py paths; "<frozen importlib._bootstrap>" and
+// friends must never become a package (never-misattribute).
+var pySymRe = regexp.MustCompile(`^py::.+:(/[^\s]+\.py)$`)
+
+// sourcePathOf extracts a source file path from a perf-map symbol name.
+// JS is tried first (unchanged); then CPython py:: symbols.
 func sourcePathOf(sym string) (string, bool) {
-	m := jsPathRe.FindStringSubmatch(sym)
-	if m == nil {
-		return "", false
+	if m := jsPathRe.FindStringSubmatch(sym); m != nil {
+		return m[1], true
 	}
-	return m[1], true
+	if strings.HasPrefix(sym, "py::") {
+		if m := pySymRe.FindStringSubmatch(sym); m != nil {
+			return m[1], true
+		}
+	}
+	return "", false
 }
 
 const packageContextTTL = 250 * time.Millisecond
@@ -104,7 +114,9 @@ func (r *Resolver) ResolveStack(pid int, stack []uint64) []Frame {
 		} else if m, ok := st.maps.Lookup(addr); ok && m.Path != "" {
 			f.Symbol = filepath.Base(m.Path)
 			// Native addons live in node_modules too: .../node_modules/x/build/Release/x.node
-			if strings.Contains(m.Path, "/node_modules/") {
+			if strings.Contains(m.Path, "/node_modules/") ||
+				strings.Contains(m.Path, "/site-packages/") ||
+				strings.Contains(m.Path, "/dist-packages/") {
 				f.Source = m.Path
 			}
 		}
@@ -134,8 +146,10 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 				continue // builtin / stub / RegExp — no source location
 			}
 			src = s
-		} else if m, ok := st.maps.Lookup(addr); ok && strings.Contains(m.Path, "/node_modules/") {
-			src = m.Path // native addon inside node_modules
+		} else if m, ok := st.maps.Lookup(addr); ok && (strings.Contains(m.Path, "/node_modules/") ||
+			strings.Contains(m.Path, "/site-packages/") ||
+			strings.Contains(m.Path, "/dist-packages/")) {
+			src = m.Path // native extension inside a dependency tree
 		} else {
 			continue
 		}
@@ -148,6 +162,15 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 				if p, _, _ := splitNodeModules(src); p != "" {
 					pkg, version = p, ""
 				}
+			}
+			refreshContext = pkg != ""
+			break
+		}
+		if strings.Contains(src, "/site-packages/") || strings.Contains(src, "/dist-packages/") {
+			if p, v, ok := PathToPyPackage(st.pidRoot, src); ok {
+				pkg, version = p, v
+			} else if ir, _, _, ok := splitSitePackages(src); ok && ir != "" {
+				pkg, version = ir, ""
 			}
 			refreshContext = pkg != ""
 			break
@@ -193,14 +216,22 @@ func packageFromOpenedPath(pidRoot string, ev *model.RawEvent) (pkg, version str
 		return "", "", false
 	}
 	path := ev.ArgString()
-	if !strings.Contains(path, "/node_modules/") {
+	if strings.Contains(path, "/node_modules/") {
+		if p, v, ok := PathToPackage(pidRoot, path); ok {
+			return p, v, true
+		}
+		if p, _, _ := splitNodeModules(path); p != "" {
+			return p, "", true
+		}
 		return "", "", false
 	}
-	if p, v, ok := PathToPackage(pidRoot, path); ok {
-		return p, v, true
-	}
-	if p, _, _ := splitNodeModules(path); p != "" {
-		return p, "", true
+	if strings.Contains(path, "/site-packages/") || strings.Contains(path, "/dist-packages/") {
+		if p, v, ok := PathToPyPackage(pidRoot, path); ok {
+			return p, v, true
+		}
+		if ir, _, _, ok := splitSitePackages(path); ok && ir != "" {
+			return ir, "", true
+		}
 	}
 	return "", "", false
 }

@@ -84,8 +84,15 @@ the dashboard. The same webhook also receives the weekly digest when
 | `-raw` | — | `false` | With `-stdout`: also print raw events including stack depth. |
 | `NODE_NAME` | — | hostname | Sensor identity in event batches (set to the k8s node name in the DaemonSet). |
 
-Watched runtimes default to `node`, `nodejs`, Node's `MainThread`, `python`, and
-`python3`. Add more with `-comms` / `GOODMAN_EXTRA_COMMS`.
+Built-in watched comm names (`internal/loader/loader.go` `WatchedComms`): Node
+`node`, `nodejs`, `MainThread`; Python `python`, `python3`, `python3.12`,
+`python3.13`; and `gunicorn`, `celery`, `uwsgi`, `uvicorn`. The sensor only
+attaches to processes whose `/proc/<pid>/comm` matches one of these (plus
+`-comms` extras).
+
+`-comms` / `GOODMAN_EXTRA_COMMS` adds comma-separated comm names beyond that
+list. Use this when a Python (or Node) process renames itself — e.g. Gunicorn or
+Celery workers after `setproctitle` — so Goodman still watches the worker pid.
 
 ## High-risk rules
 

@@ -87,13 +87,40 @@ work — see [`docs/research/tier2-attribution.md`](research/tier2-attribution.m
 The NODE_OPTIONS webhook remains the shipping answer to zero-config objections.
 Do not start a production build until that doc's GO criteria are met.
 
-## Python / PyPI (not shipping yet)
+## Python / PyPI — Tier 1 (perf trampoline)
 
-CPython 3.12+ with `PYTHONPERFSUPPORT=1` writes the same `/tmp/perf-<pid>.map`
-layout Node uses, with symbols shaped `py::<qualname>:<file>`. A live spike on
-3.13.14 confirmed site-packages frames and `*.dist-info` version metadata are
-available — see [`docs/research/python-attribution.md`](research/python-attribution.md).
-Build is gated on a named Python customer (`plan-deferred.md` Phase 2).
+CPython **3.12+** with `PYTHONPERFSUPPORT=1` appends to the same
+`/tmp/perf-<pid>.map` format as Node (`perfmap.go`). Goodman reads it via
+`/proc/<pid>/root/tmp/perf-<pid>.map` in containers. Symbols look like:
+
+```
+py::<qualname>:/usr/local/lib/python3.13/site-packages/requests/adapters.py
+```
+
+Resolution (`resolve.go`):
+
+1. Reuse the perf-map interval lookup (Tier 1 path unchanged).
+2. Parse `py::` symbols with a strict regex: only **absolute** `.py` paths count.
+   `<frozen …>` and other non-path symbols are skipped (never-misattribute).
+3. Walk the stack innermost-outward; the first frame under `site-packages/` or
+   `dist-packages/` wins (same “deepest actor” rule as `node_modules`).
+4. Map the path to `(package, version)` with `PathToPyPackage` (`package.go`):
+   deepest site-packages segment, version from adjacent `*.dist-info/` (`METADATA`
+   or the `name-version.dist-info` directory name).
+5. Native C extensions under site-packages can also attribute via `/proc/<pid>/maps`
+   when the mapped path contains `site-packages/` or `dist-packages/`.
+6. Fallbacks match Node: `<app>` for project code, `<unknown>` when nothing resolves.
+
+**Enable perf maps:** set `PYTHONPERFSUPPORT=1` on the workload. In Kubernetes the
+admission webhook injects it alongside Node `NODE_OPTIONS` (`internal/admission`).
+
+**Sensor watch list:** `WatchedComms` includes `python`, `python3`, `python3.12`,
+`python3.13`, and common WSGI/ASGI entrypoints (`gunicorn`, `celery`, `uwsgi`,
+`uvicorn`). Processes that rename themselves (e.g. `setproctitle`) may need
+`-comms` / `GOODMAN_EXTRA_COMMS` — see [`docs/configuration.md`](configuration.md).
+
+Background: [`docs/research/python-attribution.md`](research/python-attribution.md),
+implementation notes: [`docs/research/python-attribution-impl.md`](research/python-attribution-impl.md).
 
 ## Behavior canonicalization
 
