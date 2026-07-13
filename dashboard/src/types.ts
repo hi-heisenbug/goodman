@@ -48,3 +48,27 @@ export interface AttributedEvent {
   behavior: string;
   timestamp: number;
 }
+
+export interface ReportVuln {
+  id: string;
+  summary?: string;
+  severity: string;
+}
+
+export interface ReportRow {
+  name: string;
+  declared_version: string;
+  dev?: boolean;
+  executed: boolean;
+  executed_version?: string;
+  behaviors?: number;
+  vulns?: ReportVuln[];
+}
+
+export interface Report {
+  service?: string;
+  declared_count: number;
+  executed_count: number;
+  vuln_rows: ReportRow[];
+  rows: ReportRow[];
+}

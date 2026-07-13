@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { Alert, AlertStatus, Fingerprint, Severity } from "./types";
-import { ackAlert, fetchAlerts, fetchFingerprints, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { Alert, AlertStatus, Fingerprint, Report, ReportRow, Severity } from "./types";
+import { ackAlert, buildReport, fetchAlerts, fetchFingerprints, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
 
-type Tab = "alerts" | "fingerprints";
+type Tab = "alerts" | "fingerprints" | "reachability";
 type Tone = "critical" | "warning" | "good" | "accent" | "neutral";
 type IconName =
   | "activity"
@@ -616,6 +616,169 @@ function FingerprintsView() {
   );
 }
 
+function severityTone(sev: string): Tone {
+  const s = sev.toUpperCase();
+  if (s === "CRITICAL" || s === "HIGH") return "critical";
+  if (s === "MODERATE" || s === "MEDIUM") return "warning";
+  return "neutral";
+}
+
+function ReachabilityView() {
+  const [report, setReport] = useState<Report | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [osv, setOsv] = useState(true);
+  const [fileName, setFileName] = useState("");
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const onFile = async (file: File) => {
+    setBusy(true);
+    setErr("");
+    setFileName(file.name);
+    try {
+      const text = await file.text();
+      setReport(await buildReport(text, { osv }));
+    } catch (e) {
+      setErr(String(e));
+      setReport(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const vulnRows = report?.vuln_rows ?? [];
+  const rows = report?.rows ?? [];
+  const idle = report ? report.declared_count - report.executed_count : 0;
+  const coverage = report && report.declared_count > 0 ? pct(report.executed_count, report.declared_count) : 0;
+  const execVulns = vulnRows.filter((r) => r.executed);
+  const idleVulns = vulnRows.filter((r) => !r.executed);
+  const neverExecuted = rows.filter((r) => !r.executed);
+
+  return (
+    <section className="view">
+      {err && <div className="error-banner">{err}</div>}
+
+      <div className="toolbar">
+        <div>
+          <h2>Runtime reachability</h2>
+          <p>Upload a package-lock.json to see which declared dependencies actually execute, and which vulnerabilities are reachable.</p>
+        </div>
+        <div className="reach-controls">
+          <label className="osv-toggle">
+            <input type="checkbox" checked={osv} onChange={(e) => setOsv(e.target.checked)} />
+            <span>Enrich with OSV</span>
+          </label>
+          <input
+            ref={fileInput}
+            type="file"
+            accept=".json,application/json"
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f) onFile(f);
+            }}
+          />
+          <button className="primary-action" disabled={busy} onClick={() => fileInput.current?.click()}>
+            <Icon name="clipboard" />
+            {busy ? "Analyzing" : report ? "Upload another" : "Upload package-lock.json"}
+          </button>
+        </div>
+      </div>
+
+      {!report && !busy && (
+        <EmptyState
+          icon="cube"
+          title="No lockfile analyzed yet"
+          body="Upload your package-lock.json. Goodman joins it against the packages it observed executing in this deployment and ranks reachable vulnerabilities first."
+        />
+      )}
+
+      {report && (
+        <>
+          <div className="metrics-grid">
+            <MetricCard label="Declared" value={report.declared_count} icon="cube" detail={fileName || "packages in lockfile"} />
+            <MetricCard label="Executed" value={report.executed_count} tone="accent" icon="activity" detail={`${coverage}% reachable`} />
+            <MetricCard label="Never executed" value={idle} tone={idle ? "warning" : "good"} icon="archive" detail="Pruning candidates" />
+            <MetricCard
+              label="Reachable vulns"
+              value={execVulns.length}
+              tone={execVulns.length ? "critical" : "good"}
+              icon="shield"
+              detail={`${idleVulns.length} in idle packages`}
+            />
+          </div>
+
+          <div className="toolbar">
+            <div>
+              <h2>Vulnerabilities by reachability</h2>
+              <p>Vulnerabilities in packages Goodman observed running are reachable at runtime. Patch these first.</p>
+            </div>
+          </div>
+
+          {vulnRows.length === 0 ? (
+            <EmptyState icon="check" title="No known vulnerabilities" body={osv ? "OSV reported no advisories for the declared packages." : "Enable OSV enrichment to check declared packages against advisories."} />
+          ) : (
+            <div className="reach-table-wrap">
+              <table className="reach-table">
+                <thead>
+                  <tr>
+                    <th>Package</th>
+                    <th>Declared</th>
+                    <th>Reachable</th>
+                    <th>Behaviors</th>
+                    <th>Advisory</th>
+                    <th>Severity</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {vulnRows.flatMap((row) =>
+                    (row.vulns || []).map((v) => (
+                      <tr key={`${row.name}-${v.id}`} className={row.executed ? "reachable" : ""}>
+                        <td className="mono">{row.name}</td>
+                        <td className="mono">{row.declared_version}</td>
+                        <td>{row.executed ? <span className="reach-yes">yes</span> : <span className="reach-no">no</span>}</td>
+                        <td>{row.executed ? row.behaviors ?? 0 : "-"}</td>
+                        <td className="mono">
+                          <a href={`https://osv.dev/vulnerability/${encodeURIComponent(v.id)}`} target="_blank" rel="noreferrer">
+                            {v.id}
+                          </a>
+                        </td>
+                        <td>
+                          <span className={`rule-chip ${severityTone(v.severity)}`}>{v.severity}</span>
+                        </td>
+                      </tr>
+                    )),
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {neverExecuted.length > 0 && (
+            <>
+              <div className="toolbar">
+                <div>
+                  <h2>Never executed ({neverExecuted.length})</h2>
+                  <p>Declared but produced no runtime behavior in the observed window. Strong candidates for pruning (confirm rare code paths first).</p>
+                </div>
+              </div>
+              <div className="idle-list">
+                {neverExecuted.slice(0, 200).map((r: ReportRow) => (
+                  <span className="idle-chip" key={`${r.name}@${r.declared_version}`}>
+                    {r.name}@{r.declared_version}
+                    {r.dev && <em> dev</em>}
+                  </span>
+                ))}
+                {neverExecuted.length > 200 && <span className="idle-chip more">+{neverExecuted.length - 200} more</span>}
+              </div>
+            </>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
 // TokenGate blocks the workspace when the collector requires an API token
 // (GOODMAN_API_TOKEN) and none, or a wrong one, is stored locally.
 function TokenGate() {
@@ -662,7 +825,8 @@ function TokenGate() {
 export function App() {
   const getHashTab = (): Tab => {
     const h = window.location.hash.replace("#", "");
-    return h === "fingerprints" ? "fingerprints" : "alerts";
+    if (h === "fingerprints" || h === "reachability") return h;
+    return "alerts";
   };
   const [tab, setTab] = useState<Tab>(getHashTab);
   const [openCount, setOpenCount] = useState(0);
@@ -729,6 +893,10 @@ export function App() {
             <Icon name="fingerprint" />
             <span>Fingerprints</span>
           </button>
+          <button className={tab === "reachability" ? "active" : ""} onClick={() => setTab("reachability")}>
+            <Icon name="cube" />
+            <span>Reachability</span>
+          </button>
         </nav>
 
         <div className="side-panel">
@@ -748,7 +916,13 @@ export function App() {
         <header className="workspace-head">
           <div>
             <p className="eyebrow">Runtime security index</p>
-            <h2>{tab === "alerts" ? "Dependency drift review" : "Behavior fingerprint library"}</h2>
+            <h2>
+              {tab === "alerts"
+                ? "Dependency drift review"
+                : tab === "fingerprints"
+                  ? "Behavior fingerprint library"
+                  : "Runtime reachability report"}
+            </h2>
           </div>
           <div className="monitor-pill">
             <i />
@@ -757,7 +931,7 @@ export function App() {
           </div>
         </header>
 
-        {tab === "alerts" ? <AlertsView /> : <FingerprintsView />}
+        {tab === "alerts" ? <AlertsView /> : tab === "fingerprints" ? <FingerprintsView /> : <ReachabilityView />}
       </main>
     </div>
   );

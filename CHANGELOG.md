@@ -36,6 +36,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `goodman.io/inject=enabled`, so no application manifest change is needed. It
   appends to an existing NODE_OPTIONS, is idempotent, leaves valueFrom vars
   alone, and serves over HTTPS with a chart-generated CA stable across upgrades.
+- Dashboard Reachability tab: upload a package-lock.json in the browser to see
+  declared-vs-executed packages and reachable vulnerabilities (reachable ranked
+  first), backed by a new `POST /v1/report` collector endpoint.
 - `goodmanctl report`: the runtime reachability report. Parses a
   `package-lock.json` (v1/v2/v3), joins declared dependencies against packages
   Goodman observed executing, and optionally enriches with OSV.dev. Ranks

@@ -28,6 +28,7 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/diff"
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/report"
 	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
@@ -78,6 +79,7 @@ func (s *Server) Router(ui fs.FS) http.Handler {
 	r.Post("/v1/alerts/{id}/ack", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertAcknowledged)))
 	r.Post("/v1/alerts/{id}/resolve", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertResolved)))
 	r.Get("/v1/fingerprints", requireToken(s.Auth.APIToken, false, s.handleListFingerprints))
+	r.Post("/v1/report", requireToken(s.Auth.APIToken, false, s.handleReport))
 	// EventSource cannot set headers, so the stream also accepts ?token=.
 	r.Get("/v1/stream", requireToken(s.Auth.APIToken, true, s.handleStream))
 	r.Handle("/metrics", promhttp.Handler())
@@ -242,6 +244,42 @@ func (s *Server) handleListFingerprints(w http.ResponseWriter, r *http.Request) 
 		fps = []model.Fingerprint{}
 	}
 	writeJSON(w, http.StatusOK, fps)
+}
+
+// handleReport builds the runtime reachability report from an uploaded npm
+// lockfile: it joins declared dependencies against observed fingerprints and,
+// when ?osv=1 is set (and the collector has egress), enriches with OSV.dev.
+// The request body is the raw package-lock.json.
+func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
+	service := r.URL.Query().Get("service")
+	body, err := io.ReadAll(io.LimitReader(r.Body, 32<<20))
+	if err != nil {
+		http.Error(w, "read body", http.StatusBadRequest)
+		return
+	}
+	declared, err := report.ParseLockfile(body)
+	if err != nil {
+		http.Error(w, "parse lockfile: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(declared) == 0 {
+		http.Error(w, "no packages found in lockfile", http.StatusBadRequest)
+		return
+	}
+	fps, err := s.store.ListFingerprints(r.Context(), service, "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	var vulns map[string][]report.Vulnerability
+	if r.URL.Query().Get("osv") == "1" || r.URL.Query().Get("osv") == "true" {
+		vulns, err = report.NewOSVClient().Query(r.Context(), declared)
+		if err != nil {
+			http.Error(w, "osv: "+err.Error(), http.StatusBadGateway)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, report.Build(service, declared, fps, vulns))
 }
 
 // handleStream is a server-sent-events feed of live events and alerts,

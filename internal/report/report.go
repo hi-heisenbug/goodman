@@ -11,22 +11,22 @@ import (
 // PackageRow is one declared package annotated with whether Goodman observed
 // it executing and any known vulnerabilities.
 type PackageRow struct {
-	Name            string
-	DeclaredVersion string
-	Dev             bool
-	Executed        bool
-	ExecutedVersion string // version Goodman actually observed (may differ)
-	Behaviors       int    // distinct behaviors observed
-	Vulns           []Vulnerability
+	Name            string          `json:"name"`
+	DeclaredVersion string          `json:"declared_version"`
+	Dev             bool            `json:"dev,omitempty"`
+	Executed        bool            `json:"executed"`
+	ExecutedVersion string          `json:"executed_version,omitempty"` // version Goodman actually observed (may differ)
+	Behaviors       int             `json:"behaviors,omitempty"`        // distinct behaviors observed
+	Vulns           []Vulnerability `json:"vulns,omitempty"`
 }
 
 // Report is the assembled reachability analysis.
 type Report struct {
-	Service       string
-	DeclaredCount int
-	ExecutedCount int
-	VulnRows      []PackageRow // rows with at least one vulnerability
-	Rows          []PackageRow // every declared package
+	Service       string       `json:"service,omitempty"`
+	DeclaredCount int          `json:"declared_count"`
+	ExecutedCount int          `json:"executed_count"`
+	VulnRows      []PackageRow `json:"vuln_rows"` // rows with at least one vulnerability
+	Rows          []PackageRow `json:"rows"`      // every declared package
 }
 
 // Build joins declared packages against observed fingerprints and (optional)
@@ -49,7 +49,9 @@ func Build(service string, declared []DeclaredPackage, fingerprints []model.Fing
 		}
 	}
 
-	rep := Report{Service: service, DeclaredCount: len(declared)}
+	// Initialize as empty (not nil) slices so JSON serializes to [] rather
+	// than null; API clients iterate these directly.
+	rep := Report{Service: service, DeclaredCount: len(declared), VulnRows: []PackageRow{}, Rows: []PackageRow{}}
 	for _, d := range declared {
 		row := PackageRow{
 			Name:            d.Name,

@@ -1136,3 +1136,124 @@ button {
   letter-spacing: 0.02em;
   text-transform: lowercase;
 }
+
+/* Reachability view */
+.reach-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.osv-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font: 600 13px Inter, sans-serif;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.reach-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-solid);
+}
+
+.reach-table {
+  width: 100%;
+  border-collapse: collapse;
+  font: 400 13px Inter, sans-serif;
+}
+
+.reach-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font: 700 11px "DM Sans", sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-muted);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.reach-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink);
+}
+
+.reach-table tr:last-child td {
+  border-bottom: none;
+}
+
+.reach-table tr.reachable {
+  background: var(--critical-bg);
+}
+
+.reach-table td.mono {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+
+.reach-table a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.reach-yes {
+  font-weight: 700;
+  color: var(--critical);
+}
+
+.reach-no {
+  color: var(--ink-muted);
+}
+
+/* severity variants reuse the rule-chip shape */
+.rule-chip.warning {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
+.rule-chip.neutral {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+  color: var(--ink-2);
+}
+
+.idle-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.idle-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-solid);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  color: var(--ink-2);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.idle-chip em {
+  font-style: normal;
+  color: var(--ink-muted);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+
+.idle-chip.more {
+  color: var(--ink-muted);
+  border-style: dashed;
+}

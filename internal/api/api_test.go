@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/hi-heisenbug/goodman/internal/model"
@@ -77,4 +78,67 @@ func sameStrings(got, want []string) bool {
 		}
 	}
 	return true
+}
+
+func TestReportEndpoint(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "report.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	// express executed; left-pad declared but never observed.
+	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "express", Version: "4.17.1",
+		Behaviors: map[string]model.BehaviorStat{"READ /a": {Count: 1}}, IsBaseline: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	lockfile := `{"lockfileVersion":3,"packages":{
+		"":{"name":"web","version":"1.0.0"},
+		"node_modules/express":{"version":"4.17.1"},
+		"node_modules/left-pad":{"version":"1.3.0"}}}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/report?service=web", strings.NewReader(lockfile))
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var rep struct {
+		DeclaredCount int `json:"declared_count"`
+		ExecutedCount int `json:"executed_count"`
+		Rows          []struct {
+			Name     string `json:"name"`
+			Executed bool   `json:"executed"`
+		} `json:"rows"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.DeclaredCount != 2 || rep.ExecutedCount != 1 {
+		t.Fatalf("declared=%d executed=%d, want 2/1", rep.DeclaredCount, rep.ExecutedCount)
+	}
+	got := map[string]bool{}
+	for _, r := range rep.Rows {
+		got[r.Name] = r.Executed
+	}
+	if !got["express"] || got["left-pad"] {
+		t.Fatalf("reachability wrong: %v", got)
+	}
+}
+
+func TestReportEndpointRejectsBadLockfile(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "report2.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	req := httptest.NewRequest(http.MethodPost, "/v1/report", strings.NewReader("{ not json"))
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
 }

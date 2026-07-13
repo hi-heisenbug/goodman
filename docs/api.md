@@ -135,6 +135,32 @@ List learned fingerprints, optionally filtered. Both params optional.
 ]
 ```
 
+### `POST /v1/report`
+
+Build the runtime reachability report from an uploaded npm lockfile. The
+request body is the raw `package-lock.json` (v1/v2/v3). The collector joins the
+declared dependencies against the fingerprints it has observed and returns the
+report as JSON. Query params:
+
+- `service` (optional): limit executed-package matching to one service.
+- `osv=1` (optional): enrich with OSV.dev advisories (needs collector egress).
+
+```jsonc
+// response
+{
+  "service": "web",
+  "declared_count": 1400,
+  "executed_count": 240,
+  "vuln_rows": [                     // packages with advisories, reachable first
+    { "name": "lodash", "declared_version": "4.17.20", "executed": true,
+      "behaviors": 3, "vulns": [ { "id": "GHSA-35jh-r3h4-6jhm", "severity": "HIGH" } ] }
+  ],
+  "rows": [ /* every declared package, with executed/behaviors */ ]
+}
+```
+
+This backs the dashboard's Reachability tab and mirrors `goodmanctl report`.
+
 ### `GET /v1/stream`
 
 Requires the API token via header or `?token=` (see Authentication).
@@ -195,7 +221,7 @@ being shed under load — investigate before trusting completeness.
 | `goodmanctl alerts [-status S] [-json]` | `GET /v1/alerts` |
 | `goodmanctl ack <id>` | `POST /v1/alerts/{id}/ack` |
 | `goodmanctl fingerprints [-service S] [-package P] [-json]` | `GET /v1/fingerprints` |
-| `goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]` | `GET /v1/fingerprints` + OSV.dev |
+| `goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]` | `GET /v1/fingerprints` + OSV.dev (the dashboard Reachability tab uses `POST /v1/report`) |
 | `goodmanctl attribute -pid N [-stacks]` | loads eBPF directly (needs root) |
 
 ### `goodmanctl report`

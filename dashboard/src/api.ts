@@ -1,4 +1,4 @@
-import type { Alert, Fingerprint } from "./types";
+import type { Alert, Fingerprint, Report } from "./types";
 
 // The collector can require a bearer token on the API (GOODMAN_API_TOKEN).
 // The token is kept in localStorage; a 401 triggers the registered handler so
@@ -53,6 +53,18 @@ export async function fetchFingerprints(service?: string, pkg?: string): Promise
   if (pkg) u.searchParams.set("package", pkg);
   const r = await request(u);
   if (!r.ok) throw new Error(`fingerprints: ${r.status}`);
+  return r.json();
+}
+
+// buildReport uploads a package-lock.json and returns the reachability report:
+// declared dependencies joined with what Goodman observed executing, optionally
+// enriched with OSV.dev vulnerabilities.
+export async function buildReport(lockfile: string, opts?: { service?: string; osv?: boolean }): Promise<Report> {
+  const u = new URL("/v1/report", location.origin);
+  if (opts?.service) u.searchParams.set("service", opts.service);
+  if (opts?.osv) u.searchParams.set("osv", "1");
+  const r = await request(u, { method: "POST", body: lockfile });
+  if (!r.ok) throw new Error(`report: ${r.status} ${await r.text()}`);
   return r.json();
 }
 
