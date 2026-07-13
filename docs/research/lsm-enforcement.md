@@ -1,6 +1,13 @@
 # Research: eBPF LSM enforcement (Phase 6) — NO-GO on kernel work; scaffold only
 
-> **Status:** research decision (2026-07-13) for `plan-deferred.md` Phase 6.
+> **Status update (2026-07-13):** implementation authorized by the maintainer
+> (evidence gates overridden); the full implementation plan is
+> [`lsm-enforcement-impl.md`](lsm-enforcement-impl.md). The product still
+> ships **fail-open** and with enforcement **off by default** at every layer.
+> The safety design below remains the reference; the impl plan supersedes the
+> `action: "block"` reject-loudly posture (block becomes valid when it ships).
+
+> **Original status:** research decision (2026-07-13) for `plan-deferred.md` Phase 6.
 > **Decision: NO-GO on any `bpf/` change** until all three gates fire:
 > (1) 60–90 days of Phase 3 `action: warn` evidence across 2–3 real
 > environments with near-zero false positives, (2) a customer volunteering a

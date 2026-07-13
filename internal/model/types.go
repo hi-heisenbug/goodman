@@ -11,9 +11,12 @@ import (
 type EventType uint8
 
 const (
-	EventFileOpen   EventType = 1
-	EventNetConnect EventType = 2
-	EventProcExec   EventType = 3
+	EventFileOpen      EventType = 1
+	EventNetConnect    EventType = 2
+	EventProcExec      EventType = 3
+	EventDenyFileOpen  EventType = 4
+	EventDenyConnect   EventType = 5
+	EventDenyExec      EventType = 6
 )
 
 func (t EventType) String() string {
@@ -24,6 +27,12 @@ func (t EventType) String() string {
 		return "NET_CONNECT"
 	case EventProcExec:
 		return "PROC_EXEC"
+	case EventDenyFileOpen:
+		return "DENY_FILE_OPEN"
+	case EventDenyConnect:
+		return "DENY_CONNECT"
+	case EventDenyExec:
+		return "DENY_EXEC"
 	default:
 		return fmt.Sprintf("UNKNOWN(%d)", uint8(t))
 	}
@@ -81,6 +90,7 @@ type Attributed struct {
 	Behavior  string    `json:"behavior"`         // canonicalized: "READ /app/src/**" or "CONNECT 1.2.3.4:443"
 	Timestamp uint64    `json:"timestamp"`        // ns since boot converted to unix ns by the sensor
 	Sensor    string    `json:"sensor,omitempty"` // stamped by the collector from the batch header
+	Denied    bool      `json:"denied,omitempty"` // kernel LSM denied this attempt
 }
 
 // EventBatch is what the sensor POSTs to the collector.
@@ -135,7 +145,8 @@ type Alert struct {
 	BaselineBehaviors []string   `json:"baseline_behaviors,omitempty"`
 	NewBehaviors      []string   `json:"new_behaviors"`
 	MatchedRules      []string   `json:"matched_rules,omitempty"` // union of matched rule names
-	WouldBlock        bool       `json:"would_block,omitempty"`   // true if any matched rule has action=warn
+	WouldBlock        bool       `json:"would_block,omitempty"`   // true if any matched rule has action=warn or block
+	Blocked           bool       `json:"blocked,omitempty"`       // true after a kernel deny for this alert
 	Evidence          []Evidence `json:"evidence,omitempty"`      // per-behavior triage context
 	DetectedAt        uint64     `json:"detected_at"`             // unix ns
 	Status            string     `json:"status"`                  // open | acknowledged | resolved

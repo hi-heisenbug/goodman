@@ -36,6 +36,21 @@ func CanonicalizeWith(t model.EventType, arg string, connectCIDRBits int) string
 			return "EXEC <unknown>"
 		}
 		return "EXEC " + filepath.Base(arg)
+	case model.EventDenyFileOpen:
+		if arg == "" {
+			return "READ <unknown>"
+		}
+		return "READ " + arg
+	case model.EventDenyConnect:
+		return "CONNECT " + aggregateConnect(arg, connectCIDRBits)
+	case model.EventDenyExec:
+		if arg == "" {
+			return "EXEC <unknown>"
+		}
+		if strings.HasPrefix(arg, "/") {
+			return "EXEC " + arg
+		}
+		return "EXEC " + filepath.Base(arg)
 	default:
 		return "UNKNOWN " + arg
 	}

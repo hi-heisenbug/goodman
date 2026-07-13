@@ -28,6 +28,7 @@ import (
 
 	"github.com/hi-heisenbug/goodman/internal/coverage"
 	"github.com/hi-heisenbug/goodman/internal/diff"
+	"github.com/hi-heisenbug/goodman/internal/enforce"
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/model"
 	"github.com/hi-heisenbug/goodman/internal/report"
@@ -54,6 +55,7 @@ type Server struct {
 	fpEng   *fingerprint.Engine
 	diffEng *diff.Engine
 	cover   *coverage.Registry
+	enforce *enforce.Manager
 
 	// Auth protects the HTTP surface; zero value leaves it open (local dev).
 	Auth AuthConfig
@@ -70,6 +72,11 @@ func NewServer(s *store.Store, fpEng *fingerprint.Engine, diffEng *diff.Engine) 
 		cover: coverage.NewRegistry(),
 		subs:  map[chan []byte]bool{},
 	}
+}
+
+// SetEnforceManager wires the enforcement state manager (optional).
+func (s *Server) SetEnforceManager(m *enforce.Manager) {
+	s.enforce = m
 }
 
 // SetAlertBudget configures the Coverage panel's soft daily alert target.
@@ -101,6 +108,10 @@ func (s *Server) Router(ui fs.FS) http.Handler {
 	r.Get("/v1/report", requireToken(s.Auth.APIToken, false, s.handleGetReport))
 	// EventSource cannot set headers, so the stream also accepts ?token=.
 	r.Get("/v1/stream", requireToken(s.Auth.APIToken, true, s.handleStream))
+	r.Get("/v1/enforce/state", requireToken(s.Auth.IngestToken, false, s.handleEnforceState))
+	r.Get("/v1/enforce", requireToken(s.Auth.APIToken, false, s.handleEnforceStatus))
+	r.Post("/v1/enforce/on", requireToken(s.Auth.APIToken, false, s.handleEnforceOn))
+	r.Post("/v1/enforce/off", requireToken(s.Auth.APIToken, false, s.handleEnforceOff))
 	r.Handle("/metrics", promhttp.Handler())
 
 	if ui != nil {
@@ -171,11 +182,21 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 
 	ctx := r.Context()
 	if len(batch.Events) == 0 {
-		// Heartbeat: sensor is alive but quiet.
 		writeJSON(w, http.StatusOK, map[string]any{"ingested": 0, "alerts": 0})
 		return
 	}
-	updates, err := s.fpEng.Ingest(ctx, batch.Events)
+
+	var learn []model.Attributed
+	var denied []model.Attributed
+	for _, ev := range batch.Events {
+		if ev.Denied {
+			denied = append(denied, ev)
+		} else {
+			learn = append(learn, ev)
+		}
+	}
+
+	updates, err := s.fpEng.Ingest(ctx, learn)
 	if err != nil {
 		log.Printf("api: ingest: %v", err)
 		http.Error(w, "store error", http.StatusInternalServerError)
@@ -183,9 +204,30 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	}
 	var alerts []model.Alert
 	for _, up := range updates {
+		for _, b := range up.FreshBehaviors {
+			s.recordBlockBehavior(b)
+		}
 		a, err := s.diffEng.React(ctx, up)
 		if err != nil {
 			log.Printf("api: diff: %v", err)
+			continue
+		}
+		if a != nil {
+			alerts = append(alerts, *a)
+			for _, b := range a.NewBehaviors {
+				s.recordBlockBehavior(b)
+			}
+			alertsEmitted.WithLabelValues(a.Severity).Inc()
+			if s.Notifier != nil {
+				s.Notifier.Notify(*a)
+			}
+		}
+	}
+	for _, ev := range denied {
+		s.recordBlockBehavior(ev.Behavior)
+		a, err := s.diffEng.ReactDenied(ctx, ev)
+		if err != nil {
+			log.Printf("api: denied: %v", err)
 			continue
 		}
 		if a != nil {
@@ -201,6 +243,78 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		s.broadcast("alerts", alerts)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ingested": len(batch.Events), "alerts": len(alerts)})
+}
+
+func (s *Server) recordBlockBehavior(behavior string) {
+	if s.enforce != nil && behavior != "" {
+		s.enforce.RecordBehavior(behavior)
+	}
+}
+
+func (s *Server) handleEnforceState(w http.ResponseWriter, r *http.Request) {
+	sensor := r.URL.Query().Get("sensor")
+	active := r.URL.Query().Get("enforcement_active") == "true"
+	if s.enforce == nil {
+		if sensor != "" {
+			// no-op when enforcement not configured
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "rev": 0, "verdicts": enforce.VerdictSet{}})
+		return
+	}
+	if sensor != "" {
+		s.enforce.RecordSensorHeartbeat(sensor, active)
+	}
+	enabled, rev, vs := s.enforce.StateForSensor()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"enabled":  enabled,
+		"rev":      rev,
+		"verdicts": vs,
+		"skipped":  vs.Skipped,
+	})
+}
+
+func (s *Server) handleEnforceStatus(w http.ResponseWriter, r *http.Request) {
+	if s.enforce == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"master_gate": false, "enabled": false})
+		return
+	}
+	enabled, master, rev, vs, sensors := s.enforce.Status()
+	writeJSON(w, http.StatusOK, map[string]any{
+		"master_gate": master,
+		"enabled":     enabled,
+		"rev":         rev,
+		"verdicts":    vs,
+		"skipped":     vs.Skipped,
+		"sensors":     sensors,
+	})
+}
+
+func (s *Server) handleEnforceOn(w http.ResponseWriter, r *http.Request) {
+	if s.enforce == nil {
+		http.Error(w, "enforcement not configured", http.StatusNotFound)
+		return
+	}
+	if err := s.enforce.SetEnabled(r.Context(), true); err != nil {
+		if errors.Is(err, enforce.ErrMasterGateOff) {
+			http.Error(w, err.Error(), http.StatusConflict)
+			return
+		}
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
+}
+
+func (s *Server) handleEnforceOff(w http.ResponseWriter, r *http.Request) {
+	if s.enforce == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		return
+	}
+	if err := s.enforce.SetEnabled(r.Context(), false); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
 }
 
 func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {

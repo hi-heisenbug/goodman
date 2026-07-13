@@ -19,6 +19,7 @@ export interface Alert {
   new_behaviors: string[];
   matched_rules?: string[];
   would_block?: boolean;
+  blocked?: boolean;
   evidence?: AlertEvidence[];
   detected_at: number; // unix ns
   status: AlertStatus;

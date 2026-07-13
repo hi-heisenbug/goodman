@@ -48,3 +48,64 @@ print("OK: exactly one CRITICAL alert with correct drift and no baseline leakage
 PY
 
 echo "== SMOKE TEST PASSED =="
+
+echo "== enforcement pipeline (no kernel) =="
+ENF_DB="$(mktemp -u /tmp/goodman-enf-smoke-XXXX.db)"
+ENF_PORT=8847
+ENF_BASE="http://127.0.0.1:$ENF_PORT"
+ENF_RULES="$(mktemp /tmp/goodman-enf-rules-XXXX.json)"
+cat >"$ENF_RULES" <<'JSON'
+[{"name":"shadow","pattern":"^READ /etc/shadow","always_on":true,"action":"block"}]
+JSON
+
+GOODMAN_DSN="$ENF_DB" GOODMAN_LEARN_OBS=2 GOODMAN_LEARN_MIN_AGE=1ns GOODMAN_LISTEN=":$ENF_PORT" \
+  GOODMAN_ENFORCE_ENABLED=true ./bin/collector -rules="$ENF_RULES" >"$LOG.enf" 2>&1 &
+ENF_PID=$!
+trap 'kill "${COLL_PID:-}" "${ENF_PID:-}" 2>/dev/null || true; rm -f "$DB" "$DB"-* "$ENF_DB" "$ENF_DB"-* "$LOG" "$LOG.enf" "$ENF_RULES"' EXIT
+
+for i in $(seq 1 50); do curl -sf "$ENF_BASE/v1/healthz" >/dev/null 2>&1 && break; sleep 0.1; done
+
+curl -sf -X POST "$ENF_BASE/v1/events" -H 'Content-Type: application/json' -d '{
+  "sensor":"smoke",
+  "events":[{"service":"web","package":"evil","version":"1.0.0","type":1,"behavior":"READ /etc/shadow","timestamp":100}]
+}' >/dev/null
+
+STATE="$(curl -sf "$ENF_BASE/v1/enforce/state")"
+python3 - "$STATE" <<'PY' || fail "enforce state assertions"
+import json, sys
+s = json.loads(sys.argv[1])
+assert s.get("enabled") is False
+open_paths = s.get("verdicts", {}).get("open", [])
+assert "/etc/shadow" in open_paths, open_paths
+print("OK: verdict compiled while runtime switch off")
+PY
+
+curl -sf -X POST "$ENF_BASE/v1/enforce/on" >/dev/null
+STATE="$(curl -sf "$ENF_BASE/v1/enforce/state")"
+python3 - "$STATE" <<'PY' || fail "enforce on"
+import json, sys
+s = json.loads(sys.argv[1])
+assert s.get("enabled") is True
+PY
+
+curl -sf -X POST "$ENF_BASE/v1/enforce/off" >/dev/null
+STATE="$(curl -sf "$ENF_BASE/v1/enforce/state")"
+python3 - "$STATE" <<'PY' || fail "enforce off"
+import json, sys
+assert json.loads(sys.argv[1]).get("enabled") is False
+PY
+
+curl -sf -X POST "$ENF_BASE/v1/events" -H 'Content-Type: application/json' -d '{
+  "sensor":"smoke",
+  "events":[{"service":"web","package":"evil","version":"1.0.0","type":1,"behavior":"READ /etc/shadow","timestamp":200,"denied":true}]
+}' >/dev/null
+
+ALERTS="$(curl -sf "$ENF_BASE/v1/alerts")"
+python3 - "$ALERTS" <<'PY' || fail "blocked alert"
+import json, sys
+alerts = json.loads(sys.argv[1])
+assert any(a.get("blocked") for a in alerts), alerts
+print("OK: denied event upgraded alert to blocked")
+PY
+
+echo "== ENFORCEMENT SMOKE PASSED =="

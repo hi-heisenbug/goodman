@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -365,10 +364,8 @@ func TestWarnActionWouldBlock(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CompileRules([]Rule{{Name: "bad", Pattern: `^READ `, Action: "block"}}); err == nil {
-		t.Fatal("block action must fail CompileRules")
-	} else if !strings.Contains(err.Error(), `action "block" is not available yet`) {
-		t.Fatalf("block error = %q, want enforcement-not-shipped message", err)
+	if _, err := CompileRules([]Rule{{Name: "block-rule", Pattern: `^READ `, Action: ActionBlock}}); err != nil {
+		t.Fatalf("block action must be accepted: %v", err)
 	}
 
 	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 2, MinAge: time.Nanosecond})
@@ -392,6 +389,47 @@ func TestWarnActionWouldBlock(t *testing.T) {
 	got, err := s.GetAlert(ctx, alert.ID)
 	if err != nil || got == nil || !got.WouldBlock {
 		t.Fatalf("persisted WouldBlock = %+v err=%v", got, err)
+	}
+}
+
+func TestBlockActionWouldBlockAndDeniedUpgrade(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "block.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	rules, err := CompileRules([]Rule{
+		{Name: "shadow", AlwaysOn: true, Pattern: `^READ /etc/shadow`, Action: ActionBlock},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 2, MinAge: time.Nanosecond})
+	diffEng := NewEngine(s, rules)
+	ups, err := fpEng.Ingest(ctx, []model.Attributed{
+		{Service: "web", Package: "evil", Version: "1.0.0", Type: model.EventFileOpen,
+			Behavior: "READ /etc/shadow", Timestamp: 100, Sensor: "node-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alert *model.Alert
+	for _, up := range ups {
+		if a, _ := diffEng.React(ctx, up); a != nil {
+			alert = a
+		}
+	}
+	if alert == nil || !alert.WouldBlock {
+		t.Fatalf("want WouldBlock from block rule, got %+v", alert)
+	}
+	upgraded, err := diffEng.ReactDenied(ctx, model.Attributed{
+		Service: "web", Package: "evil", Version: "1.0.0",
+		Behavior: "READ /etc/shadow", Denied: true, Timestamp: 200, Sensor: "node-a",
+	})
+	if err != nil || upgraded == nil || !upgraded.Blocked {
+		t.Fatalf("ReactDenied = %+v err=%v", upgraded, err)
 	}
 }
 

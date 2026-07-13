@@ -86,13 +86,30 @@ if [[ "$OS" == "Linux" ]]; then
   else
     warn "kernel config not readable ($CFG) — skipping CONFIG_* checks"
   fi
-  # LSM enforcement (future block mode) — warn only; detection works without it.
-  hdr "LSM enforcement (future block mode)"
+  # LSM enforcement (block mode) — warn only; detection works without it.
+  hdr "LSM enforcement (block mode)"
   LSM_OK=1
+  KR="$(uname -r 2>/dev/null || echo 0)"
+  KR_MAJOR="${KR%%.*}"
+  KR_REST="${KR#*.}"
+  KR_MINOR="${KR_REST%%.*}"
+  if [[ "$KR_MAJOR" -gt 5 ]] || { [[ "$KR_MAJOR" -eq 5 ]] && [[ "$KR_MINOR" -ge 10 ]]; }; then
+    ok "kernel $KR (>= 5.10 for bpf_d_path in file_open enforcement)"
+  else
+    warn "kernel $KR < 5.10 — file_open enforcement needs 5.10; detection works from 5.8"
+    LSM_OK=0
+  fi
+  if [[ -f /sys/fs/cgroup/cgroup.controllers ]]; then
+    ok "cgroup v2 unified hierarchy"
+  else
+    warn "cgroup v2 not detected (/sys/fs/cgroup/cgroup.controllers missing)"
+    hint "Enforcement scope uses cgroup ids; cgroup v1 clusters are detection-only."
+    LSM_OK=0
+  fi
   if [[ -r "$CFG" ]]; then
     if $reader -q "^CONFIG_BPF_LSM=y" "$CFG" 2>/dev/null; then ok "CONFIG_BPF_LSM=y"; else
       warn "CONFIG_BPF_LSM not set in $CFG"
-      hint "Kernel LSM BPF hooks are required for future block mode (Phase 6)."
+      hint "Kernel LSM BPF hooks are required for block mode (Phase 6)."
       LSM_OK=0
     fi
   else
@@ -111,9 +128,9 @@ if [[ "$OS" == "Linux" ]]; then
     LSM_OK=0
   fi
   if [[ "$LSM_OK" -eq 1 ]]; then
-    ok "LSM enforcement (future block mode): available"
+    ok "LSM enforcement (block mode): available"
   else
-    warn "LSM enforcement (future block mode): not available (detection-only is fine)"
+    warn "LSM enforcement (block mode): not available (detection-only is fine)"
   fi
   # unprivileged bpf + capabilities
   UBD="$(cat /proc/sys/kernel/unprivileged_bpf_disabled 2>/dev/null || echo '?')"

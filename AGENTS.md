@@ -248,6 +248,16 @@ environment:
 rule-level `exclude` lives in `internal/diff`. Keep
 private/loopback/link-local/cloud-metadata addresses exact when aggregating.
 
+**LSM enforcement (Phase 6).** Fail-open always; enforcement OFF by default
+(Helm `enforce.enabled`, `GOODMAN_ENFORCE_ENABLED`, runtime switch, deadline
+map). Deny map keys are literal paths/addresses only — never hashes or
+prefix tries. New `EventType` deny values (`EVENT_DENY_*`) mirror in
+`internal/model/types.go` in the same commit; they are enum values on the
+existing `type` field, not layout changes (`types_test.go` stays unedited).
+Denied events skip fingerprint learning; ring-buffer reader stays non-blocking.
+Live proof requires human `sudo make e2e` on an LSM kernel — see
+`docs/enforcement.md`.
+
 **Add a high-risk rule** — edit `deploy/rules.example.json` (or `DefaultRules`
 in `internal/diff/diff.go`). Patterns are case-insensitive regexes matched
 against the canonical behavior string (`READ …`, `CONNECT …`, `EXEC …`).

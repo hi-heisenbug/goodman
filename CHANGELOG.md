@@ -27,7 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   union behaviors and sum `obs_count` instead of last-writer-wins. Concurrency
   test in `internal/fingerprint`. Full HA replicas + leader election shipped
   in Phase 5 — `docs/research/collector-ha.md`, `docs/deployment.md`.
-- Phase 6 scaffold (no `bpf/` changes): `action: "block"` fails rule loading
+- Phase 6 eBPF LSM enforcement (block mode): fail-open kernel denies via LSM
+  hooks; `action: "block"` on rules; `GOODMAN_ENFORCE_ENABLED` master gate
+  (default false); `goodmanctl enforce on|off|status`; dashboard `BLOCKED`
+  chip; `docs/enforcement.md` and `docs/pilot-runbook.md`. Human `sudo make e2e`
+  on LSM kernel still required for live proof.
+- Phase 6 scaffold (superseded): `action: "block"` fails rule loading
   with an explicit enforcement-not-shipped message; `make doctor` adds warn-level
   `CONFIG_BPF_LSM` and active-LSM checks; posture documented in
   `docs/configuration.md` and `deploy/rules.example.json`. Kernel LSM enforcement

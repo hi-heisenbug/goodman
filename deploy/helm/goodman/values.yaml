@@ -120,3 +120,11 @@ rules: ""
 
 rbac:
   create: true
+
+# Kernel enforcement (eBPF LSM block mode). Requires kernel >= 5.10 with
+# CONFIG_BPF_LSM=y and "bpf" in the active lsm= list, and cgroup v2.
+# Denies apply only inside namespaces labeled goodman.io/enforce=enabled,
+# only for behaviors matching rules with action: "block", and only while the
+# sensor heartbeat is live. Everything fails open.
+enforce:
+  enabled: false

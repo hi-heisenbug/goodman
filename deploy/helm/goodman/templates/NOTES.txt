@@ -12,6 +12,20 @@ The API requires a token (the dashboard prompts for it on first load):
   kubectl -n {{ .Release.Namespace }} get secret {{ include "goodman.authSecretName" . }} -o jsonpath='{.data.api-token}' | base64 -d
 {{- end }}
 
+{{- if .Values.enforce.enabled }}
+
+Kernel enforcement is ENABLED (master gate). Label namespaces for scope, then
+arm at runtime:
+
+  kubectl label namespace <app-namespace> goodman.io/enforce=enabled
+  goodmanctl enforce status
+  goodmanctl enforce on
+
+See docs/enforcement.md. Everything fails open; enforce off or sensor loss
+disarms within seconds.
+
+{{- end }}
+
 {{- if .Values.webhook.enabled }}
 
 Tier-1 attribution: the NODE_OPTIONS admission webhook is ENABLED. Label any

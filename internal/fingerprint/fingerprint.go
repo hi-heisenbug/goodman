@@ -47,6 +47,9 @@ func (e *Engine) Ingest(ctx context.Context, events []model.Attributed) ([]Updat
 	type key struct{ service, pkg, version string }
 	grouped := map[key][]model.Attributed{}
 	for _, ev := range events {
+		if ev.Denied {
+			continue // denied attempts must not feed baseline learning
+		}
 		if ev.Package == "" || ev.Behavior == "" {
 			continue
 		}

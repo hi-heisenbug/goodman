@@ -56,6 +56,12 @@ func TestAuthRejectsAndAccepts(t *testing.T) {
 		{"healthz open", http.MethodGet, "/v1/healthz", "", "", http.StatusOK},
 		{"readyz open", http.MethodGet, "/v1/readyz", "", "", http.StatusOK},
 		{"metrics open", http.MethodGet, "/metrics", "", "", http.StatusOK},
+		{"enforce state no token", http.MethodGet, "/v1/enforce/state", "", "", http.StatusUnauthorized},
+		{"enforce state ingest token", http.MethodGet, "/v1/enforce/state", "Bearer ingest-secret", "", http.StatusOK},
+		{"enforce status no token", http.MethodGet, "/v1/enforce", "", "", http.StatusUnauthorized},
+		{"enforce status api token", http.MethodGet, "/v1/enforce", "Bearer api-secret", "", http.StatusOK},
+		{"enforce on no token", http.MethodPost, "/v1/enforce/on", "", "", http.StatusUnauthorized},
+		{"enforce off api token", http.MethodPost, "/v1/enforce/off", "Bearer api-secret", "", http.StatusOK},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

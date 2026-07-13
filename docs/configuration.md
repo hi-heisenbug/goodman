@@ -30,6 +30,7 @@ variables take precedence over built-in defaults.
 | `-digest-interval` | `GOODMAN_DIGEST_INTERVAL` | `0` | Emit a weekly digest to the webhook on this cadence (`168h` = weekly). `0` = disabled. Requires `-webhook-url`. Fires once at startup. |
 | `-digest-alert-budget` | `GOODMAN_DIGEST_ALERT_BUDGET` | `5` | Soft open-alert noise target quoted in the digest. |
 | `-ha-replicas` | `GOODMAN_HA_REPLICAS` | `1` | Expected collector replica count. When `>1`, Postgres is required and singleton background loops use advisory-lock leader election. Helm sets this from `collector.replicas`. |
+| `-enforce-enabled` | `GOODMAN_ENFORCE_ENABLED` | `false` | Master gate for kernel LSM enforcement. When false, `/v1/enforce/on` fails and sensors never arm the deadline. |
 
 **Learning window.** A `(service, package, version)` fingerprint becomes a
 baseline only when it has been observed `learn-obs` times **and** spans at least
@@ -80,6 +81,9 @@ the dashboard. The same webhook also receives the weekly digest when
 | `-tls-ca` | `GOODMAN_TLS_CA` | *(empty)* | PEM CA bundle to trust for an `https://` collector (private CA / self-signed). Empty uses system roots. |
 | `-connect-cidr` | `GOODMAN_CONNECT_CIDR` | `0` | Aggregate public destination IPs to this IPv4 prefix (8-32) in `CONNECT` behaviors. `0` keeps exact IPs. See noise control below. |
 | `-spool-events` | `GOODMAN_SPOOL_EVENTS` | `50000` | Max attributed events retained in RAM when the collector is unreachable. Oldest are evicted first; see `goodman_sensor_spool_*` metrics. |
+| `-enforce-enabled` | `GOODMAN_ENFORCE_ENABLED` | `false` | Load LSM enforcement programs and poll `/v1/enforce/state` (master gate at deploy; default off). |
+| `-cgroup-root` | `GOODMAN_CGROUP_ROOT` | `/sys/fs/cgroup` | Host cgroup v2 mount for enforcement scope (DaemonSet mounts when `enforce.enabled`). |
+| `-enforce-cgroup` | — | *(none)* | Repeatable explicit cgroup2 paths for lab/e2e scope (not a product surface). |
 | `-watch-interval` | — | `3s` | How often to rescan `/proc` for runtime processes. |
 | `-stdout` | — | `false` | Print attributed events to stdout instead of sending to the collector (debugging). |
 | `-raw` | — | `false` | With `-stdout`: also print raw events including stack depth. |
@@ -109,7 +113,7 @@ Each rule supports these fields:
 | `pattern` | Case-insensitive regex matched against the canonical behavior string. |
 | `always_on` | Fire even when no baseline exists yet, learning window included. Reserve this for behaviors that are never legitimate learning (credential reads, cloud metadata). Without it, the rule only escalates drift against an established baseline. |
 | `exclude` | Regexes that suppress a match without deleting the rule, for noise tuning ("new connects are critical, except to our CDN"). |
-| `action` | Enforcement posture: `"alert"` (default) raises a normal alert; `"warn"` also sets `would_block` on the alert (audit mode — nothing is blocked). `"block"` is **not available yet** — the collector refuses to start with that value until kernel LSM enforcement ships (Phase 6); use `"warn"` to build the audit evidence that unlocks it. See [`docs/research/lsm-enforcement.md`](../docs/research/lsm-enforcement.md). Other unknown values also fail collector startup. |
+| `action` | Enforcement posture: `"alert"` (default) raises a normal alert; `"warn"` also sets `would_block` on the alert (audit — nothing denied). `"block"` sets `would_block` and compiles literal kernel verdicts when enforcement is armed. See [`docs/enforcement.md`](enforcement.md). Unknown values fail collector startup. |
 
 The built-in defaults (also in [`deploy/rules.example.json`](../deploy/rules.example.json); the example sets `new-exec` to `"action": "warn"` to show the field — built-in defaults with empty `-rules` stay `"alert"`):
 

@@ -30,6 +30,7 @@ import (
 
 	"github.com/hi-heisenbug/goodman/internal/attribute"
 	"github.com/hi-heisenbug/goodman/internal/coverage"
+	"github.com/hi-heisenbug/goodman/internal/enforce"
 	"github.com/hi-heisenbug/goodman/internal/loader"
 	"github.com/hi-heisenbug/goodman/internal/model"
 	"github.com/hi-heisenbug/goodman/internal/spool"
@@ -57,7 +58,19 @@ var (
 	mSpoolDepth = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "goodman_sensor_spool_depth",
 		Help: "Events waiting in the collector-retry spool."})
+	mDenied = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "goodman_sensor_denied_total",
+		Help: "Kernel LSM deny events attributed and shipped."}, []string{"type"})
 )
+
+// multiString is a repeatable string flag.
+type multiString []string
+
+func (m *multiString) String() string { return strings.Join(*m, ",") }
+func (m *multiString) Set(v string) error {
+	*m = append(*m, v)
+	return nil
+}
 
 func main() {
 	var (
@@ -73,19 +86,24 @@ func main() {
 		tlsCA         = flag.String("tls-ca", os.Getenv("GOODMAN_TLS_CA"), "PEM CA bundle to trust for an https collector (empty = system roots)")
 		connectCIDR   = flag.Int("connect-cidr", envIntOr("GOODMAN_CONNECT_CIDR", 0), "aggregate public destination IPs to this IPv4 prefix in CONNECT behaviors (8-32; 0 = exact IPs)")
 		spoolEvents   = flag.Int("spool-events", envIntOr("GOODMAN_SPOOL_EVENTS", 50_000), "max attributed events to retain when the collector is unreachable")
+		enforceEnabled = flag.Bool("enforce-enabled", envBoolOr("GOODMAN_ENFORCE_ENABLED", false), "load LSM enforcement programs (default false)")
+		cgroupRoot    = flag.String("cgroup-root", envOr("GOODMAN_CGROUP_ROOT", "/sys/fs/cgroup"), "host cgroup2 mount for enforcement scope")
+		enforceCgroup multiString
 	)
+	flag.Var(&enforceCgroup, "enforce-cgroup", "cgroup2 path subject to enforcement (repeatable; e2e/lab)")
 	flag.Parse()
 	log.SetPrefix("sensor: ")
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	l, err := loader.New(*procRoot)
+	l, err := loader.NewWithOptions(loader.Options{ProcRoot: *procRoot, Enforce: *enforceEnabled})
 	if err != nil {
 		log.Fatalf("load eBPF: %v", err)
 	}
 	defer l.Close()
-	log.Printf("eBPF programs attached (open/openat/openat2, connect, execve); proc root %s", *procRoot)
+	log.Printf("eBPF programs attached (open/openat/openat2, connect, execve); proc root %s; enforce=%t active=%t",
+		*procRoot, *enforceEnabled, l.EnforcementActive())
 
 	if *metricsAddr != "" {
 		go func() {
@@ -150,6 +168,10 @@ func main() {
 			}
 			mEvents.WithLabelValues(model.EventType(ev.Type).String()).Inc()
 			at := resolver.Attribute(ev, bootOffset)
+			if isDenyEvent(ev.Type) {
+				at.Denied = true
+				mDenied.WithLabelValues(model.EventType(ev.Type).String()).Inc()
+			}
 			switch {
 			case at.Package == "<unknown>":
 				mAttributed.WithLabelValues("unknown").Inc()
@@ -189,7 +211,105 @@ func main() {
 		log.Fatalf("collector TLS: %v", err)
 	}
 	go reportCoverageLoop(ctx, client, *collectorURL, *ingestToken, sensorName)
+	if *enforceEnabled {
+		go enforceScopeLoop(ctx, l, *cgroupRoot, sensorName, []string(enforceCgroup))
+		go enforcePollLoop(ctx, client, l, *collectorURL, *ingestToken, sensorName)
+	}
 	sendBatches(ctx, client, *collectorURL, *ingestToken, sensorName, out, *batchEvery, *spoolEvents, &dropped)
+}
+
+func isDenyEvent(t uint8) bool {
+	switch model.EventType(t) {
+	case model.EventDenyFileOpen, model.EventDenyConnect, model.EventDenyExec:
+		return true
+	default:
+		return false
+	}
+}
+
+func enforceScopeLoop(ctx context.Context, l *loader.Loader, cgroupRoot, nodeName string, explicit []string) {
+	t := time.NewTicker(5 * time.Second)
+	defer t.Stop()
+	reconcile := func() {
+		ids := map[uint64]bool{}
+		if len(explicit) > 0 {
+			ids = coverage.ResolveCgroupPaths(explicit)
+		} else if scanned, err := coverage.ScanEnforcedCgroups(cgroupRoot, nodeName); err == nil {
+			ids = scanned
+		}
+		if err := l.ReconcileEnforcedCgroups(ids); err != nil {
+			log.Printf("enforce scope: %v", err)
+		}
+	}
+	reconcile()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			reconcile()
+		}
+	}
+}
+
+func enforcePollLoop(ctx context.Context, client *http.Client, l *loader.Loader, baseURL, token, sensor string) {
+	const ttl = 10 * time.Second
+	t := time.NewTicker(500 * time.Millisecond)
+	defer t.Stop()
+	var lastRev int
+	poll := func() {
+		u := baseURL + "/v1/enforce/state?sensor=" + urlQueryEscape(sensor) +
+			"&enforcement_active=" + strconv.FormatBool(l.EnforcementActive())
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return
+		}
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return // fail-open: deadline lapses on its own
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			return
+		}
+		var state struct {
+			Enabled  bool                `json:"enabled"`
+			Rev      int                 `json:"rev"`
+			Verdicts enforce.VerdictSet  `json:"verdicts"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
+			return
+		}
+		if state.Enabled {
+			deadline := loader.MonotonicNowNs() + uint64(ttl.Nanoseconds())
+			_ = l.SetEnforceDeadline(deadline)
+		} else {
+			_ = l.SetEnforceDeadline(0)
+		}
+		if state.Rev != lastRev {
+			lastRev = state.Rev
+			if err := l.ReconcileDenyMaps(state.Verdicts); err != nil {
+				log.Printf("enforce verdicts: %v", err)
+			}
+		}
+	}
+	poll()
+	for {
+		select {
+		case <-ctx.Done():
+			_ = l.SetEnforceDeadline(0)
+			return
+		case <-t.C:
+			poll()
+		}
+	}
+}
+
+func urlQueryEscape(s string) string {
+	return strings.ReplaceAll(s, " ", "%20")
 }
 
 // newCollectorClient builds the HTTP client for collector POSTs; a non-empty
@@ -321,6 +441,14 @@ func envDurOr(k string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+func envBoolOr(k string, def bool) bool {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	return v == "1" || v == "true" || v == "TRUE"
 }
 
 // reportCoverageLoop posts namespace injection coverage to the collector when

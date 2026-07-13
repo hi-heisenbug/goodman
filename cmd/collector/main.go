@@ -20,6 +20,7 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/api/ui"
 	"github.com/hi-heisenbug/goodman/internal/diff"
 	"github.com/hi-heisenbug/goodman/internal/digest"
+	"github.com/hi-heisenbug/goodman/internal/enforce"
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/notify"
 	"github.com/hi-heisenbug/goodman/internal/report"
@@ -58,6 +59,7 @@ func main() {
 		admissionListen = flag.String("admission-listen", os.Getenv("GOODMAN_ADMISSION_LISTEN"), "serve the NODE_OPTIONS mutating webhook on this address (empty = disabled)")
 		admissionCert   = flag.String("admission-tls-cert", os.Getenv("GOODMAN_ADMISSION_TLS_CERT"), "PEM cert for the admission webhook (required when -admission-listen is set)")
 		admissionKey    = flag.String("admission-tls-key", os.Getenv("GOODMAN_ADMISSION_TLS_KEY"), "PEM key for the admission webhook")
+		enforceEnabled  = flag.Bool("enforce-enabled", envBoolOr("GOODMAN_ENFORCE_ENABLED", false), "master gate for kernel LSM enforcement (default false)")
 	)
 	flag.Parse()
 	log.SetPrefix("collector: ")
@@ -86,6 +88,12 @@ func main() {
 	fpEng := fingerprint.NewEngine(st, fingerprint.LearningWindow{MinObs: *learnObs, MinAge: *learnAge})
 	diffEng := diff.NewEngine(st, rules)
 	srv := api.NewServer(st, fpEng, diffEng)
+	enforceMgr := enforce.NewManager(st, *enforceEnabled)
+	enforceMgr.SetRules(rules)
+	srv.SetEnforceManager(enforceMgr)
+	if *enforceEnabled {
+		log.Printf("enforcement master gate enabled (runtime switch off until goodmanctl enforce on)")
+	}
 	srv.Auth = api.AuthConfig{IngestToken: *ingestToken, APIToken: *apiToken}
 	srv.SetAlertBudget(*digestBudget)
 	if !srv.Auth.Enabled() {
@@ -303,4 +311,12 @@ func envDurOr(k string, def time.Duration) time.Duration {
 		}
 	}
 	return def
+}
+
+func envBoolOr(k string, def bool) bool {
+	v := os.Getenv(k)
+	if v == "" {
+		return def
+	}
+	return v == "1" || v == "true" || v == "TRUE"
 }

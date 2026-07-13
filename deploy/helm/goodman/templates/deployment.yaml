@@ -113,6 +113,10 @@ spec:
             - name: GOODMAN_RETENTION
               value: {{ .Values.retention | quote }}
 {{- end }}
+{{- if .Values.enforce.enabled }}
+            - name: GOODMAN_ENFORCE_ENABLED
+              value: "true"
+{{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.collector.service.port }}

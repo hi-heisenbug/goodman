@@ -1162,6 +1162,13 @@ button {
   color: var(--warning);
 }
 
+.rule-chip.blocked {
+  border-color: var(--critical);
+  background: var(--critical-bg);
+  color: var(--critical);
+  font-weight: 700;
+}
+
 /* Reachability view */
 .reach-controls {
   display: flex;

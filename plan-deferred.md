@@ -18,8 +18,9 @@
 | 5a. Transactional fingerprint merge | **DONE** — `store.MergeFingerprint` + concurrency test |
 | 5. True HA collector | **DONE (codepath)** — advisory locks, transactional `UpsertAlert`, Helm HA; two-replica Postgres proof is human/CI follow-up — `docs/research/collector-ha.md`, `docs/release.md` |
 | 6 scaffold | **DONE** — `block` rule rejection, doctor LSM checks; kernel enforcement **PARK** until evidence gates — `docs/research/lsm-enforcement.md` |
+| 6 kernel LSM enforcement | **DONE (codepath)** — fail-open, off-by-default; `docs/enforcement.md`; human `sudo make e2e` proof required on LSM kernel |
 
-Next: deferred product code is complete except Phase 6 kernel enforcement (gated); remaining work is the release gate (`docs/release.md`), GTM, and live HA / `sudo make e2e` proof.
+Next: release gate (`docs/release.md`), GTM, and live HA / `sudo make e2e` LSM proof on a real kernel.
 
 ## Sequencing rationale
 

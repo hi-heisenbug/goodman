@@ -9,6 +9,9 @@ enum event_type {
     EVENT_FILE_OPEN = 1,
     EVENT_NET_CONNECT = 2,
     EVENT_PROC_EXEC = 3,
+    EVENT_DENY_FILE_OPEN = 4,
+    EVENT_DENY_CONNECT = 5,
+    EVENT_DENY_EXEC = 6,
 };
 
 /* Wire layout is shared with Go (internal/model/types.go RawEvent).

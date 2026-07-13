@@ -41,15 +41,13 @@ var wouldBlockTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 //
 //	"alert" (default) — normal alert only
 //	"warn"            — alert plus WouldBlock (audit: would have been blocked)
-//
-// "block" is rejected until kernel enforcement ships (Phase 6). Unknown
-// actions fail LoadRules loudly; there is no silent ignore.
+//	"block"           — alert plus WouldBlock; kernel denies when enforcement armed
 type Rule struct {
 	Name     string   `json:"name"`
 	Pattern  string   `json:"pattern"`             // regex matched against the behavior string
 	AlwaysOn bool     `json:"always_on,omitempty"` // fire without a baseline (learning window included)
 	Exclude  []string `json:"exclude,omitempty"`   // regexes that suppress a match
-	Action   string   `json:"action,omitempty"`    // "alert" (default) | "warn"
+	Action   string   `json:"action,omitempty"`    // "alert" (default) | "warn" | "block"
 	re       *regexp.Regexp
 	exclude  []*regexp.Regexp
 }
@@ -58,6 +56,7 @@ type Rule struct {
 const (
 	ActionAlert = "alert"
 	ActionWarn  = "warn"
+	ActionBlock = "block"
 )
 
 // DefaultRules encode the four attack patterns from the May-2026 incidents:
@@ -101,11 +100,9 @@ func CompileRules(rules []Rule) ([]Rule, error) {
 			action = ActionAlert
 		}
 		switch action {
-		case ActionAlert, ActionWarn:
-		case "block":
-			return nil, fmt.Errorf(`rule %q: action "block" is not available yet (enforcement has not shipped; use "warn" to build the audit evidence)`, r.Name)
+		case ActionAlert, ActionWarn, ActionBlock:
 		default:
-			return nil, fmt.Errorf("rule %q: unknown action %q (want %q or %q)", r.Name, r.Action, ActionAlert, ActionWarn)
+			return nil, fmt.Errorf("rule %q: unknown action %q (want %q, %q, or %q)", r.Name, r.Action, ActionAlert, ActionWarn, ActionBlock)
 		}
 		re, err := regexp.Compile("(?i)" + r.Pattern)
 		if err != nil {
@@ -124,6 +121,9 @@ func CompileRules(rules []Rule) ([]Rule, error) {
 	}
 	return out, nil
 }
+
+// Matches reports whether the behavior triggers this rule.
+func (r *Rule) Matches(behavior string) bool { return r.matches(behavior) }
 
 // matches reports whether the behavior triggers this rule: the pattern must
 // match and no exclude pattern may match.
@@ -229,7 +229,7 @@ func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, ba
 				severity = model.SeverityCritical
 				ruleSet[eng.rules[i].Name] = true
 				ev.Rules = append(ev.Rules, eng.rules[i].Name)
-				if eng.rules[i].Action == ActionWarn {
+				if eng.rules[i].Action == ActionWarn || eng.rules[i].Action == ActionBlock {
 					warnRules[eng.rules[i].Name] = true
 				}
 			}
@@ -268,6 +268,35 @@ func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, ba
 		wouldBlockTotal.WithLabelValues(name).Inc()
 	}
 	return a, nil
+}
+
+// ReactDenied upgrades an existing alert when a kernel deny event arrives for
+// a behavior that already triggered an alert. Returns the updated alert or nil.
+func (eng *Engine) ReactDenied(ctx context.Context, ev model.Attributed) (*model.Alert, error) {
+	if !ev.Denied || ev.Behavior == "" || ev.Package == "" {
+		return nil, nil
+	}
+	alerts, err := eng.store.ListAlerts(ctx, "")
+	if err != nil {
+		return nil, err
+	}
+	for i := range alerts {
+		a := &alerts[i]
+		for _, b := range a.NewBehaviors {
+			if b != ev.Behavior {
+				continue
+			}
+			if a.Blocked {
+				return nil, nil
+			}
+			a.Blocked = true
+			if err := eng.store.SetAlertBlocked(ctx, a.ID, true); err != nil {
+				return nil, err
+			}
+			return a, nil
+		}
+	}
+	return nil, nil
 }
 
 func behaviorKeys(behaviors map[string]model.BehaviorStat) []string {

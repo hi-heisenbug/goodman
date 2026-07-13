@@ -40,6 +40,8 @@ Usage:
                                                             runtime reachability report
   goodmanctl demo          [-host 127.0.0.1] [-port 8844] [-attack-delay 12s]
                                                             five-minute product wow (no root)
+  goodmanctl enforce status|on|off [-collector URL] [-token T]
+                                                            kernel enforcement runtime switch
   goodmanctl attribute -pid N [-duration 15s] [-proc-root /proc]
                                                             live-attribute one pid (needs root)
 
@@ -79,6 +81,8 @@ func main() {
 		cmdReport(args)
 	case "demo":
 		cmdDemo(args)
+	case "enforce":
+		cmdEnforce(args)
 	case "attribute":
 		cmdAttribute(args)
 	default:
@@ -492,4 +496,33 @@ func orDash(s string) string {
 		return "-"
 	}
 	return s
+}
+
+func cmdEnforce(args []string) {
+	if len(args) < 1 {
+		log.Fatal("usage: goodmanctl enforce status|on|off")
+	}
+	action := args[0]
+	fs := flag.NewFlagSet("enforce", flag.ExitOnError)
+	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
+	fs.Parse(args[1:])
+	var method, path string
+	switch action {
+	case "status":
+		method, path = http.MethodGet, "/v1/enforce"
+	case "on":
+		method, path = http.MethodPost, "/v1/enforce/on"
+	case "off":
+		method, path = http.MethodPost, "/v1/enforce/off"
+	default:
+		log.Fatal("usage: goodmanctl enforce status|on|off")
+	}
+	resp := doRequest(method, *collector+path, *token)
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		log.Fatalf("collector returned %s: %s", resp.Status, strings.TrimSpace(string(body)))
+	}
+	fmt.Println(string(body))
 }

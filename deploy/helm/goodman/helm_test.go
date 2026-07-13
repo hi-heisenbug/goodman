@@ -163,6 +163,39 @@ func TestHelmHAReplicasRequirePostgres(t *testing.T) {
 	}
 }
 
+func TestHelmEnforceDefaultOff(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	out, err := exec.Command("helm", "template", "goodman", ".").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	rendered := string(out)
+	if strings.Contains(rendered, "GOODMAN_ENFORCE_ENABLED") {
+		t.Fatal("default chart must not set GOODMAN_ENFORCE_ENABLED")
+	}
+	if strings.Contains(rendered, "name: cgroup") {
+		t.Fatal("default chart must not mount host cgroup fs")
+	}
+
+	out, err = exec.Command("helm", "template", "goodman", ".", "--set", "enforce.enabled=true").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template enforce: %v\n%s", err, out)
+	}
+	rendered = string(out)
+	for _, want := range []string{
+		"GOODMAN_ENFORCE_ENABLED",
+		`value: "true"`,
+		"name: cgroup",
+		"/sys/fs/cgroup",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("enforce.enabled=true missing %q\n%s", want, rendered)
+		}
+	}
+}
+
 func TestHelmHAReplicasWithPostgres(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")

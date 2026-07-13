@@ -38,6 +38,120 @@ struct {
     __uint(max_entries, 1);
 } drops SEC(".maps");
 
+/* --- LSM enforcement maps (written only by user space) --- */
+
+struct {
+    __uint(type, BPF_MAP_TYPE_ARRAY);
+    __type(key, __u32);
+    __type(value, __u64);
+    __uint(max_entries, 1);
+} enforce_deadline SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, __u64);
+    __type(value, __u8);
+    __uint(max_entries, 4096);
+} enforced_cgroups SEC(".maps");
+
+struct deny_path {
+    char path[PATH_MAX_LEN];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, struct deny_path);
+    __type(value, __u8);
+    __uint(max_entries, 1024);
+} deny_open SEC(".maps");
+
+struct deny_addr {
+    __u8  family;
+    __u8  _pad;
+    __u16 port;
+    __u8  addr[16];
+};
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, struct deny_addr);
+    __type(value, __u8);
+    __uint(max_entries, 1024);
+} deny_connect SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_HASH);
+    __type(key, struct deny_path);
+    __type(value, __u8);
+    __uint(max_entries, 1024);
+} deny_exec SEC(".maps");
+
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, __u64);
+    __uint(max_entries, 1);
+} deny_event_drops SEC(".maps");
+
+#ifndef EPERM
+#define EPERM 1
+#endif
+
+static __always_inline void count_deny_drop(void)
+{
+    __u32 zero = 0;
+    __u64 *d = bpf_map_lookup_elem(&deny_event_drops, &zero);
+    if (d)
+        __sync_fetch_and_add(d, 1);
+}
+
+static __always_inline int enforce_active(void)
+{
+    __u32 zero = 0;
+    __u64 *deadline = bpf_map_lookup_elem(&enforce_deadline, &zero);
+    if (!deadline || *deadline == 0)
+        return 0;
+    return bpf_ktime_get_ns() < *deadline;
+}
+
+static __always_inline int in_enforced_cgroup(void)
+{
+    __u64 cg = bpf_get_current_cgroup_id();
+    return bpf_map_lookup_elem(&enforced_cgroups, &cg) != NULL;
+}
+
+static __always_inline int emit_deny(void *ctx, __u32 tgid, __u8 type, const char *arg, int arg_len)
+{
+    struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
+    if (!e) {
+        count_deny_drop();
+        return 0;
+    }
+    e->pid = tgid;
+    e->tid = (__u32)bpf_get_current_pid_tgid();
+    e->type = type;
+    e->timestamp_ns = bpf_ktime_get_ns();
+    bpf_get_current_comm(&e->comm, sizeof(e->comm));
+    __builtin_memset(e->arg, 0, sizeof(e->arg));
+    if (arg && arg_len > 0) {
+        int n = arg_len;
+        if (n >= PATH_MAX_LEN)
+            n = PATH_MAX_LEN - 1;
+        bpf_probe_read_kernel(e->arg, n, arg);
+        e->arg[n] = 0;
+    }
+    long stk = bpf_get_stack(ctx, e->stack, sizeof(e->stack), BPF_F_USER_STACK);
+    e->stack_len = stk > 0 ? (__u32)(stk / sizeof(__u64)) : 0;
+    bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+static __always_inline int deny_return(void *ctx, __u32 tgid, __u8 type, const char *arg, int arg_len)
+{
+    emit_deny(ctx, tgid, type, arg, arg_len);
+    return -EPERM;
+}
+
 static __always_inline void count_drop(void)
 {
     __u32 zero = 0;
@@ -215,5 +329,106 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx)
     const char *filename = (const char *)ctx->args[0];
     bpf_probe_read_user_str(&e->arg, sizeof(e->arg), filename);
     bpf_ringbuf_submit(e, 0);
+    return 0;
+}
+
+SEC("lsm/file_open")
+int enforce_file_open(struct file *file)
+{
+    if (!enforce_active() || !in_enforced_cgroup())
+        return 0;
+
+    __u32 tgid = bpf_get_current_pid_tgid() >> 32;
+    struct deny_path key = {};
+    long n = bpf_d_path(&file->f_path, key.path, sizeof(key.path));
+    if (n <= 0)
+        return 0;
+
+    if (bpf_map_lookup_elem(&deny_open, &key))
+        return deny_return((void *)file, tgid, EVENT_DENY_FILE_OPEN, key.path, n > PATH_MAX_LEN ? PATH_MAX_LEN : (int)n);
+    return 0;
+}
+
+SEC("lsm/socket_connect")
+int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen)
+{
+    if (!enforce_active() || !in_enforced_cgroup())
+        return 0;
+
+    __u32 tgid = bpf_get_current_pid_tgid() >> 32;
+    __u16 family = 0;
+    bpf_probe_read_kernel(&family, sizeof(family), &address->sa_family);
+    if (family != AF_INET && family != AF_INET6)
+        return 0;
+
+    struct deny_addr key = {};
+    key.family = (__u8)family;
+    char arg_buf[PATH_MAX_LEN] = {};
+    int pos = 0;
+
+    if (family == AF_INET) {
+        struct sockaddr_in sa = {};
+        bpf_probe_read_kernel(&sa, sizeof(sa), address);
+        __u32 ip = bpf_ntohl(sa.sin_addr.s_addr);
+        __u16 port = bpf_ntohs(sa.sin_port);
+        key.port = port;
+        __builtin_memcpy(key.addr, &sa.sin_addr.s_addr, 4);
+        pos = put_u8_dec(arg_buf, pos, (ip >> 24) & 0xff);
+        PUT(arg_buf, pos, '.');
+        pos = put_u8_dec(arg_buf, pos, (ip >> 16) & 0xff);
+        PUT(arg_buf, pos, '.');
+        pos = put_u8_dec(arg_buf, pos, (ip >> 8) & 0xff);
+        PUT(arg_buf, pos, '.');
+        pos = put_u8_dec(arg_buf, pos, ip & 0xff);
+        PUT(arg_buf, pos, ':');
+        pos = put_u16_dec(arg_buf, pos, port);
+    } else {
+        struct sockaddr_in6 sa6 = {};
+        bpf_probe_read_kernel(&sa6, sizeof(sa6), address);
+        __u16 port = bpf_ntohs(sa6.sin6_port);
+        key.port = port;
+        __builtin_memcpy(key.addr, &sa6.sin6_addr, 16);
+        PUT(arg_buf, pos, '[');
+#pragma unroll
+        for (int i = 0; i < 16; i++) {
+            __u8 b = sa6.sin6_addr.in6_u.u6_addr8[i];
+            PUT(arg_buf, pos, hexd[b >> 4]);
+            PUT(arg_buf, pos, hexd[b & 0xf]);
+            if ((i & 1) && i != 15)
+                PUT(arg_buf, pos, ':');
+        }
+        PUT(arg_buf, pos, ']');
+        PUT(arg_buf, pos, ':');
+        pos = put_u16_dec(arg_buf, pos, port);
+    }
+    arg_buf[pos & ARG_MASK] = 0;
+
+    if (bpf_map_lookup_elem(&deny_connect, &key))
+        return deny_return((void *)sock, tgid, EVENT_DENY_CONNECT, arg_buf, pos);
+
+    key.port = 0;
+    if (bpf_map_lookup_elem(&deny_connect, &key))
+        return deny_return((void *)sock, tgid, EVENT_DENY_CONNECT, arg_buf, pos);
+    return 0;
+}
+
+SEC("lsm/bprm_check_security")
+int enforce_bprm_check(struct linux_binprm *bprm)
+{
+    if (!enforce_active() || !in_enforced_cgroup())
+        return 0;
+
+    __u32 tgid = bpf_get_current_pid_tgid() >> 32;
+    struct deny_path key = {};
+    const char *filename = NULL;
+    bpf_core_read(&filename, sizeof(filename), &bprm->filename);
+    if (!filename)
+        return 0;
+    long n = bpf_probe_read_kernel_str(key.path, sizeof(key.path), filename);
+    if (n <= 0)
+        return 0;
+
+    if (bpf_map_lookup_elem(&deny_exec, &key))
+        return deny_return((void *)bprm, tgid, EVENT_DENY_EXEC, key.path, n > PATH_MAX_LEN ? PATH_MAX_LEN : (int)n);
     return 0;
 }

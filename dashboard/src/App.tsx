@@ -242,15 +242,20 @@ function AlertCard({ alert, onChange }: { alert: Alert; onChange: () => void }) 
             <span>{relTime(alert.detected_at)}</span>
             <span className={`status-dot ${alert.status}`}>{STATUS_LABELS[alert.status]}</span>
           </div>
-          {((alert.matched_rules?.length ?? 0) > 0 || alert.would_block) && (
+          {((alert.matched_rules?.length ?? 0) > 0 || alert.would_block || alert.blocked) && (
             <div className="rule-chips" aria-label="Matched high-risk rules">
               {alert.matched_rules?.map((rule) => (
                 <span className="rule-chip" key={rule} title={`Matched high-risk rule: ${rule}`}>
                   {rule}
                 </span>
               ))}
-              {alert.would_block && (
-                <span className="rule-chip would-block" title="Matched a rule with action=warn — would have been blocked in enforce mode">
+              {alert.blocked && (
+                <span className="rule-chip blocked" title="Kernel LSM denied this behavior">
+                  BLOCKED
+                </span>
+              )}
+              {alert.would_block && !alert.blocked && (
+                <span className="rule-chip would-block" title="Matched a rule with action=warn or block — would be denied when enforcement is armed">
                   would block
                 </span>
               )}

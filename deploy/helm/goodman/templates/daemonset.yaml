@@ -38,6 +38,10 @@ spec:
             - name: GOODMAN_INGEST_TOKEN
               valueFrom: { secretKeyRef: { name: {{ include "goodman.authSecretName" . }}, key: ingest-token } }
 {{- end }}
+{{- if .Values.enforce.enabled }}
+            - name: GOODMAN_ENFORCE_ENABLED
+              value: "true"
+{{- end }}
 {{- if .Values.collector.tls.secretName }}
             # kubernetes.io/tls Secrets carry the issuing CA in ca.crt; the
             # sensor pins trust to it when connecting over HTTPS.
@@ -57,6 +61,9 @@ spec:
             - { name: sys, mountPath: /sys, readOnly: true }
             - { name: proc, mountPath: /host/proc }
             - { name: bpffs, mountPath: /sys/fs/bpf }
+{{- if .Values.enforce.enabled }}
+            - { name: cgroup, mountPath: /sys/fs/cgroup, readOnly: true }
+{{- end }}
 {{- if .Values.collector.tls.secretName }}
             - { name: tls, mountPath: /etc/goodman/tls, readOnly: true }
 {{- end }}
@@ -64,6 +71,9 @@ spec:
         - { name: sys, hostPath: { path: /sys } }
         - { name: proc, hostPath: { path: /proc } }
         - { name: bpffs, hostPath: { path: /sys/fs/bpf } }
+{{- if .Values.enforce.enabled }}
+        - { name: cgroup, hostPath: { path: /sys/fs/cgroup } }
+{{- end }}
 {{- if .Values.collector.tls.secretName }}
         - name: tls
           secret:

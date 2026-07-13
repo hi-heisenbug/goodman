@@ -84,6 +84,7 @@ List alerts, newest first (max 500). Omit `status` for all.
     "severity": "CRITICAL",
     "matched_rules": ["cloud-metadata", "new-outbound-connect", "secret-read"],
     "would_block": false,
+    "blocked": false,
     "evidence": [
       {
         "behavior": "READ /tmp/goodman-fake-secrets/credentials",
@@ -278,6 +279,31 @@ Requires the ingest token. Sensors POST namespace injection coverage:
 ```json
 {"sensor": "node-a", "namespaces": [{"name": "staging", "inject_label": false, "pods_total": 3, "pods_with_node_options": 0, "pods_without": 3}]}
 ```
+
+### `GET /v1/enforce/state`
+
+Requires the ingest token. Sensors poll this (~500ms) for verdicts and as a
+heartbeat. Optional query params: `sensor`, `enforcement_active=true|false`.
+
+```json
+{"enabled": true, "rev": 3,
+ "verdicts": {"open": ["/etc/shadow"], "connect": [{"addr":"169.254.169.254","port":0}], "exec": []},
+ "skipped": []}
+```
+
+When `enabled` is false, sensors zero the kernel deadline immediately on the
+next poll.
+
+### `GET /v1/enforce`
+
+Requires the API token. Operator status: master gate, runtime switch, verdict
+counts, skipped uncompilable behaviors, per-sensor heartbeat and
+`enforcement_active`.
+
+### `POST /v1/enforce/on` / `POST /v1/enforce/off`
+
+Requires the API token. Toggle the runtime enforcement switch (persisted). `on`
+returns `409` if the collector master gate (`-enforce-enabled`) is off.
 
 ### `GET /v1/stream`
 

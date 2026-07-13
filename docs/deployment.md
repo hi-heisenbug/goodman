@@ -107,6 +107,19 @@ Only namespaces labeled `goodman.io/inject=enabled` are affected. The webhook:
 - defaults to `failurePolicy: Ignore` so an unreachable collector never blocks
   pod scheduling (set `webhook.failurePolicy=Fail` for stricter enforcement).
 
+### Kernel enforcement (optional, default off)
+
+LSM block mode is **off by default** (`enforce.enabled: false`). To enable:
+
+```bash
+helm upgrade goodman deploy/helm/goodman --set enforce.enabled=true
+kubectl label namespace checkout goodman.io/enforce=enabled
+goodmanctl enforce on
+```
+
+Requires kernel ≥ 5.10, `CONFIG_BPF_LSM`, `bpf` in `lsm=`, and cgroup v2. See
+[`docs/enforcement.md`](enforcement.md) and [`docs/pilot-runbook.md`](pilot-runbook.md).
+
 ## What the chart creates
 
 | Resource | Purpose |
