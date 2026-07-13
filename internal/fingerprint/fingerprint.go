@@ -56,50 +56,40 @@ func (e *Engine) Ingest(ctx context.Context, events []model.Attributed) ([]Updat
 
 	var updates []Update
 	for k, evs := range grouped {
-		fp, err := e.store.GetFingerprint(ctx, k.service, k.pkg, k.version)
-		if err != nil {
-			return nil, err
-		}
-		if fp == nil {
-			fp = &model.Fingerprint{
-				Service: k.service, Package: k.pkg, Version: k.version,
-				Behaviors: map[string]model.BehaviorStat{},
-				FirstSeen: evs[0].Timestamp,
-			}
-		}
-		if fp.Behaviors == nil {
-			fp.Behaviors = map[string]model.BehaviorStat{}
-		}
-
 		var fresh []string
 		freshEvents := map[string]model.Attributed{}
-		for _, ev := range evs {
-			st, known := fp.Behaviors[ev.Behavior]
-			if !known {
-				st = model.BehaviorStat{FirstSeen: ev.Timestamp}
-				fresh = append(fresh, ev.Behavior)
-				freshEvents[ev.Behavior] = ev
-			}
-			st.Count++
-			if ev.Timestamp > st.LastSeen {
-				st.LastSeen = ev.Timestamp
-			}
-			fp.Behaviors[ev.Behavior] = st
-			fp.ObsCount++
-			if ev.Timestamp > fp.LastSeen {
-				fp.LastSeen = ev.Timestamp
-			}
-			if fp.FirstSeen == 0 || ev.Timestamp < fp.FirstSeen {
-				fp.FirstSeen = ev.Timestamp
-			}
-		}
-
 		promoted := false
-		if !fp.IsBaseline && e.qualifies(fp) {
-			fp.IsBaseline = true
-			promoted = true
-		}
-		if err := e.store.UpsertFingerprint(ctx, fp); err != nil {
+
+		fp, err := e.store.MergeFingerprint(ctx, k.service, k.pkg, k.version, func(fp *model.Fingerprint) {
+			if fp.Behaviors == nil {
+				fp.Behaviors = map[string]model.BehaviorStat{}
+			}
+			for _, ev := range evs {
+				st, known := fp.Behaviors[ev.Behavior]
+				if !known {
+					st = model.BehaviorStat{FirstSeen: ev.Timestamp}
+					fresh = append(fresh, ev.Behavior)
+					freshEvents[ev.Behavior] = ev
+				}
+				st.Count++
+				if ev.Timestamp > st.LastSeen {
+					st.LastSeen = ev.Timestamp
+				}
+				fp.Behaviors[ev.Behavior] = st
+				fp.ObsCount++
+				if ev.Timestamp > fp.LastSeen {
+					fp.LastSeen = ev.Timestamp
+				}
+				if fp.FirstSeen == 0 || ev.Timestamp < fp.FirstSeen {
+					fp.FirstSeen = ev.Timestamp
+				}
+			}
+			if !fp.IsBaseline && e.qualifies(fp) {
+				fp.IsBaseline = true
+				promoted = true
+			}
+		})
+		if err != nil {
 			return nil, err
 		}
 		updates = append(updates, Update{Fingerprint: fp, FreshBehaviors: fresh, FreshEvents: freshEvents, JustPromoted: promoted})

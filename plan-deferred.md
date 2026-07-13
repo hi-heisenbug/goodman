@@ -6,7 +6,7 @@
 > Work the phases **in order**; each has a Definition of Done (DoD). Read
 > `AGENTS.md` before touching anything — every invariant there applies here.
 
-## Status (2026-07-13): Phases 0–3 DONE; Phase 2 build DONE
+## Status (2026-07-13): Phases 0–3 DONE; Phase 2 build DONE; Phase 5a DONE
 
 | Phase | Outcome |
 |---|---|
@@ -14,8 +14,10 @@
 | 1. Collector durability | PVC + sensor RAM spool + recovery test |
 | 2. Python Tier-1 | **DONE** — shipped on `main`; `docs/attribution.md` + `docs/research/python-attribution-impl.md` |
 | 3. enforce=warn | `action` on rules + `would_block` + Coverage/digest |
+| 5a. Transactional fingerprint merge | **DONE** — `store.MergeFingerprint` + concurrency test; full HA still **PARK** — `docs/research/collector-ha.md` |
+| 6 scaffold | **DONE** — `block` rule rejection, doctor LSM checks; kernel enforcement **PARK** — `docs/research/lsm-enforcement.md` |
 
-Next ungated product work: Phases 4–6 stay trigger-gated (`plan-deferred.md`).
+Next ungated product work: Phases 4–6 (full builds) stay trigger-gated (`plan-deferred.md`).
 
 ## Sequencing rationale
 
@@ -401,6 +403,10 @@ rows carry provenance in API and UI; both dialects migrate; all gates green.
 
 ## Phase 5: True HA collector (trigger-gated)
 
+> **Sub-step 5a (transactional fingerprint merge) is DONE** — see
+> `docs/research/collector-ha.md`. Full HA below remains **PARK** until the
+> annual-contract security-review trigger fires.
+
 **Gate:** a production (annual) contract's security review demands no single
 point of failure. Do not start this on a calendar. Phase 1 already bought the
 pilot-grade story ("restarts lose nothing, sensors buffer and retry, recovery
@@ -466,6 +472,11 @@ mid-ingest loses nothing; single-replica SQLite path still green end to end.
 ---
 
 ## Phase 6: eBPF LSM enforcement (block mode)
+
+> **Scaffold is DONE** — `action: "block"` fails rule loading with an explicit
+> message, `make doctor` reports LSM capability, posture documented in
+> `docs/configuration.md`. See `docs/research/lsm-enforcement.md`. Kernel
+> work below remains **PARK** until all three gates fire.
 
 **Gate — all three, no exceptions:**
 1. 60–90 days of Phase 3 warn-mode evidence across 2–3 real environments with

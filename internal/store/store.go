@@ -207,15 +207,22 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
+func normalizeOrigin(origin string) string {
+	if origin == "" {
+		return model.OriginLocal
+	}
+	return origin
+}
+
 // GetFingerprint loads one fingerprint; returns nil when absent.
 func (s *Store) GetFingerprint(ctx context.Context, service, pkg, version string) (*model.Fingerprint, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT behaviors, first_seen, last_seen, obs_count, is_baseline
+		`SELECT behaviors, first_seen, last_seen, obs_count, is_baseline, origin
 		 FROM fingerprints WHERE service=$1 AND package=$2 AND version=$3`,
 		service, pkg, version)
 	fp := model.Fingerprint{Service: service, Package: pkg, Version: version}
 	var behaviorsJSON []byte
-	err := row.Scan(&behaviorsJSON, &fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.IsBaseline)
+	err := row.Scan(&behaviorsJSON, &fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.IsBaseline, &fp.Origin)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -225,30 +232,166 @@ func (s *Store) GetFingerprint(ctx context.Context, service, pkg, version string
 	if err := json.Unmarshal(behaviorsJSON, &fp.Behaviors); err != nil {
 		return nil, err
 	}
+	fp.Origin = normalizeOrigin(fp.Origin)
 	return &fp, nil
 }
 
-// UpsertFingerprint writes the full fingerprint state.
-func (s *Store) UpsertFingerprint(ctx context.Context, fp *model.Fingerprint) error {
-	behaviorsJSON, err := json.Marshal(fp.Behaviors)
+// MergeFingerprint runs merge on the current row (or a fresh one) inside a
+// transaction, then writes it back. Postgres uses SELECT FOR UPDATE for
+// row-level locking; SQLite relies on the single connection plus the tx.
+func (s *Store) MergeFingerprint(ctx context.Context, service, pkg, version string, merge func(*model.Fingerprint)) (*model.Fingerprint, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO fingerprints (service, package, version, behaviors, first_seen, last_seen, obs_count, is_baseline)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+	defer tx.Rollback() //nolint:errcheck
+
+	q := `SELECT behaviors, first_seen, last_seen, obs_count, is_baseline, origin
+	      FROM fingerprints WHERE service=$1 AND package=$2 AND version=$3`
+	if s.dialect == "postgres" {
+		q += ` FOR UPDATE`
+	}
+	fp := &model.Fingerprint{Service: service, Package: pkg, Version: version, Behaviors: map[string]model.BehaviorStat{}}
+	var behaviorsJSON []byte
+	err = tx.QueryRowContext(ctx, q, service, pkg, version).Scan(
+		&behaviorsJSON, &fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.IsBaseline, &fp.Origin)
+	if err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	if err == nil {
+		if err := json.Unmarshal(behaviorsJSON, &fp.Behaviors); err != nil {
+			return nil, err
+		}
+		if fp.Behaviors == nil {
+			fp.Behaviors = map[string]model.BehaviorStat{}
+		}
+		fp.Origin = normalizeOrigin(fp.Origin)
+	}
+
+	merge(fp)
+
+	behaviorsJSON, err = json.Marshal(fp.Behaviors)
+	if err != nil {
+		return nil, err
+	}
+	origin := normalizeOrigin(fp.Origin)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO fingerprints (service, package, version, behaviors, first_seen, last_seen, obs_count, is_baseline, origin)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 		ON CONFLICT (service, package, version) DO UPDATE SET
 		  behaviors=EXCLUDED.behaviors, last_seen=EXCLUDED.last_seen,
 		  obs_count=EXCLUDED.obs_count, is_baseline=EXCLUDED.is_baseline,
 		  first_seen=EXCLUDED.first_seen`,
 		fp.Service, fp.Package, fp.Version, string(behaviorsJSON),
-		fp.FirstSeen, fp.LastSeen, fp.ObsCount, fp.IsBaseline)
+		fp.FirstSeen, fp.LastSeen, fp.ObsCount, fp.IsBaseline, origin)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, err
+	}
+	fp.Origin = origin
+	return fp, nil
+}
+
+// UpsertFingerprint writes the full fingerprint state. Origin is set on insert
+// only; live merges never flip imported provenance back to local.
+func (s *Store) UpsertFingerprint(ctx context.Context, fp *model.Fingerprint) error {
+	behaviorsJSON, err := json.Marshal(fp.Behaviors)
+	if err != nil {
+		return err
+	}
+	origin := normalizeOrigin(fp.Origin)
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO fingerprints (service, package, version, behaviors, first_seen, last_seen, obs_count, is_baseline, origin)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+		ON CONFLICT (service, package, version) DO UPDATE SET
+		  behaviors=EXCLUDED.behaviors, last_seen=EXCLUDED.last_seen,
+		  obs_count=EXCLUDED.obs_count, is_baseline=EXCLUDED.is_baseline,
+		  first_seen=EXCLUDED.first_seen`,
+		fp.Service, fp.Package, fp.Version, string(behaviorsJSON),
+		fp.FirstSeen, fp.LastSeen, fp.ObsCount, fp.IsBaseline, origin)
 	return err
+}
+
+// ImportOutcome is which row of the import conflict matrix applied.
+type ImportOutcome string
+
+const (
+	ImportImported           ImportOutcome = "imported"
+	ImportSkippedLocal       ImportOutcome = "skipped_local"
+	ImportReplaced           ImportOutcome = "replaced"
+	ImportIgnoredNonBaseline ImportOutcome = "ignored_non_baseline"
+)
+
+// ImportFingerprint upserts one baseline using the multi-cluster conflict
+// matrix: local rows are never clobbered; imported rows may be replaced.
+func (s *Store) ImportFingerprint(ctx context.Context, fp *model.Fingerprint) (ImportOutcome, error) {
+	if !fp.IsBaseline {
+		return ImportIgnoredNonBaseline, nil
+	}
+	existing, err := s.GetFingerprint(ctx, fp.Service, fp.Package, fp.Version)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil && existing.Origin == model.OriginLocal {
+		return ImportSkippedLocal, nil
+	}
+	behaviorsJSON, err := json.Marshal(fp.Behaviors)
+	if err != nil {
+		return "", err
+	}
+	_, err = s.db.ExecContext(ctx, `
+		INSERT INTO fingerprints (service, package, version, behaviors, first_seen,
+		                          last_seen, obs_count, is_baseline, origin)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,TRUE,$8)
+		ON CONFLICT (service, package, version) DO UPDATE SET
+		  behaviors=EXCLUDED.behaviors, first_seen=EXCLUDED.first_seen,
+		  last_seen=EXCLUDED.last_seen, obs_count=EXCLUDED.obs_count,
+		  is_baseline=TRUE
+		WHERE fingerprints.origin = $9`,
+		fp.Service, fp.Package, fp.Version, string(behaviorsJSON),
+		fp.FirstSeen, fp.LastSeen, fp.ObsCount, model.OriginImported,
+		model.OriginImported)
+	if err != nil {
+		return "", err
+	}
+	if existing != nil {
+		return ImportReplaced, nil
+	}
+	return ImportImported, nil
+}
+
+// ListBaselines returns promoted fingerprints only (for export).
+func (s *Store) ListBaselines(ctx context.Context) ([]model.Fingerprint, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT service, package, version, behaviors, first_seen, last_seen, obs_count, is_baseline, origin
+		FROM fingerprints WHERE is_baseline=TRUE
+		ORDER BY service, package, version`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Fingerprint
+	for rows.Next() {
+		var fp model.Fingerprint
+		var behaviorsJSON []byte
+		if err := rows.Scan(&fp.Service, &fp.Package, &fp.Version, &behaviorsJSON,
+			&fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.IsBaseline, &fp.Origin); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(behaviorsJSON, &fp.Behaviors); err != nil {
+			return nil, err
+		}
+		fp.Origin = normalizeOrigin(fp.Origin)
+		out = append(out, fp)
+	}
+	return out, rows.Err()
 }
 
 // ListFingerprints returns fingerprints filtered by optional service/package.
 func (s *Store) ListFingerprints(ctx context.Context, service, pkg string) ([]model.Fingerprint, error) {
-	q := `SELECT service, package, version, behaviors, first_seen, last_seen, obs_count, is_baseline
+	q := `SELECT service, package, version, behaviors, first_seen, last_seen, obs_count, is_baseline, origin
 	      FROM fingerprints WHERE 1=1`
 	var args []any
 	if service != "" {
@@ -270,12 +413,13 @@ func (s *Store) ListFingerprints(ctx context.Context, service, pkg string) ([]mo
 		var fp model.Fingerprint
 		var behaviorsJSON []byte
 		if err := rows.Scan(&fp.Service, &fp.Package, &fp.Version, &behaviorsJSON,
-			&fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.IsBaseline); err != nil {
+			&fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.IsBaseline, &fp.Origin); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(behaviorsJSON, &fp.Behaviors); err != nil {
 			return nil, err
 		}
+		fp.Origin = normalizeOrigin(fp.Origin)
 		out = append(out, fp)
 	}
 	return out, rows.Err()
@@ -285,14 +429,14 @@ func (s *Store) ListFingerprints(ctx context.Context, service, pkg string) ([]mo
 // (service, package), excluding the given version. nil when none exists.
 func (s *Store) LatestBaseline(ctx context.Context, service, pkg, excludeVersion string) (*model.Fingerprint, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT version, behaviors, first_seen, last_seen, obs_count
+		`SELECT version, behaviors, first_seen, last_seen, obs_count, origin
 		 FROM fingerprints
 		 WHERE service=$1 AND package=$2 AND version<>$3 AND is_baseline=TRUE
 		 ORDER BY last_seen DESC LIMIT 1`,
 		service, pkg, excludeVersion)
 	fp := model.Fingerprint{Service: service, Package: pkg, IsBaseline: true}
 	var behaviorsJSON []byte
-	err := row.Scan(&fp.Version, &behaviorsJSON, &fp.FirstSeen, &fp.LastSeen, &fp.ObsCount)
+	err := row.Scan(&fp.Version, &behaviorsJSON, &fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.Origin)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -302,6 +446,7 @@ func (s *Store) LatestBaseline(ctx context.Context, service, pkg, excludeVersion
 	if err := json.Unmarshal(behaviorsJSON, &fp.Behaviors); err != nil {
 		return nil, err
 	}
+	fp.Origin = normalizeOrigin(fp.Origin)
 	return &fp, nil
 }
 

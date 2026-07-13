@@ -21,6 +21,7 @@
     "name": "new-exec",
     "pattern": "^EXEC ",
     "exclude": [],
-    "action": "warn"
+    "action": "warn",
+    "_comment": "warn builds audit evidence (would_block) that unlocks block mode later; action block is rejected until kernel enforcement ships — see docs/research/lsm-enforcement.md"
   }
 ]

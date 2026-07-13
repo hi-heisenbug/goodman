@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -365,7 +366,9 @@ func TestWarnActionWouldBlock(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := CompileRules([]Rule{{Name: "bad", Pattern: `^READ `, Action: "block"}}); err == nil {
-		t.Fatal("unknown action must fail CompileRules")
+		t.Fatal("block action must fail CompileRules")
+	} else if !strings.Contains(err.Error(), `action "block" is not available yet`) {
+		t.Fatalf("block error = %q, want enforcement-not-shipped message", err)
 	}
 
 	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 2, MinAge: time.Nanosecond})

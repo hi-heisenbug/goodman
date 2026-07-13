@@ -9,6 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Transactional fingerprint merge (deferred Phase 5a): `store.MergeFingerprint`
+  wraps read-modify-write in a transaction (Postgres `SELECT FOR UPDATE`;
+  SQLite tx-only). `fingerprint.Engine.Ingest` uses it so concurrent ingests
+  union behaviors and sum `obs_count` instead of last-writer-wins. Concurrency
+  test in `internal/fingerprint`. Full HA (replicas, leader election, Redis)
+  remains parked — `docs/research/collector-ha.md`.
+- Phase 6 scaffold (no `bpf/` changes): `action: "block"` fails rule loading
+  with an explicit enforcement-not-shipped message; `make doctor` adds warn-level
+  `CONFIG_BPF_LSM` and active-LSM checks; posture documented in
+  `docs/configuration.md` and `deploy/rules.example.json`. Kernel LSM enforcement
+  remains gated — `docs/research/lsm-enforcement.md`.
 - enforce=warn audit mode (deferred Phase 3): rules accept `action` (`alert`|
   `warn`); matching `warn` sets `would_block` on alerts, increments
   `goodman_enforce_would_block_total{rule}`, surfaces a dashboard chip +

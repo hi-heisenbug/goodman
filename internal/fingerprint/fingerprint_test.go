@@ -2,7 +2,9 @@ package fingerprint
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -68,6 +70,53 @@ func TestIngestAggregatesAndPromotes(t *testing.T) {
 	}
 	if fp.FirstSeen != 10 || fp.LastSeen != 21 {
 		t.Fatalf("first/last = %d/%d", fp.FirstSeen, fp.LastSeen)
+	}
+}
+
+func TestIngestConcurrentMerge(t *testing.T) {
+	ctx := context.Background()
+	s := newStore(t)
+	// High MinObs so promotion does not interfere with the merge assertion.
+	eng := NewEngine(s, LearningWindow{MinObs: 10000, MinAge: time.Hour})
+
+	const N = 32
+	var wg sync.WaitGroup
+	wg.Add(N)
+	errCh := make(chan error, N)
+	for i := 0; i < N; i++ {
+		go func(i int) {
+			defer wg.Done()
+			b := fmt.Sprintf("READ /concurrent/%d/**", i)
+			_, err := eng.Ingest(ctx, []model.Attributed{
+				{Service: "svc", Package: "p", Version: "1", Behavior: b, Timestamp: uint64(i + 1)},
+				{Service: "svc", Package: "p", Version: "1", Behavior: b, Timestamp: uint64(i + 1000)},
+			})
+			if err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Fatal(err)
+	}
+
+	fp, err := s.GetFingerprint(ctx, "svc", "p", "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fp.Behaviors) != N {
+		t.Fatalf("behaviors = %d, want union of %d", len(fp.Behaviors), N)
+	}
+	if fp.ObsCount != 2*N {
+		t.Fatalf("obs_count = %d, want %d", fp.ObsCount, 2*N)
+	}
+	for i := 0; i < N; i++ {
+		b := fmt.Sprintf("READ /concurrent/%d/**", i)
+		if st, ok := fp.Behaviors[b]; !ok || st.Count != 2 {
+			t.Fatalf("behavior %q = (%v, %v), want count 2", b, st, ok)
+		}
 	}
 }
 

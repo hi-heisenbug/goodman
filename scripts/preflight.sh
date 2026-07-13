@@ -86,6 +86,35 @@ if [[ "$OS" == "Linux" ]]; then
   else
     warn "kernel config not readable ($CFG) — skipping CONFIG_* checks"
   fi
+  # LSM enforcement (future block mode) — warn only; detection works without it.
+  hdr "LSM enforcement (future block mode)"
+  LSM_OK=1
+  if [[ -r "$CFG" ]]; then
+    if $reader -q "^CONFIG_BPF_LSM=y" "$CFG" 2>/dev/null; then ok "CONFIG_BPF_LSM=y"; else
+      warn "CONFIG_BPF_LSM not set in $CFG"
+      hint "Kernel LSM BPF hooks are required for future block mode (Phase 6)."
+      LSM_OK=0
+    fi
+  else
+    warn "kernel config not readable — skipping CONFIG_BPF_LSM check"
+    LSM_OK=0
+  fi
+  LSM_LIST="$(cat /sys/kernel/security/lsm 2>/dev/null || true)"
+  if [[ -n "$LSM_LIST" ]]; then
+    if [[ ",$LSM_LIST," == *",bpf,"* ]]; then ok "bpf in active LSM list ($LSM_LIST)"; else
+      warn "bpf not in active LSM list ($LSM_LIST)"
+      hint "Add lsm=...,bpf to kernel boot params (GRUB GRUB_CMDLINE_LINUX), then reboot."
+      LSM_OK=0
+    fi
+  else
+    warn "/sys/kernel/security/lsm not readable — skipping active LSM check"
+    LSM_OK=0
+  fi
+  if [[ "$LSM_OK" -eq 1 ]]; then
+    ok "LSM enforcement (future block mode): available"
+  else
+    warn "LSM enforcement (future block mode): not available (detection-only is fine)"
+  fi
   # unprivileged bpf + capabilities
   UBD="$(cat /proc/sys/kernel/unprivileged_bpf_disabled 2>/dev/null || echo '?')"
   if [[ "$(id -u)" -eq 0 ]]; then

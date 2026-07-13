@@ -42,7 +42,8 @@ var wouldBlockTotal = promauto.NewCounterVec(prometheus.CounterOpts{
 //	"alert" (default) — normal alert only
 //	"warn"            — alert plus WouldBlock (audit: would have been blocked)
 //
-// Unknown actions fail LoadRules loudly; there is no silent ignore.
+// "block" is rejected until kernel enforcement ships (Phase 6). Unknown
+// actions fail LoadRules loudly; there is no silent ignore.
 type Rule struct {
 	Name     string   `json:"name"`
 	Pattern  string   `json:"pattern"`             // regex matched against the behavior string
@@ -101,6 +102,8 @@ func CompileRules(rules []Rule) ([]Rule, error) {
 		}
 		switch action {
 		case ActionAlert, ActionWarn:
+		case "block":
+			return nil, fmt.Errorf(`rule %q: action "block" is not available yet (enforcement has not shipped; use "warn" to build the audit evidence)`, r.Name)
 		default:
 			return nil, fmt.Errorf("rule %q: unknown action %q (want %q or %q)", r.Name, r.Action, ActionAlert, ActionWarn)
 		}
