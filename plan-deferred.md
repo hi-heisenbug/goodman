@@ -6,16 +6,17 @@
 > Work the phases **in order**; each has a Definition of Done (DoD). Read
 > `AGENTS.md` before touching anything — every invariant there applies here.
 
-## Status (2026-07-13): Phases 0–3 DONE
+## Status (2026-07-13): Phases 0–3 DONE; Phase 2 spike GO (build gated)
 
 | Phase | Outcome |
 |---|---|
 | 0. Tier-2 research spike | **PARK (year-scale)** — `docs/research/tier2-attribution.md` |
 | 1. Collector durability | PVC + sensor RAM spool + recovery test |
-| 2. Python Tier-1 | gated — named customer / pipeline stall |
-| 3. enforce=warn | `action` on rules + `would_block` + Coverage/digest — this change |
+| 2. Python Tier-1 | **spike GO (~1 week build)** — `docs/research/python-attribution.md`; product merge still needs named customer |
+| 3. enforce=warn | `action` on rules + `would_block` + Coverage/digest |
 
-Next ungated: Phase 4 is customer-gated (3+ clusters). Phase 5–6 stay trigger-gated.
+Next ungated product work is thin: Phases 4–6 stay trigger-gated. Prefer
+pilot release gate / GTM over speculative Phase 2 code.
 
 ## Sequencing rationale
 

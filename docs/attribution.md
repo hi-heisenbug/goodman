@@ -87,6 +87,14 @@ work — see [`docs/research/tier2-attribution.md`](research/tier2-attribution.m
 The NODE_OPTIONS webhook remains the shipping answer to zero-config objections.
 Do not start a production build until that doc's GO criteria are met.
 
+## Python / PyPI (not shipping yet)
+
+CPython 3.12+ with `PYTHONPERFSUPPORT=1` writes the same `/tmp/perf-<pid>.map`
+layout Node uses, with symbols shaped `py::<qualname>:<file>`. A live spike on
+3.13.14 confirmed site-packages frames and `*.dist-info` version metadata are
+available — see [`docs/research/python-attribution.md`](research/python-attribution.md).
+Build is gated on a named Python customer (`plan-deferred.md` Phase 2).
+
 ## Behavior canonicalization
 
 Raw syscall arguments are noisy — unique temp files, ephemeral ports. The same
