@@ -25,6 +25,8 @@ var scenarioFS embed.FS
 
 // Scenario is one reproduced attack. When Baseline is nil the malicious
 // behavior must be caught with no baseline at all (the always-on rule path).
+// Rules, when non-empty, replace the built-in defaults for that scenario
+// (used to exercise enforce=warn without changing production defaults).
 type Scenario struct {
 	Name      string        `json:"name"`
 	Incident  string        `json:"incident"`
@@ -32,6 +34,7 @@ type Scenario struct {
 	Summary   string        `json:"summary"`
 	Service   string        `json:"service"`
 	Package   string        `json:"package"`
+	Rules     []diff.Rule   `json:"rules,omitempty"`
 	Baseline  *VersionState `json:"baseline"`
 	Malicious VersionState  `json:"malicious"`
 	Expect    Expectation   `json:"expect"`
@@ -48,6 +51,7 @@ type Expectation struct {
 	NewVersion   string   `json:"new_version"`
 	NewBehaviors []string `json:"new_behaviors"`
 	MatchedRules []string `json:"matched_rules"`
+	WouldBlock   bool     `json:"would_block,omitempty"`
 }
 
 // LoadScenarios reads every embedded scenario, sorted by name.
@@ -88,6 +92,12 @@ func Run(ctx context.Context, s Scenario, dbPath string) (*model.Alert, error) {
 	rules, err := diff.LoadRules("")
 	if err != nil {
 		return nil, err
+	}
+	if len(s.Rules) > 0 {
+		rules, err = diff.CompileRules(s.Rules)
+		if err != nil {
+			return nil, err
+		}
 	}
 	// A high learning window so the malicious version, seen only briefly,
 	// never auto-promotes: it must be diffed as live drift, not learned as a

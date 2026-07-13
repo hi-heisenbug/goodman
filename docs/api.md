@@ -83,6 +83,7 @@ List alerts, newest first (max 500). Omit `status` for all.
     "new_version": "1.0.1",
     "severity": "CRITICAL",
     "matched_rules": ["cloud-metadata", "new-outbound-connect", "secret-read"],
+    "would_block": false,
     "evidence": [
       {
         "behavior": "READ /tmp/goodman-fake-secrets/credentials",
@@ -216,7 +217,7 @@ and alert-budget burn rate (alerts in the last 24h vs target).
   "namespaces": [
     {"name": "staging", "inject_label": false, "pods_total": 3, "pods_with_node_options": 0, "pods_without": 3}
   ],
-  "alert_budget": {"target_per_day": 5, "alerts_last_24h": 2}
+  "alert_budget": {"target_per_day": 5, "alerts_last_24h": 2, "would_block_last_24h": 1}
 }
 ```
 

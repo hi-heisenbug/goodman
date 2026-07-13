@@ -349,3 +349,45 @@ func TestDriftAlertCarriesRulesAndEvidence(t *testing.T) {
 		t.Fatalf("evidence rules = %v", ev.Rules)
 	}
 }
+
+func TestWarnActionWouldBlock(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "warn.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	rules, err := CompileRules([]Rule{
+		{Name: "secret-read", AlwaysOn: true, Pattern: `^READ .*(secret|\.npmrc)`, Action: ActionWarn},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompileRules([]Rule{{Name: "bad", Pattern: `^READ `, Action: "block"}}); err == nil {
+		t.Fatal("unknown action must fail CompileRules")
+	}
+
+	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 2, MinAge: time.Nanosecond})
+	diffEng := NewEngine(s, rules)
+	ups, err := fpEng.Ingest(ctx, []model.Attributed{
+		{Service: "web", Package: "fresh-pkg", Version: "1.0.0", Type: model.EventFileOpen,
+			Behavior: "READ /root/.npmrc", Timestamp: 200, Sensor: "node-a"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var alert *model.Alert
+	for _, up := range ups {
+		if a, _ := diffEng.React(ctx, up); a != nil {
+			alert = a
+		}
+	}
+	if alert == nil || !alert.WouldBlock {
+		t.Fatalf("want WouldBlock alert, got %+v", alert)
+	}
+	got, err := s.GetAlert(ctx, alert.ID)
+	if err != nil || got == nil || !got.WouldBlock {
+		t.Fatalf("persisted WouldBlock = %+v err=%v", got, err)
+	}
+}

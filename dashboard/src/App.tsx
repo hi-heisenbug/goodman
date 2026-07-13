@@ -242,13 +242,18 @@ function AlertCard({ alert, onChange }: { alert: Alert; onChange: () => void }) 
             <span>{relTime(alert.detected_at)}</span>
             <span className={`status-dot ${alert.status}`}>{STATUS_LABELS[alert.status]}</span>
           </div>
-          {(alert.matched_rules?.length ?? 0) > 0 && (
+          {((alert.matched_rules?.length ?? 0) > 0 || alert.would_block) && (
             <div className="rule-chips" aria-label="Matched high-risk rules">
-              {alert.matched_rules!.map((rule) => (
+              {alert.matched_rules?.map((rule) => (
                 <span className="rule-chip" key={rule} title={`Matched high-risk rule: ${rule}`}>
                   {rule}
                 </span>
               ))}
+              {alert.would_block && (
+                <span className="rule-chip would-block" title="Matched a rule with action=warn — would have been blocked in enforce mode">
+                  would block
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -882,6 +887,13 @@ function CoverageView() {
           tone={overBudget ? "critical" : "good"}
           icon="alert"
           detail={`${budget.alerts_last_24h} / ${budget.target_per_day} target per day`}
+        />
+        <MetricCard
+          label="Would block"
+          value={budget.would_block_last_24h}
+          tone={budget.would_block_last_24h > 0 ? "warning" : "good"}
+          icon="shield"
+          detail="enforce=warn matches in last 24h"
         />
         <MetricCard
           label="Sensors"

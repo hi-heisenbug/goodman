@@ -55,6 +55,9 @@ func TestReplayCorpus(t *testing.T) {
 			if !sameSet(alert.MatchedRules, s.Expect.MatchedRules) {
 				t.Fatalf("matched_rules = %v, want %v", alert.MatchedRules, s.Expect.MatchedRules)
 			}
+			if alert.WouldBlock != s.Expect.WouldBlock {
+				t.Fatalf("would_block = %v, want %v", alert.WouldBlock, s.Expect.WouldBlock)
+			}
 			// Evidence must name the sensor for every new behavior.
 			if len(alert.Evidence) != len(s.Expect.NewBehaviors) {
 				t.Fatalf("evidence entries = %d, want %d", len(alert.Evidence), len(s.Expect.NewBehaviors))

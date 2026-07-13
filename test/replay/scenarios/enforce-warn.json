@@ -1,0 +1,30 @@
+{
+  "name": "enforce-warn",
+  "incident": "Synthetic enforce=warn audit (not a historical CVE)",
+  "reference": "plan-deferred.md Phase 3",
+  "summary": "Same always-on secret-read detection with action=warn must raise a CRITICAL alert flagged would_block, without blocking anything.",
+  "service": "web",
+  "package": "audit-probe",
+  "rules": [
+    {
+      "name": "secret-read",
+      "pattern": "^READ .*(secret|token|credential|password|shadow|wallet|\\.pem|\\.key|\\.aws|\\.ssh|\\.npmrc|\\.env|id_rsa)",
+      "always_on": true,
+      "action": "warn"
+    }
+  ],
+  "malicious": {
+    "version": "1.0.0",
+    "behaviors": [
+      "READ /root/.npmrc"
+    ]
+  },
+  "expect": {
+    "severity": "CRITICAL",
+    "old_version": "",
+    "new_version": "1.0.0",
+    "new_behaviors": ["READ /root/.npmrc"],
+    "matched_rules": ["secret-read"],
+    "would_block": true
+  }
+}

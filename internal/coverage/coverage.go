@@ -60,10 +60,12 @@ type NamespaceCoverage struct {
 	ReportedAt          uint64 `json:"reported_at,omitempty"`
 }
 
-// AlertBudget is alerts in the last 24h against the soft daily target.
+// AlertBudget is alerts in the last 24h against the soft daily target,
+// plus enforce=warn would-block count for the Phase 6 evidence view.
 type AlertBudget struct {
-	TargetPerDay  int `json:"target_per_day"`
-	AlertsLast24h int `json:"alerts_last_24h"`
+	TargetPerDay      int `json:"target_per_day"`
+	AlertsLast24h     int `json:"alerts_last_24h"`
+	WouldBlockLast24h int `json:"would_block_last_24h"`
 }
 
 // Registry is an in-memory coverage state updated from ingest and coverage POSTs.
@@ -171,7 +173,7 @@ func (r *Registry) SetNamespaces(reportedBy string, rows []NamespaceCoverage, no
 }
 
 // Snapshot builds the coverage panel payload.
-func (r *Registry) Snapshot(now time.Time, alertsLast24h int) Snapshot {
+func (r *Registry) Snapshot(now time.Time, alertsLast24h, wouldBlockLast24h int) Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -179,8 +181,9 @@ func (r *Registry) Snapshot(now time.Time, alertsLast24h int) Snapshot {
 		Sensors:    []SensorHealth{},
 		Namespaces: []NamespaceCoverage{},
 		AlertBudget: AlertBudget{
-			TargetPerDay:  r.budget,
-			AlertsLast24h: alertsLast24h,
+			TargetPerDay:      r.budget,
+			AlertsLast24h:     alertsLast24h,
+			WouldBlockLast24h: wouldBlockLast24h,
 		},
 		Attribution: AttributionKPI{
 			Package:    r.attrPkg,

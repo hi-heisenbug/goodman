@@ -367,7 +367,12 @@ func (s *Server) handleGetCoverage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, http.StatusOK, s.cover.Snapshot(now, n))
+	wb, err := s.store.CountWouldBlockSince(r.Context(), since)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.cover.Snapshot(now, n, wb))
 }
 
 // handlePostCoverage accepts a namespace injection coverage report from a sensor.

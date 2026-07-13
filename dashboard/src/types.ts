@@ -18,6 +18,7 @@ export interface Alert {
   baseline_behaviors?: string[];
   new_behaviors: string[];
   matched_rules?: string[];
+  would_block?: boolean;
   evidence?: AlertEvidence[];
   detected_at: number; // unix ns
   status: AlertStatus;
@@ -120,6 +121,7 @@ export interface CoverageSnapshot {
   alert_budget: {
     target_per_day: number;
     alerts_last_24h: number;
+    would_block_last_24h: number;
   };
 }
 

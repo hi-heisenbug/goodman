@@ -317,22 +317,28 @@ func (s *Store) UpsertAlert(ctx context.Context, a *model.Alert) (created bool, 
 		sev := maxSeverity(existing.Severity, a.Severity)
 		rules := mergeBehaviors(existing.MatchedRules, a.MatchedRules)
 		evidence := mergeEvidence(existing.Evidence, a.Evidence)
+		wouldBlock := existing.WouldBlock || a.WouldBlock
 		nbJSON, _ := json.Marshal(merged)
 		ruJSON, _ := json.Marshal(orEmpty(rules))
 		evJSON, _ := json.Marshal(evidence)
 		_, err := s.db.ExecContext(ctx,
-			`UPDATE alerts SET new_behaviors=$1, severity=$2, matched_rules=$3, evidence=$4 WHERE id=$5`,
-			string(nbJSON), sev, string(ruJSON), string(evJSON), a.ID)
+			`UPDATE alerts SET new_behaviors=$1, severity=$2, matched_rules=$3, evidence=$4, would_block=$5 WHERE id=$6`,
+			string(nbJSON), sev, string(ruJSON), string(evJSON), wouldBlock, a.ID)
+		a.WouldBlock = wouldBlock
+		a.MatchedRules = rules
+		a.NewBehaviors = merged
+		a.Evidence = evidence
+		a.Severity = sev
 		return false, err
 	}
 	nbJSON, _ := json.Marshal(a.NewBehaviors)
 	ruJSON, _ := json.Marshal(orEmpty(a.MatchedRules))
 	evJSON, _ := json.Marshal(orEmptyEvidence(a.Evidence))
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO alerts (id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, detected_at, status)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
+		INSERT INTO alerts (id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, would_block, detected_at, status)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
 		a.ID, a.Service, a.Package, a.OldVersion, a.NewVersion, a.Severity,
-		string(nbJSON), string(ruJSON), string(evJSON), a.DetectedAt, a.Status)
+		string(nbJSON), string(ruJSON), string(evJSON), a.WouldBlock, a.DetectedAt, a.Status)
 	return err == nil, err
 }
 
@@ -373,7 +379,7 @@ func mergeEvidence(a, b []model.Evidence) []model.Evidence {
 
 func (s *Store) GetAlert(ctx context.Context, id string) (*model.Alert, error) {
 	row := s.db.QueryRowContext(ctx,
-		`SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, detected_at, status
+		`SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, would_block, detected_at, status
 		 FROM alerts WHERE id=$1`, id)
 	return scanAlert(row)
 }
@@ -385,7 +391,7 @@ func scanAlert(row rowScanner) (*model.Alert, error) {
 	var nbJSON, ruJSON, evJSON []byte
 	var oldVersion sql.NullString
 	err := row.Scan(&a.ID, &a.Service, &a.Package, &oldVersion, &a.NewVersion,
-		&a.Severity, &nbJSON, &ruJSON, &evJSON, &a.DetectedAt, &a.Status)
+		&a.Severity, &nbJSON, &ruJSON, &evJSON, &a.WouldBlock, &a.DetectedAt, &a.Status)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -406,7 +412,7 @@ func scanAlert(row rowScanner) (*model.Alert, error) {
 }
 
 func (s *Store) ListAlerts(ctx context.Context, status string) ([]model.Alert, error) {
-	q := `SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, detected_at, status
+	q := `SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, would_block, detected_at, status
 	      FROM alerts`
 	var args []any
 	if status != "" {
@@ -436,6 +442,15 @@ func (s *Store) CountAlertsSince(ctx context.Context, sinceNs uint64) (int, erro
 	var n int
 	err := s.db.QueryRowContext(ctx,
 		`SELECT COUNT(*) FROM alerts WHERE detected_at >= $1`, sinceNs).Scan(&n)
+	return n, err
+}
+
+// CountWouldBlockSince returns how many alerts flagged would_block were
+// detected at or after sinceNs (enforce=warn audit evidence).
+func (s *Store) CountWouldBlockSince(ctx context.Context, sinceNs uint64) (int, error) {
+	var n int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM alerts WHERE would_block AND detected_at >= $1`, sinceNs).Scan(&n)
 	return n, err
 }
 

@@ -23,6 +23,7 @@ const DefaultAlertBudget = 5
 type Digest struct {
 	GeneratedAt      time.Time    `json:"generated_at"`
 	OpenAlerts       int          `json:"open_alerts"`
+	WouldBlockAlerts int          `json:"would_block_alerts"`
 	AlertBudget      int          `json:"alert_budget"`
 	HasLockfile      bool         `json:"has_lockfile"`
 	DeclaredCount    int          `json:"declared_count"`
@@ -55,6 +56,11 @@ func Build(ctx context.Context, st *store.Store, alertBudget int, publicURL stri
 		return d, err
 	}
 	d.OpenAlerts = len(alerts)
+	for _, a := range alerts {
+		if a.WouldBlock {
+			d.WouldBlockAlerts++
+		}
+	}
 
 	lfs, err := st.ListLockfiles(ctx)
 	if err != nil {
@@ -114,6 +120,7 @@ func (d Digest) Markdown() string {
 	fmt.Fprintf(&b, "Generated %s\n\n", d.GeneratedAt.Format(time.RFC3339))
 	fmt.Fprintf(&b, "## Alerts\n\n")
 	fmt.Fprintf(&b, "- Open alerts: **%d** (budget < %d/day target)\n", d.OpenAlerts, d.AlertBudget)
+	fmt.Fprintf(&b, "- Would-block (enforce=warn): **%d**\n", d.WouldBlockAlerts)
 	if d.OpenAlerts > d.AlertBudget {
 		fmt.Fprintf(&b, "- Above noise budget — tune rule excludes or CIDR aggregation.\n")
 	}
@@ -158,6 +165,7 @@ func (d Digest) slackText() string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "*Goodman weekly digest* · %s\n", d.GeneratedAt.Format("2006-01-02"))
 	fmt.Fprintf(&b, "Open alerts: *%d* (budget <%d)\n", d.OpenAlerts, d.AlertBudget)
+	fmt.Fprintf(&b, "Would-block (enforce=warn): *%d*\n", d.WouldBlockAlerts)
 	if !d.HasLockfile {
 		b.WriteString("Reachability: no lockfile yet — upload one to unlock coverage.\n")
 	} else {

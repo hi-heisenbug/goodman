@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- enforce=warn audit mode (deferred Phase 3): rules accept `action` (`alert`|
+  `warn`); matching `warn` sets `would_block` on alerts, increments
+  `goodman_enforce_would_block_total{rule}`, surfaces a dashboard chip +
+  Coverage “Would block” KPI, and appears in the weekly digest. Nothing is
+  blocked. Replay scenario `enforce-warn` covers the path.
 - Collector durability (deferred Phase 1): Helm `store.persistence` mounts a
   PVC for SQLite by default; sensors buffer failed collector POSTs in a
   bounded RAM spool (`-spool-events` / `GOODMAN_SPOOL_EVENTS`, metrics

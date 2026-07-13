@@ -14,10 +14,18 @@ import (
 	"sort"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/model"
 	"github.com/hi-heisenbug/goodman/internal/store"
 )
+
+var wouldBlockTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+	Name: "goodman_enforce_would_block_total",
+	Help: "Alerts that matched a rule with action=warn (audit would-block)."},
+	[]string{"rule"})
 
 // Rule marks matching new behaviors as high risk (CRITICAL).
 //
@@ -28,14 +36,28 @@ import (
 //
 // Exclude patterns suppress a match without deleting the rule, so operators
 // can tune noise ("new outbound connects are critical, except to our CDN").
+//
+// Action controls enforcement posture without changing detection:
+//
+//	"alert" (default) — normal alert only
+//	"warn"            — alert plus WouldBlock (audit: would have been blocked)
+//
+// Unknown actions fail LoadRules loudly; there is no silent ignore.
 type Rule struct {
 	Name     string   `json:"name"`
 	Pattern  string   `json:"pattern"`             // regex matched against the behavior string
 	AlwaysOn bool     `json:"always_on,omitempty"` // fire without a baseline (learning window included)
 	Exclude  []string `json:"exclude,omitempty"`   // regexes that suppress a match
+	Action   string   `json:"action,omitempty"`    // "alert" (default) | "warn"
 	re       *regexp.Regexp
 	exclude  []*regexp.Regexp
 }
+
+// Rule action values. Empty Action on disk is normalized to ActionAlert.
+const (
+	ActionAlert = "alert"
+	ActionWarn  = "warn"
+)
 
 // DefaultRules encode the four attack patterns from the May-2026 incidents:
 // secret reads, cloud-metadata access, new outbound connects, new execs.
@@ -50,8 +72,8 @@ var DefaultRules = []Rule{
 }
 
 // LoadRules reads a JSON rule file; falls back to DefaultRules when path is
-// empty. Invalid patterns are an error — a silently dropped rule is a
-// silently missed CRITICAL.
+// empty. Invalid patterns or unknown actions are an error — a silently
+// dropped rule is a silently missed CRITICAL.
 func LoadRules(path string) ([]Rule, error) {
 	rules := DefaultRules
 	if path != "" {
@@ -64,8 +86,24 @@ func LoadRules(path string) ([]Rule, error) {
 			return nil, fmt.Errorf("parse rules %s: %w", path, err)
 		}
 	}
+	return CompileRules(rules)
+}
+
+// CompileRules validates and compiles an in-memory rule list (same rules as
+// LoadRules). Used by tests and the replay corpus when a scenario ships its
+// own rules.
+func CompileRules(rules []Rule) ([]Rule, error) {
 	out := make([]Rule, len(rules))
 	for i, r := range rules {
+		action := r.Action
+		if action == "" {
+			action = ActionAlert
+		}
+		switch action {
+		case ActionAlert, ActionWarn:
+		default:
+			return nil, fmt.Errorf("rule %q: unknown action %q (want %q or %q)", r.Name, r.Action, ActionAlert, ActionWarn)
+		}
 		re, err := regexp.Compile("(?i)" + r.Pattern)
 		if err != nil {
 			return nil, fmt.Errorf("rule %q: %w", r.Name, err)
@@ -76,7 +114,10 @@ func LoadRules(path string) ([]Rule, error) {
 				return nil, fmt.Errorf("rule %q exclude %q: %w", r.Name, e, err)
 			}
 		}
-		out[i] = Rule{Name: r.Name, Pattern: r.Pattern, AlwaysOn: r.AlwaysOn, Exclude: r.Exclude, re: re, exclude: excl}
+		out[i] = Rule{
+			Name: r.Name, Pattern: r.Pattern, AlwaysOn: r.AlwaysOn,
+			Exclude: r.Exclude, Action: action, re: re, exclude: excl,
+		}
 	}
 	return out, nil
 }
@@ -176,6 +217,7 @@ func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Ale
 func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, baselineBehaviors, newBehaviors []string, freshEvents map[string]model.Attributed) (*model.Alert, error) {
 	severity := model.SeverityWarn
 	ruleSet := map[string]bool{}
+	warnRules := map[string]bool{}
 	evidence := make([]model.Evidence, 0, len(newBehaviors))
 	for _, b := range newBehaviors {
 		ev := model.Evidence{Behavior: b}
@@ -184,6 +226,9 @@ func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, ba
 				severity = model.SeverityCritical
 				ruleSet[eng.rules[i].Name] = true
 				ev.Rules = append(ev.Rules, eng.rules[i].Name)
+				if eng.rules[i].Action == ActionWarn {
+					warnRules[eng.rules[i].Name] = true
+				}
 			}
 		}
 		if first, ok := freshEvents[b]; ok {
@@ -208,12 +253,16 @@ func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, ba
 		BaselineBehaviors: baselineBehaviors,
 		NewBehaviors:      newBehaviors,
 		MatchedRules:      matched,
+		WouldBlock:        len(warnRules) > 0,
 		Evidence:          evidence,
 		DetectedAt:        uint64(time.Now().UnixNano()),
 		Status:            model.AlertOpen,
 	}
 	if _, err := eng.store.UpsertAlert(ctx, a); err != nil {
 		return nil, err
+	}
+	for name := range warnRules {
+		wouldBlockTotal.WithLabelValues(name).Inc()
 	}
 	return a, nil
 }

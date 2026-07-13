@@ -215,6 +215,9 @@ func slackMessage(a model.Alert, publicURL string) map[string]any {
 	if len(a.MatchedRules) > 0 {
 		text += fmt.Sprintf("\nRules: `%s`", strings.Join(a.MatchedRules, "`, `"))
 	}
+	if a.WouldBlock {
+		text += "\n_Would block_ (enforce=warn audit — nothing blocked)"
+	}
 	evByBehavior := map[string]model.Evidence{}
 	for _, ev := range a.Evidence {
 		evByBehavior[ev.Behavior] = ev

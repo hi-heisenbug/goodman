@@ -2,21 +2,25 @@
   {
     "name": "secret-read",
     "pattern": "^READ .*(secret|token|credential|password|shadow|wallet|\\.pem|\\.key|\\.aws|\\.ssh|\\.npmrc|\\.env|id_rsa)",
-    "always_on": true
+    "always_on": true,
+    "action": "alert"
   },
   {
     "name": "cloud-metadata",
     "pattern": "^CONNECT 169\\.254\\.169\\.254:",
-    "always_on": true
+    "always_on": true,
+    "action": "alert"
   },
   {
     "name": "new-outbound-connect",
     "pattern": "^CONNECT ",
-    "exclude": []
+    "exclude": [],
+    "action": "alert"
   },
   {
     "name": "new-exec",
     "pattern": "^EXEC ",
-    "exclude": []
+    "exclude": [],
+    "action": "warn"
   }
 ]

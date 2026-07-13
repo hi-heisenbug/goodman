@@ -93,7 +93,7 @@ Drift is escalated from `WARN` to `CRITICAL` when a new behavior matches a
 high-risk rule. Rules are a config-driven list of case-insensitive regexes matched
 against the canonical behavior string — never hard-coded — so you can tune them.
 
-Each rule supports four fields:
+Each rule supports these fields:
 
 | Field | Meaning |
 |---|---|
@@ -101,8 +101,9 @@ Each rule supports four fields:
 | `pattern` | Case-insensitive regex matched against the canonical behavior string. |
 | `always_on` | Fire even when no baseline exists yet, learning window included. Reserve this for behaviors that are never legitimate learning (credential reads, cloud metadata). Without it, the rule only escalates drift against an established baseline. |
 | `exclude` | Regexes that suppress a match without deleting the rule, for noise tuning ("new connects are critical, except to our CDN"). |
+| `action` | Enforcement posture: `"alert"` (default) raises a normal alert; `"warn"` also sets `would_block` on the alert (audit mode — nothing is blocked). Unknown values fail collector startup. |
 
-The built-in defaults (also in [`deploy/rules.example.json`](../deploy/rules.example.json)):
+The built-in defaults (also in [`deploy/rules.example.json`](../deploy/rules.example.json); the example sets `new-exec` to `"action": "warn"` to show the field — built-in defaults with empty `-rules` stay `"alert"`):
 
 ```json
 [

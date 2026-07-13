@@ -1137,6 +1137,12 @@ button {
   text-transform: lowercase;
 }
 
+.rule-chip.would-block {
+  border-color: var(--warning);
+  background: var(--warning-bg);
+  color: var(--warning);
+}
+
 /* Reachability view */
 .reach-controls {
   display: flex;

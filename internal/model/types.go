@@ -128,6 +128,7 @@ type Alert struct {
 	BaselineBehaviors []string   `json:"baseline_behaviors,omitempty"`
 	NewBehaviors      []string   `json:"new_behaviors"`
 	MatchedRules      []string   `json:"matched_rules,omitempty"` // union of matched rule names
+	WouldBlock        bool       `json:"would_block,omitempty"`   // true if any matched rule has action=warn
 	Evidence          []Evidence `json:"evidence,omitempty"`      // per-behavior triage context
 	DetectedAt        uint64     `json:"detected_at"`             // unix ns
 	Status            string     `json:"status"`                  // open | acknowledged | resolved

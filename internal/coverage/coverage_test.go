@@ -18,7 +18,7 @@ func TestObserveIngestAttributionAndSensorHealth(t *testing.T) {
 	}, now)
 	r.ObserveIngest("node-a", nil, now.Add(10*time.Second)) // heartbeat
 
-	snap := r.Snapshot(now.Add(15*time.Second), 2)
+	snap := r.Snapshot(now.Add(15*time.Second), 2, 1)
 	if len(snap.Sensors) != 1 || snap.Sensors[0].Status != "running" {
 		t.Fatalf("sensors = %+v", snap.Sensors)
 	}
@@ -31,7 +31,7 @@ func TestObserveIngestAttributionAndSensorHealth(t *testing.T) {
 	if len(snap.Attribution.TopUnknown) != 1 || snap.Attribution.TopUnknown[0].Service != "pay" {
 		t.Fatalf("top_unknown = %+v", snap.Attribution.TopUnknown)
 	}
-	if snap.AlertBudget.AlertsLast24h != 2 || snap.AlertBudget.TargetPerDay != 5 {
+	if snap.AlertBudget.AlertsLast24h != 2 || snap.AlertBudget.TargetPerDay != 5 || snap.AlertBudget.WouldBlockLast24h != 1 {
 		t.Fatalf("budget = %+v", snap.AlertBudget)
 	}
 }
@@ -45,7 +45,7 @@ func TestStaleSensorAndNamespaceGapsFirst(t *testing.T) {
 		{Name: "staging", InjectLabel: false, PodsTotal: 3, PodsWithNodeOptions: 0, PodsWithout: 3},
 	}, now)
 
-	snap := r.Snapshot(now, 0)
+	snap := r.Snapshot(now, 0, 0)
 	if snap.Sensors[0].Status != "stale" {
 		t.Fatalf("want stale, got %+v", snap.Sensors[0])
 	}
