@@ -81,7 +81,10 @@ func TestSlackFormatAndSeverityFilter(t *testing.T) {
 	}))
 	defer ts.Close()
 
-	n, err := New(Config{URL: ts.URL, Format: FormatSlack, MinSeverity: model.SeverityCritical})
+	n, err := New(Config{
+		URL: ts.URL, Format: FormatSlack, MinSeverity: model.SeverityCritical,
+		PublicURL: "https://goodman.example",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -89,7 +92,15 @@ func TestSlackFormatAndSeverityFilter(t *testing.T) {
 	done := make(chan struct{})
 	go func() { n.Run(ctx); close(done) }()
 	n.Notify(alert(model.SeverityWarn)) // below threshold: filtered
-	n.Notify(alert(model.SeverityCritical))
+	a := alert(model.SeverityCritical)
+	a.MatchedRules = []string{"secret-read", "new-outbound-connect"}
+	a.Evidence = []model.Evidence{{
+		Behavior:  "READ /etc/secret",
+		Rules:     []string{"secret-read"},
+		Sensor:    "node-a",
+		FirstSeen: uint64(time.Date(2026, 7, 1, 12, 0, 0, 0, time.UTC).UnixNano()),
+	}}
+	n.Notify(a)
 	time.Sleep(150 * time.Millisecond)
 	cancel()
 	<-done
@@ -98,8 +109,13 @@ func TestSlackFormatAndSeverityFilter(t *testing.T) {
 		t.Fatalf("webhook calls = %d, want 1 (WARN must be filtered)", c)
 	}
 	body, _ := got.Load().(string)
-	if !strings.Contains(body, `"text"`) || !strings.Contains(body, "good-pkg") {
-		t.Fatalf("not a Slack payload: %s", body)
+	for _, needle := range []string{
+		`"text"`, "good-pkg", "secret-read", "sensor `node-a`",
+		"first seen", "Open in Goodman", "https://goodman.example/#alerts?id=a1",
+	} {
+		if !strings.Contains(body, needle) {
+			t.Fatalf("Slack payload missing %q: %s", needle, body)
+		}
 	}
 }
 

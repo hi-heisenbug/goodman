@@ -45,12 +45,25 @@ auth:
   apiToken: ""
   existingSecret: ""
 
-# Forward alerts to a webhook (Slack-compatible or generic JSON POST).
+# Forward alerts (and optional weekly digests) to a webhook.
 notifications:
   webhookUrl: ""            # empty = disabled
   format: generic           # generic | slack
   minSeverity: WARN         # INFO | WARN | CRITICAL
   token: ""                 # optional bearer token sent to the webhook
+  # Emit a digest on this cadence when webhookUrl is set (0/empty = off).
+  # 168h = weekly; the collector also fires once at startup.
+  digestInterval: 168h
+  digestAlertBudget: 5      # soft open-alert noise target quoted in the digest
+
+# Public dashboard URL used for Slack deep links (alerts + digest).
+# Example: https://goodman.example.com
+publicUrl: ""
+
+# Recompute stored reachability reports as fingerprints change.
+reachability:
+  interval: 1h              # 0/empty disables; requires a persisted lockfile
+  osv: false                # enrich scheduled recomputes with OSV.dev (needs egress)
 
 # Prune resolved alerts older than this Go duration (e.g. 720h = 30 days).
 # Empty keeps resolved alerts forever. Open/acknowledged alerts are never pruned.

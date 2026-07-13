@@ -298,7 +298,7 @@ func TestLockfileAndReportPersistence(t *testing.T) {
 	s := openTestStore(t)
 
 	// No snapshot yet.
-	if _, _, _, found, err := s.GetReport(ctx, "web"); err != nil || found {
+	if _, found, err := s.GetReport(ctx, "web"); err != nil || found {
 		t.Fatalf("expected no stored report, got found=%v err=%v", found, err)
 	}
 
@@ -325,14 +325,31 @@ func TestLockfileAndReportPersistence(t *testing.T) {
 		}
 	}
 
-	if err := s.SaveReport(ctx, "web", `{"declared_count":5}`, true, 300); err != nil {
+	if err := s.SaveReport(ctx, "web", `{"declared_count":5,"executed_count":1}`, true, 300); err != nil {
 		t.Fatal(err)
 	}
-	rep, osv, at, found, err := s.GetReport(ctx, "web")
+	got, found, err := s.GetReport(ctx, "web")
 	if err != nil || !found {
 		t.Fatalf("GetReport = (found %v, err %v)", found, err)
 	}
-	if rep != `{"declared_count":5}` || !osv || at != 300 {
-		t.Fatalf("stored report mismatch: %q osv=%v at=%d", rep, osv, at)
+	if got.Report != `{"declared_count":5,"executed_count":1}` || !got.OSV || got.ComputedAt != 300 {
+		t.Fatalf("stored report mismatch: %+v", got)
+	}
+	if got.PreviousReport != "" || got.PreviousComputedAt != 0 {
+		t.Fatalf("first save must leave previous empty: %+v", got)
+	}
+
+	if err := s.SaveReport(ctx, "web", `{"declared_count":5,"executed_count":3}`, true, 400); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err = s.GetReport(ctx, "web")
+	if err != nil || !found {
+		t.Fatalf("second GetReport: found=%v err=%v", found, err)
+	}
+	if got.Report != `{"declared_count":5,"executed_count":3}` || got.ComputedAt != 400 {
+		t.Fatalf("current not updated: %+v", got)
+	}
+	if got.PreviousReport != `{"declared_count":5,"executed_count":1}` || got.PreviousComputedAt != 300 {
+		t.Fatalf("previous not preserved: %+v", got)
 	}
 }

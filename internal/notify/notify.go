@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -37,6 +38,7 @@ type Config struct {
 	MinSeverity string        // lowest severity forwarded (default WARN)
 	Timeout     time.Duration // per-attempt HTTP timeout (default 10s)
 	MaxRetries  int           // re-delivery attempts after the first (default 2)
+	PublicURL   string        // dashboard base URL for Slack deep links (optional)
 }
 
 // Notifier accepts alerts on a bounded queue and posts them to the webhook
@@ -173,22 +175,81 @@ func (n *Notifier) post(ctx context.Context, payload []byte) error {
 
 func (n *Notifier) payload(a model.Alert) ([]byte, error) {
 	if n.cfg.Format == FormatSlack {
-		return json.Marshal(slackMessage(a))
+		return json.Marshal(slackMessage(a, n.cfg.PublicURL))
 	}
 	return json.Marshal(map[string]any{"type": "goodman.alert", "alert": a})
 }
 
-func slackMessage(a model.Alert) map[string]any {
+// PostJSON delivers an arbitrary JSON body with the same auth/retry policy as
+// alerts. Used for the weekly digest so alert and digest share one webhook.
+func (n *Notifier) PostJSON(ctx context.Context, payload []byte) error {
+	for attempt := 0; ; attempt++ {
+		err := n.post(ctx, payload)
+		if err == nil {
+			deliveries.WithLabelValues("delivered").Inc()
+			return nil
+		}
+		if attempt >= n.cfg.MaxRetries || ctx.Err() != nil {
+			deliveries.WithLabelValues("failed").Inc()
+			return err
+		}
+		select {
+		case <-ctx.Done():
+			deliveries.WithLabelValues("failed").Inc()
+			return ctx.Err()
+		case <-time.After(n.backoff(attempt)):
+		}
+	}
+}
+
+// Format returns the configured payload format.
+func (n *Notifier) Format() string { return n.cfg.Format }
+
+func slackMessage(a model.Alert, publicURL string) map[string]any {
 	old := a.OldVersion
 	if old == "" {
 		old = "(none)"
 	}
 	text := fmt.Sprintf("*Goodman %s alert*: `%s` dependency `%s` drifted %s → %s",
 		a.Severity, a.Service, a.Package, old, a.NewVersion)
+	if len(a.MatchedRules) > 0 {
+		text += fmt.Sprintf("\nRules: `%s`", strings.Join(a.MatchedRules, "`, `"))
+	}
+	evByBehavior := map[string]model.Evidence{}
+	for _, ev := range a.Evidence {
+		evByBehavior[ev.Behavior] = ev
+	}
 	for _, b := range a.NewBehaviors {
-		text += fmt.Sprintf("\n• `%s`", b)
+		line := fmt.Sprintf("\n• `%s`", b)
+		if ev, ok := evByBehavior[b]; ok {
+			parts := []string{}
+			if ev.Sensor != "" {
+				parts = append(parts, fmt.Sprintf("sensor `%s`", ev.Sensor))
+			}
+			if ev.FirstSeen > 0 {
+				parts = append(parts, "first seen "+model.NsToTime(ev.FirstSeen).UTC().Format(time.RFC3339))
+			}
+			if len(ev.Rules) > 0 {
+				parts = append(parts, "rules `"+strings.Join(ev.Rules, "`, `")+"`")
+			}
+			if len(parts) > 0 {
+				line += " — " + strings.Join(parts, " · ")
+			}
+		}
+		text += line
 	}
 	text += fmt.Sprintf("\nDetected %s · alert id `%s`",
 		model.NsToTime(a.DetectedAt).UTC().Format(time.RFC3339), a.ID)
+	if link := alertDeepLink(publicURL, a.ID); link != "" {
+		text += fmt.Sprintf("\n<%s|Open in Goodman>", link)
+	}
 	return map[string]any{"text": text}
+}
+
+func alertDeepLink(publicURL, alertID string) string {
+	base := strings.TrimRight(strings.TrimSpace(publicURL), "/")
+	if base == "" || alertID == "" {
+		return ""
+	}
+	return base + "/#alerts?id=" + alertID
 }

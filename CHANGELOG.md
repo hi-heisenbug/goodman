@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Pilot heartbeat (Phase 8): week-over-week reachability deltas on
+  `GET /v1/report`, weekly digest delivery via the existing webhook
+  (`-digest-interval`, Helm `notifications.digestInterval=168h`), and Slack
+  alert messages enriched with matched rules, sensor, first-seen times, and
+  dashboard deep links (`-public-url`).
 - Five-minute product wow (`make demo` / `goodmanctl demo` / `make demo-check`):
   seeds alerts and fingerprints, preloads Reachability at 1,400 declared /
   240 executed, prints a 60-second guided script, then live-replays the

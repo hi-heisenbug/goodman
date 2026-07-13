@@ -303,10 +303,11 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 
 // handleGetReport returns the most recently stored reachability snapshot for a
 // service scope (404 when none has been uploaded yet). This lets the dashboard
-// show current numbers on load without re-uploading a lockfile.
+// show current numbers on load without re-uploading a lockfile. When a previous
+// snapshot exists, the response includes a week-over-week delta.
 func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 	service := r.URL.Query().Get("service")
-	repJSON, osv, computedAt, found, err := s.store.GetReport(r.Context(), service)
+	stored, found, err := s.store.GetReport(r.Context(), service)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -315,11 +316,23 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "no stored report for this service", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"computed_at": computedAt,
-		"osv":         osv,
-		"report":      json.RawMessage(repJSON),
-	})
+	out := map[string]any{
+		"computed_at": stored.ComputedAt,
+		"osv":         stored.OSV,
+		"report":      json.RawMessage(stored.Report),
+	}
+	if stored.PreviousReport != "" && stored.PreviousComputedAt > 0 {
+		var cur, prev report.Report
+		if err := json.Unmarshal([]byte(stored.Report), &cur); err == nil {
+			_ = json.Unmarshal([]byte(stored.PreviousReport), &prev)
+			out["previous"] = map[string]any{
+				"computed_at": stored.PreviousComputedAt,
+				"report":      json.RawMessage(stored.PreviousReport),
+			}
+			out["delta"] = report.ComputeDelta(cur, prev, stored.PreviousComputedAt)
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleStream is a server-sent-events feed of live events and alerts,

@@ -69,9 +69,27 @@ spec:
               value: {{ .Values.notifications.format | quote }}
             - name: GOODMAN_WEBHOOK_MIN_SEVERITY
               value: {{ .Values.notifications.minSeverity | quote }}
+{{- if .Values.notifications.digestInterval }}
+            - name: GOODMAN_DIGEST_INTERVAL
+              value: {{ .Values.notifications.digestInterval | quote }}
+            - name: GOODMAN_DIGEST_ALERT_BUDGET
+              value: {{ .Values.notifications.digestAlertBudget | default 5 | quote }}
+{{- end }}
 {{- if .Values.notifications.token }}
             - name: GOODMAN_WEBHOOK_TOKEN
               valueFrom: { secretKeyRef: { name: {{ include "goodman.authSecretName" . }}, key: webhook-token } }
+{{- end }}
+{{- end }}
+{{- if .Values.publicUrl }}
+            - name: GOODMAN_PUBLIC_URL
+              value: {{ .Values.publicUrl | quote }}
+{{- end }}
+{{- if .Values.reachability.interval }}
+            - name: GOODMAN_REACHABILITY_INTERVAL
+              value: {{ .Values.reachability.interval | quote }}
+{{- if .Values.reachability.osv }}
+            - name: GOODMAN_REACHABILITY_OSV
+              value: "true"
 {{- end }}
 {{- end }}
 {{- if .Values.retention }}

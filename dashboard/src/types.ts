@@ -73,8 +73,22 @@ export interface Report {
   rows: ReportRow[];
 }
 
+export interface ReportDelta {
+  executed: number;
+  declared: number;
+  reachable_vulns: number;
+  new_executed_packages?: string[];
+  new_reachable_vuln_ids?: string[];
+  previous_computed_at?: number;
+}
+
 export interface StoredReport {
   computed_at: number; // unix ns
   osv: boolean;
   report: Report;
+  previous?: {
+    computed_at: number;
+    report: Report;
+  };
+  delta?: ReportDelta;
 }

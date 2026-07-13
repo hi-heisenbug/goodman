@@ -5,6 +5,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"io/fs"
 	"log"
@@ -18,6 +19,7 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/api"
 	"github.com/hi-heisenbug/goodman/internal/api/ui"
 	"github.com/hi-heisenbug/goodman/internal/diff"
+	"github.com/hi-heisenbug/goodman/internal/digest"
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/notify"
 	"github.com/hi-heisenbug/goodman/internal/report"
@@ -41,11 +43,15 @@ func main() {
 		webhookFormat = flag.String("webhook-format", envOr("GOODMAN_WEBHOOK_FORMAT", notify.FormatGeneric), "webhook payload format: generic or slack")
 		webhookToken  = flag.String("webhook-token", os.Getenv("GOODMAN_WEBHOOK_TOKEN"), "bearer token sent to the webhook")
 		webhookMinSev = flag.String("webhook-min-severity", envOr("GOODMAN_WEBHOOK_MIN_SEVERITY", "WARN"), "lowest severity forwarded to the webhook (INFO|WARN|CRITICAL)")
+		publicURL     = flag.String("public-url", os.Getenv("GOODMAN_PUBLIC_URL"), "dashboard base URL for Slack deep links and digests")
 
 		retention = flag.Duration("retention", envDurOr("GOODMAN_RETENTION", 0), "prune resolved alerts older than this (0 = keep forever)")
 
 		reachInterval = flag.Duration("reachability-interval", envDurOr("GOODMAN_REACHABILITY_INTERVAL", 0), "recompute stored reachability reports on this cadence (0 = disabled)")
 		reachOSV      = flag.Bool("reachability-osv", os.Getenv("GOODMAN_REACHABILITY_OSV") == "1" || os.Getenv("GOODMAN_REACHABILITY_OSV") == "true", "enrich scheduled reachability recomputes with OSV.dev (needs egress)")
+
+		digestInterval = flag.Duration("digest-interval", envDurOr("GOODMAN_DIGEST_INTERVAL", 0), "emit a weekly digest to the webhook on this cadence (0 = disabled; requires -webhook-url)")
+		digestBudget   = flag.Int("digest-alert-budget", envIntOr("GOODMAN_DIGEST_ALERT_BUDGET", digest.DefaultAlertBudget), "soft open-alert budget quoted in the digest")
 
 		admissionListen = flag.String("admission-listen", os.Getenv("GOODMAN_ADMISSION_LISTEN"), "serve the NODE_OPTIONS mutating webhook on this address (empty = disabled)")
 		admissionCert   = flag.String("admission-tls-cert", os.Getenv("GOODMAN_ADMISSION_TLS_CERT"), "PEM cert for the admission webhook (required when -admission-listen is set)")
@@ -76,12 +82,15 @@ func main() {
 		log.Printf("WARNING: no GOODMAN_INGEST_TOKEN / GOODMAN_API_TOKEN set; the API is unauthenticated (fine locally, not in production)")
 	}
 
+	var notifier *notify.Notifier
 	if *webhookURL != "" {
-		notifier, err := notify.New(notify.Config{
+		var err error
+		notifier, err = notify.New(notify.Config{
 			URL:         *webhookURL,
 			Format:      *webhookFormat,
 			Token:       *webhookToken,
 			MinSeverity: *webhookMinSev,
+			PublicURL:   *publicURL,
 		})
 		if err != nil {
 			log.Fatalf("webhook: %v", err)
@@ -99,6 +108,15 @@ func main() {
 	if *reachInterval > 0 {
 		go reachabilityLoop(ctx, st, *reachInterval, *reachOSV)
 		log.Printf("reachability refresh enabled: every %s (osv=%t)", *reachInterval, *reachOSV)
+	}
+
+	if *digestInterval > 0 {
+		if notifier == nil {
+			log.Printf("WARNING: -digest-interval set but -webhook-url is empty; digest delivery disabled")
+		} else {
+			go digestLoop(ctx, st, notifier, *digestInterval, *digestBudget, *publicURL)
+			log.Printf("weekly digest enabled: every %s (alert budget %d)", *digestInterval, *digestBudget)
+		}
 	}
 
 	if *admissionListen != "" {
@@ -185,6 +203,46 @@ func reachabilityLoop(ctx context.Context, st *store.Store, interval time.Durati
 			} else if n > 0 {
 				log.Printf("reachability: refreshed %d service report(s)", n)
 			}
+		}()
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// digestLoop posts a weekly heartbeat to the configured webhook once at
+// startup and then every interval, so a quiet POV still speaks on day one.
+func digestLoop(ctx context.Context, st *store.Store, n *notify.Notifier, interval time.Duration, budget int, publicURL string) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		func() {
+			runCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+			defer cancel()
+			d, err := digest.Build(runCtx, st, budget, publicURL)
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Printf("digest: build: %v", err)
+				}
+				return
+			}
+			var payload []byte
+			if n.Format() == notify.FormatSlack {
+				payload, err = json.Marshal(d.SlackPayload())
+			} else {
+				payload, err = json.Marshal(d.GenericPayload())
+			}
+			if err != nil {
+				log.Printf("digest: encode: %v", err)
+				return
+			}
+			if err := n.PostJSON(runCtx, payload); err != nil && ctx.Err() == nil {
+				log.Printf("digest: deliver: %v", err)
+				return
+			}
+			log.Printf("digest: delivered (open alerts=%d, executed=%d)", d.OpenAlerts, d.ExecutedCount)
 		}()
 		select {
 		case <-ctx.Done():

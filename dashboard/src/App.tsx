@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Alert, AlertStatus, Fingerprint, Report, ReportRow, Severity } from "./types";
+import type { Alert, AlertStatus, Fingerprint, Report, ReportDelta, ReportRow, Severity } from "./types";
 import { ackAlert, buildReport, fetchAlerts, fetchFingerprints, fetchStoredReport, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
 
 type Tab = "alerts" | "fingerprints" | "reachability";
@@ -625,6 +625,7 @@ function severityTone(sev: string): Tone {
 
 function ReachabilityView() {
   const [report, setReport] = useState<Report | null>(null);
+  const [delta, setDelta] = useState<ReportDelta | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
   const [osv, setOsv] = useState(true);
@@ -641,6 +642,7 @@ function ReachabilityView() {
       .then((stored) => {
         if (!active || !stored) return;
         setReport(stored.report);
+        setDelta(stored.delta ?? null);
         setComputedAt(stored.computed_at);
         setOsv(stored.osv);
       })
@@ -661,10 +663,15 @@ function ReachabilityView() {
       const text = await file.text();
       // persist so the collector can refresh it and future loads are instant.
       setReport(await buildReport(text, { osv, persist: true }));
+      setDelta(null);
       setComputedAt(Date.now() * 1e6);
+      // Re-fetch so week-over-week delta (if a prior snapshot existed) shows up.
+      const stored = await fetchStoredReport();
+      if (stored?.delta) setDelta(stored.delta);
     } catch (e) {
       setErr(String(e));
       setReport(null);
+      setDelta(null);
     } finally {
       setBusy(false);
     }
@@ -677,6 +684,10 @@ function ReachabilityView() {
   const execVulns = vulnRows.filter((r) => r.executed);
   const idleVulns = vulnRows.filter((r) => !r.executed);
   const neverExecuted = rows.filter((r) => !r.executed);
+  const deltaDetail = (n: number | undefined, suffix: string) =>
+    delta && delta.previous_computed_at
+      ? `${n! >= 0 ? "+" : ""}${n} vs prior · ${suffix}`
+      : suffix;
 
   return (
     <section className="view">
@@ -724,15 +735,15 @@ function ReachabilityView() {
       {report && (
         <>
           <div className="metrics-grid">
-            <MetricCard label="Declared" value={report.declared_count.toLocaleString()} icon="cube" detail={fileName || "packages in lockfile"} />
-            <MetricCard label="Executed" value={report.executed_count.toLocaleString()} tone="accent" icon="activity" detail={`${coverage}% reachable`} />
+            <MetricCard label="Declared" value={report.declared_count.toLocaleString()} icon="cube" detail={deltaDetail(delta?.declared, fileName || "packages in lockfile")} />
+            <MetricCard label="Executed" value={report.executed_count.toLocaleString()} tone="accent" icon="activity" detail={deltaDetail(delta?.executed, `${coverage}% reachable`)} />
             <MetricCard label="Never executed" value={idle.toLocaleString()} tone={idle ? "warning" : "good"} icon="archive" detail="Pruning candidates" />
             <MetricCard
               label="Reachable vulns"
               value={execVulns.length}
               tone={execVulns.length ? "critical" : "good"}
               icon="shield"
-              detail={`${idleVulns.length} in idle packages`}
+              detail={deltaDetail(delta?.reachable_vulns, `${idleVulns.length} in idle packages`)}
             />
           </div>
 

@@ -170,14 +170,28 @@ This backs the dashboard's Reachability tab and mirrors `goodmanctl report`.
 
 Return the most recently stored reachability snapshot for a service scope
 (`404` when none has been uploaded with `persist=1`). Lets the dashboard show
-current numbers on load without re-uploading a lockfile.
+current numbers on load without re-uploading a lockfile. When a previous
+snapshot exists (after a scheduled refresh or a second upload), the response
+includes a week-over-week `delta`.
 
 ```jsonc
 // response
 {
   "computed_at": 1783921240344971762, // unix ns of the snapshot
   "osv": true,                         // whether it was OSV-enriched
-  "report": { /* the same Report shape as POST returns */ }
+  "report": { /* the same Report shape as POST returns */ },
+  "previous": {                        // omitted on the first snapshot
+    "computed_at": 1783316440344971762,
+    "report": { /* prior Report */ }
+  },
+  "delta": {                           // omitted on the first snapshot
+    "executed": 12,
+    "declared": 0,
+    "reachable_vulns": -1,
+    "new_executed_packages": ["left-pad@1.3.0"],
+    "new_reachable_vuln_ids": ["GHSA-…"],
+    "previous_computed_at": 1783316440344971762
+  }
 }
 ```
 

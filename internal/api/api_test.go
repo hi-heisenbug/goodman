@@ -176,7 +176,20 @@ func TestReportPersistAndGet(t *testing.T) {
 		t.Fatalf("POST persist = %d body=%s", rec.Code, rec.Body.String())
 	}
 
-	// GET now returns the stored snapshot envelope.
+	// Second persist after a fingerprint change creates a previous snapshot + delta.
+	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "left-pad", Version: "1.3.0",
+		Behaviors: map[string]model.BehaviorStat{"READ /b": {Count: 1}}, IsBaseline: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/report?service=web&persist=1", strings.NewReader(lockfile)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("second POST persist = %d", rec.Code)
+	}
+
+	// GET now returns the stored snapshot envelope with a delta.
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/report?service=web", nil))
 	if rec.Code != http.StatusOK {
@@ -188,6 +201,9 @@ func TestReportPersistAndGet(t *testing.T) {
 			DeclaredCount int `json:"declared_count"`
 			ExecutedCount int `json:"executed_count"`
 		} `json:"report"`
+		Delta *struct {
+			Executed int `json:"executed"`
+		} `json:"delta"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
 		t.Fatal(err)
@@ -195,7 +211,10 @@ func TestReportPersistAndGet(t *testing.T) {
 	if env.ComputedAt == 0 {
 		t.Fatal("stored snapshot missing computed_at")
 	}
-	if env.Report.DeclaredCount != 2 || env.Report.ExecutedCount != 1 {
+	if env.Report.DeclaredCount != 2 || env.Report.ExecutedCount != 2 {
 		t.Fatalf("stored snapshot wrong: declared=%d executed=%d", env.Report.DeclaredCount, env.Report.ExecutedCount)
+	}
+	if env.Delta == nil || env.Delta.Executed != 1 {
+		t.Fatalf("expected executed delta +1, got %+v body=%s", env.Delta, rec.Body.String())
 	}
 }

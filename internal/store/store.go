@@ -120,29 +120,47 @@ func (s *Store) ListLockfiles(ctx context.Context) ([]StoredLockfile, error) {
 	return out, rows.Err()
 }
 
-// SaveReport stores the latest computed reachability report for a service.
+// StoredReachability is one persisted reachability snapshot, plus the
+// immediately previous snapshot used for week-over-week deltas.
+type StoredReachability struct {
+	Report             string
+	OSV                bool
+	ComputedAt         uint64
+	PreviousReport     string
+	PreviousComputedAt uint64
+}
+
+// SaveReport stores the latest computed reachability report for a service,
+// shifting the prior snapshot into previous_* so the API can return deltas.
 func (s *Store) SaveReport(ctx context.Context, service, reportJSON string, osv bool, computedAt uint64) error {
 	_, err := s.db.ExecContext(ctx, `
-		INSERT INTO reachability_reports (service, report, osv, computed_at)
-		VALUES ($1,$2,$3,$4)
-		ON CONFLICT (service) DO UPDATE SET report=EXCLUDED.report, osv=EXCLUDED.osv, computed_at=EXCLUDED.computed_at`,
+		INSERT INTO reachability_reports (service, report, osv, computed_at, previous_report, previous_computed_at)
+		VALUES ($1,$2,$3,$4,'',0)
+		ON CONFLICT (service) DO UPDATE SET
+			previous_report=reachability_reports.report,
+			previous_computed_at=reachability_reports.computed_at,
+			report=EXCLUDED.report,
+			osv=EXCLUDED.osv,
+			computed_at=EXCLUDED.computed_at`,
 		service, reportJSON, osv, computedAt)
 	return err
 }
 
 // GetReport returns the stored report snapshot for a service. found is false
 // when no snapshot exists yet.
-func (s *Store) GetReport(ctx context.Context, service string) (reportJSON string, osv bool, computedAt uint64, found bool, err error) {
-	row := s.db.QueryRowContext(ctx,
-		`SELECT report, osv, computed_at FROM reachability_reports WHERE service=$1`, service)
-	err = row.Scan(&reportJSON, &osv, &computedAt)
+func (s *Store) GetReport(ctx context.Context, service string) (StoredReachability, bool, error) {
+	var out StoredReachability
+	row := s.db.QueryRowContext(ctx, `
+		SELECT report, osv, computed_at, previous_report, previous_computed_at
+		FROM reachability_reports WHERE service=$1`, service)
+	err := row.Scan(&out.Report, &out.OSV, &out.ComputedAt, &out.PreviousReport, &out.PreviousComputedAt)
 	if err == sql.ErrNoRows {
-		return "", false, 0, false, nil
+		return StoredReachability{}, false, nil
 	}
 	if err != nil {
-		return "", false, 0, false, err
+		return StoredReachability{}, false, err
 	}
-	return reportJSON, osv, computedAt, true, nil
+	return out, true, nil
 }
 
 // migrate applies pending migration files in name order. Applied files are

@@ -23,9 +23,12 @@ variables take precedence over built-in defaults.
 | `-webhook-format` | `GOODMAN_WEBHOOK_FORMAT` | `generic` | Webhook payload: `generic` JSON or `slack` (Slack-compatible `text` message). |
 | `-webhook-token` | `GOODMAN_WEBHOOK_TOKEN` | *(empty)* | Bearer token sent to the webhook endpoint. |
 | `-webhook-min-severity` | `GOODMAN_WEBHOOK_MIN_SEVERITY` | `WARN` | Lowest severity forwarded (`INFO`, `WARN`, `CRITICAL`). |
+| `-public-url` | `GOODMAN_PUBLIC_URL` | *(empty)* | Dashboard base URL for Slack deep links (alerts + weekly digest). |
 | `-retention` | `GOODMAN_RETENTION` | `0` | Prune resolved alerts older than this (`720h` = 30 days). `0` keeps them forever. Open/acknowledged alerts are never pruned. |
 | `-reachability-interval` | `GOODMAN_REACHABILITY_INTERVAL` | `0` | Recompute stored reachability reports on this cadence as fingerprints change (`0` = disabled). |
 | `-reachability-osv` | `GOODMAN_REACHABILITY_OSV` | `false` | Enrich scheduled reachability recomputes with OSV.dev (needs egress). |
+| `-digest-interval` | `GOODMAN_DIGEST_INTERVAL` | `0` | Emit a weekly digest to the webhook on this cadence (`168h` = weekly). `0` = disabled. Requires `-webhook-url`. Fires once at startup. |
+| `-digest-alert-budget` | `GOODMAN_DIGEST_ALERT_BUDGET` | `5` | Soft open-alert noise target quoted in the digest. |
 
 **Learning window.** A `(service, package, version)` fingerprint becomes a
 baseline only when it has been observed `learn-obs` times **and** spans at least
@@ -56,7 +59,10 @@ token prompt and stores the entered token in the browser's localStorage.
 worker (bounded queue, three delivery attempts with backoff; ingestion is never
 blocked by a slow endpoint). `generic` sends `{"type": "goodman.alert",
 "alert": {…}}` with the full alert object; `slack` sends a Slack-compatible
-`{"text": …}` message that also works with Mattermost and Rocket.Chat.
+`{"text": …}` message that includes matched rules, per-behavior sensor /
+first-seen evidence, and (when `GOODMAN_PUBLIC_URL` is set) a deep link into
+the dashboard. The same webhook also receives the weekly digest when
+`-digest-interval` is set.
 
 ## Sensor
 
@@ -178,6 +184,11 @@ in [`deploy/helm/goodman/values.yaml`](../deploy/helm/goodman/values.yaml).
 | `notifications.format` | `generic` | `generic` or `slack`. |
 | `notifications.minSeverity` | `WARN` | Lowest severity forwarded. |
 | `notifications.token` | `""` | Bearer token sent to the webhook. |
+| `notifications.digestInterval` | `168h` | Weekly digest cadence when `webhookUrl` is set (`""` / `0` disables). Fires once at startup. |
+| `notifications.digestAlertBudget` | `5` | Soft open-alert noise target quoted in the digest. |
+| `publicUrl` | `""` | Dashboard base URL for Slack deep links. |
+| `reachability.interval` | `1h` | Recompute stored reachability reports (`""` / `0` disables). |
+| `reachability.osv` | `false` | Enrich scheduled recomputes with OSV.dev. |
 | `retention` | `""` | Prune resolved alerts older than this Go duration (e.g. `720h`). |
 | `webhook.enabled` | `false` | Enable the NODE_OPTIONS mutating admission webhook (injects the perf-map flags into pods in namespaces labeled `goodman.io/inject=enabled`). |
 | `webhook.port` | `8443` | Port the collector serves the webhook on. |
