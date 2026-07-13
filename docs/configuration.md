@@ -69,6 +69,7 @@ blocked by a slow endpoint). `generic` sends `{"type": "goodman.alert",
 | `-comms` | `GOODMAN_EXTRA_COMMS` | *(none)* | Extra process names to watch, comma-separated (beyond built-in runtime comm names). |
 | `-ingest-token` | `GOODMAN_INGEST_TOKEN` | *(empty)* | Bearer token sent with every event batch (must match the collector's ingest token). |
 | `-tls-ca` | `GOODMAN_TLS_CA` | *(empty)* | PEM CA bundle to trust for an `https://` collector (private CA / self-signed). Empty uses system roots. |
+| `-connect-cidr` | `GOODMAN_CONNECT_CIDR` | `0` | Aggregate public destination IPs to this IPv4 prefix (8-32) in `CONNECT` behaviors. `0` keeps exact IPs. See noise control below. |
 | `-watch-interval` | — | `3s` | How often to rescan `/proc` for runtime processes. |
 | `-stdout` | — | `false` | Print attributed events to stdout instead of sending to the collector (debugging). |
 | `-raw` | — | `false` | With `-stdout`: also print raw events including stack depth. |
@@ -117,6 +118,24 @@ An example of noise tuning with `exclude`:
 { "name": "new-outbound-connect", "pattern": "^CONNECT ",
   "exclude": ["^CONNECT 10\\.", "^CONNECT 151\\.101\\."] }
 ```
+
+### Taming CONNECT noise
+
+`CONNECT` behaviors canonicalize to `ip:port`, so a dependency talking to a CDN
+or any DNS-rotated host produces a "new" behavior on every address change and
+can flood the fingerprint set and alerts. Two independent controls help:
+
+- **Sensor CIDR aggregation** (`-connect-cidr` / `GOODMAN_CONNECT_CIDR`):
+  collapse public destination IPs to a prefix at capture time, so
+  `52.84.12.7:443` and `52.84.250.9:443` both become
+  `CONNECT 52.84.0.0/16:443`. Private, loopback, link-local, and cloud-metadata
+  addresses always stay exact, so internal calls and metadata access remain
+  precise. `/16` is a good starting point for large CDNs.
+- **Rule excludes** (above): suppress connects you have vetted (a known CDN
+  range, your database subnet) without disabling the whole rule.
+
+Aggregation happens on the sensor before events leave the node, so it also
+reduces the volume shipped to the collector.
 
 Point the collector at your own file:
 

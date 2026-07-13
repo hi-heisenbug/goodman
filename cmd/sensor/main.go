@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -62,6 +63,7 @@ func main() {
 		watchInterval = flag.Duration("watch-interval", 3*time.Second, "how often to rescan /proc for runtime processes")
 		ingestToken   = flag.String("ingest-token", os.Getenv("GOODMAN_INGEST_TOKEN"), "bearer token sent with event batches")
 		tlsCA         = flag.String("tls-ca", os.Getenv("GOODMAN_TLS_CA"), "PEM CA bundle to trust for an https collector (empty = system roots)")
+		connectCIDR   = flag.Int("connect-cidr", envIntOr("GOODMAN_CONNECT_CIDR", 0), "aggregate public destination IPs to this IPv4 prefix in CONNECT behaviors (8-32; 0 = exact IPs)")
 	)
 	flag.Parse()
 	log.SetPrefix("sensor: ")
@@ -87,6 +89,7 @@ func main() {
 	}
 
 	resolver := attribute.NewResolver(*procRoot)
+	resolver.ConnectCIDRBits = *connectCIDR
 	bootOffset := loader.BootToUnixNs()
 
 	// pid watcher
@@ -267,6 +270,15 @@ func sendBatches(ctx context.Context, client *http.Client, baseURL, token, senso
 func envOr(k, def string) string {
 	if v := os.Getenv(k); v != "" {
 		return v
+	}
+	return def
+}
+
+func envIntOr(k string, def int) int {
+	if v := os.Getenv(k); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
 	}
 	return def
 }

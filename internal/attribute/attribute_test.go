@@ -68,6 +68,37 @@ func TestCanonicalize(t *testing.T) {
 	}
 }
 
+func TestCanonicalizeConnectCIDR(t *testing.T) {
+	cases := []struct {
+		arg  string
+		bits int
+		want string
+	}{
+		// Public IPv4 collapses to the requested prefix.
+		{"52.84.12.7:443", 16, "CONNECT 52.84.0.0/16:443"},
+		{"52.84.250.9:443", 16, "CONNECT 52.84.0.0/16:443"}, // same /16 as above: dedups CDN rotation
+		{"140.82.113.6:443", 24, "CONNECT 140.82.113.0/24:443"},
+		// Aggregation off (0) keeps exact IPs.
+		{"52.84.12.7:443", 0, "CONNECT 52.84.12.7:443"},
+		// Private, loopback, link-local stay exact even with aggregation on.
+		{"10.0.0.5:5432", 16, "CONNECT 10.0.0.5:5432"},
+		{"192.168.1.9:80", 16, "CONNECT 192.168.1.9:80"},
+		{"127.0.0.1:6379", 16, "CONNECT 127.0.0.1:6379"},
+		// Cloud metadata is never aggregated (rules must still match it exactly).
+		{"169.254.169.254:80", 16, "CONNECT 169.254.169.254:80"},
+		// Out-of-range bits are a no-op.
+		{"52.84.12.7:443", 40, "CONNECT 52.84.12.7:443"},
+		// Non-IPv4 / malformed passes through.
+		{"example.com:443", 16, "CONNECT example.com:443"},
+	}
+	for _, c := range cases {
+		got := CanonicalizeWith(model.EventNetConnect, c.arg, c.bits)
+		if got != c.want {
+			t.Errorf("CanonicalizeWith(CONNECT %q, bits=%d) = %q, want %q", c.arg, c.bits, got, c.want)
+		}
+	}
+}
+
 func TestPerfMapLookup(t *testing.T) {
 	dir := t.TempDir()
 	pm := filepath.Join(dir, "perf-1.map")

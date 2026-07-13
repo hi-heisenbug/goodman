@@ -19,6 +19,10 @@ type Resolver struct {
 
 	mu   sync.Mutex
 	pids map[int]*pidState
+
+	// ConnectCIDRBits, when in [8,32], aggregates public destination IPs to
+	// that IPv4 prefix in CONNECT behaviors (0 = exact IPs, the default).
+	ConnectCIDRBits int
 }
 
 type pidState struct {
@@ -179,7 +183,7 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		Package:   pkg,
 		Version:   version,
 		Type:      model.EventType(ev.Type),
-		Behavior:  Canonicalize(model.EventType(ev.Type), ev.ArgString()),
+		Behavior:  CanonicalizeWith(model.EventType(ev.Type), ev.ArgString(), r.ConnectCIDRBits),
 		Timestamp: ev.Timestamp + bootToUnixNs,
 	}
 }

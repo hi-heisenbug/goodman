@@ -241,6 +241,11 @@ environment:
 4. Canonicalize it in `internal/attribute/canonical.go`.
 5. `make bpf && make build && make test`.
 
+**Tune attribution noise.** Connect aggregation lives in `aggregateConnect`
+(`internal/attribute/canonical.go`), gated by the sensor's `-connect-cidr`;
+rule-level `exclude` lives in `internal/diff`. Keep
+private/loopback/link-local/cloud-metadata addresses exact when aggregating.
+
 **Add a high-risk rule** — edit `deploy/rules.example.json` (or `DefaultRules`
 in `internal/diff/diff.go`). Patterns are case-insensitive regexes matched
 against the canonical behavior string (`READ …`, `CONNECT …`, `EXEC …`).

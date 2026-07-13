@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and cloud-metadata access now alert from the first observation, during the
   learning window and with no baseline, closing the baseline-poisoning gap.
 - Per-rule `exclude` patterns for noise tuning without deleting a rule.
+- Sensor CONNECT noise control: `-connect-cidr` / `GOODMAN_CONNECT_CIDR`
+  aggregates public destination IPs to an IPv4 prefix (e.g. /16), collapsing
+  CDN and DNS rotation into one behavior. Private, loopback, link-local, and
+  cloud-metadata addresses stay exact.
 - Alert evidence: every alert now carries `matched_rules` (which high-risk
   rules fired) and per-behavior `evidence` (rule names, reporting sensor,
   first-seen timestamp). Shown in the dashboard as rule chips and by
