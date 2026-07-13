@@ -22,9 +22,22 @@ sudo make e2e
 Confirms the eBPF sensor → collector path on a real kernel. Unprivileged
 sandboxes cannot run this; note in the release notes if skipped.
 
-## HA proof (Postgres, human or staging CI)
+## HA proof (Postgres)
 
-Two collector replicas behind one Service, shared Postgres DSN:
+Two collector replicas behind one Service, shared Postgres DSN. **SQLite is
+single-writer — two collectors against one SQLite file is invalid.**
+
+Automated when Docker is available:
+
+```bash
+make ha-smoke   # scripts/ha-smoke.sh — two collectors, shared Postgres;
+                # asserts fingerprint parity + alert dedup; skips if unavailable
+```
+
+`WithLeader` advisory locks are unit-tested in `internal/store`; digest
+singleton behavior is part of the manual staging checklist below.
+
+Manual / staging checklist:
 
 1. `helm upgrade` with `collector.replicas=2` and `postgres.dsn` set.
 2. Run `make replay` (or equivalent load) with sensors posting to the Service.
@@ -32,8 +45,7 @@ Two collector replicas behind one Service, shared Postgres DSN:
    alert per scenario (no duplicate webhooks/digests).
 4. Kill one replica mid-ingest; confirm no lost behaviors within spool budget.
 
-This path is not fully automated in CI today; record the environment and outcome
-in the release notes when executed.
+Record the environment and outcome in `docs/releases/v0.2.0-notes.md` when executed.
 
 ## Ship
 

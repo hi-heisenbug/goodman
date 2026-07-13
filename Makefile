@@ -79,6 +79,10 @@ e2e: build workload ## Full eBPF drift replay (NEEDS ROOT: run `sudo make e2e`)
 smoke: build ## Backend-only smoke test (no root needed)
 	bash test/e2e/smoke_test.sh
 
+.PHONY: ha-smoke
+ha-smoke: build ## Two-replica HA smoke against Docker Postgres (skips if unavailable)
+	bash scripts/ha-smoke.sh
+
 .PHONY: replay
 replay: ## Replay real npm supply-chain attacks and assert each is caught (no root)
 	go test ./test/replay/ -v -count=1

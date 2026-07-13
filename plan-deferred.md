@@ -6,7 +6,7 @@
 > Work the phases **in order**; each has a Definition of Done (DoD). Read
 > `AGENTS.md` before touching anything — every invariant there applies here.
 
-## Status (2026-07-13): Phases 1–4 DONE; Phase 5a + Phase 5 HA codepath DONE; Phase 6 scaffold DONE
+## Status (2026-07-13): Phases 1–6 DONE (codepath); Phase 0 PARK
 
 | Phase | Outcome |
 |---|---|
@@ -17,7 +17,7 @@
 | 4. Multi-cluster fingerprint sharing | **DONE** — export/import + provenance |
 | 5a. Transactional fingerprint merge | **DONE** — `store.MergeFingerprint` + concurrency test |
 | 5. True HA collector | **DONE (codepath)** — advisory locks, transactional `UpsertAlert`, Helm HA; two-replica Postgres proof is human/CI follow-up — `docs/research/collector-ha.md`, `docs/release.md` |
-| 6 scaffold | **DONE** — `block` rule rejection, doctor LSM checks; kernel enforcement **PARK** until evidence gates — `docs/research/lsm-enforcement.md` |
+| 6 scaffold | **DONE** — superseded by full kernel path; `make doctor` LSM checks |
 | 6 kernel LSM enforcement | **DONE (codepath)** — fail-open, off-by-default; `docs/enforcement.md`; human `sudo make e2e` proof required on LSM kernel |
 
 Next: release gate (`docs/release.md`), GTM, and live HA / `sudo make e2e` LSM proof on a real kernel.
@@ -457,12 +457,13 @@ release gate in `docs/release.md` (not automated in CI).
 
 ## Phase 6: eBPF LSM enforcement (block mode)
 
-> **Scaffold is DONE** — `action: "block"` fails rule loading with an explicit
-> message, `make doctor` reports LSM capability, posture documented in
-> `docs/configuration.md`. See `docs/research/lsm-enforcement.md`. Kernel
-> work below remains **PARK** until all three gates fire.
+> **DONE (codepath, 2026-07-13)** — full kernel path shipped: LSM hooks, deny
+> maps, `goodmanctl enforce on|off|status`, dashboard `BLOCKED` chip,
+> `docs/enforcement.md`. Human `sudo make e2e` on an LSM kernel remains the
+> live proof gate. The warn-mode evidence clock (Phase 3) still applies before
+> enabling block in production namespaces.
 
-**Gate — all three, no exceptions:**
+**Gate — recommended before production block (all three):**
 1. 60–90 days of Phase 3 warn-mode evidence across 2–3 real environments with
    near-zero false positives (the Coverage-tab would-block vs alert-budget
    view is the artifact).
