@@ -21,9 +21,10 @@ Goodman attributes each security-relevant Linux syscall to the **npm/PyPI
 package** that caused it, learns a per-`(service, package, version)` behavioral
 baseline, and raises an alert when a dependency's behavior drifts. An eBPF
 program captures the syscall plus the user-space call stack; user space resolves
-that stack to a JavaScript source path, maps it to a package, and diffs live
-behavior against the baseline. The hard part is **attribution** (`internal/attribute/`);
-everything else is plumbing around it.
+that stack to a JS or Python source path, maps it to a package version, and
+diffs live behavior against the baseline. Optional LSM enforcement is
+fail-open and off by default (`docs/enforcement.md`). The hard part is
+**attribution** (`internal/attribute/`); everything else is plumbing around it.
 
 Read [`docs/architecture.md`](docs/architecture.md) for the full design and
 [`docs/attribution.md`](docs/attribution.md) for the attribution algorithm.
@@ -373,11 +374,16 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 |---|---|
 | [`docs/getting-started.md`](docs/getting-started.md) | Local setup, first run, first alert |
 | [`docs/architecture.md`](docs/architecture.md) | Components, data flow, design decisions |
-| [`docs/attribution.md`](docs/attribution.md) | The stack→package algorithm (Tier 1/2) |
+| [`docs/attribution.md`](docs/attribution.md) | The stack→package algorithm (Tier 1 npm/PyPI; Tier 2 PARK) |
+| [`docs/enforcement.md`](docs/enforcement.md) | Optional LSM block mode (fail-open, off by default) |
+| [`docs/pilot-runbook.md`](docs/pilot-runbook.md) | Pilot install, noise, digest, rollback |
+| [`docs/release.md`](docs/release.md) | Release gate checklist |
 | [`docs/configuration.md`](docs/configuration.md) | Every flag, env var, and Helm value |
-| [`docs/deployment.md`](docs/deployment.md) | Kubernetes / Helm production guide |
+| [`docs/deployment.md`](docs/deployment.md) | Kubernetes / Helm / HA / multi-cluster |
 | [`docs/api.md`](docs/api.md) | REST + SSE + metrics reference |
 | [`docs/development.md`](docs/development.md) | Dev loop, testing strategy, releasing |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | Common failures and fixes |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Human contributor workflow |
-| [`plan.md`](plan.md) | The original build plan (phases + DoD) |
+| [`plan-pilot.md`](plan-pilot.md) | Path to first paid pilot (Phases 1–9 DONE) |
+| [`plan-deferred.md`](plan-deferred.md) | Deferred Phases 0–6 (codepath DONE; Tier-2 PARK) |
+| [`plan.md`](plan.md) | Original zero-to-v0.1 build plan |

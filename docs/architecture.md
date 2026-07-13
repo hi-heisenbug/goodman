@@ -36,12 +36,19 @@ signal.
 1. **Capture** — eBPF programs hook low-volume security syscall tracepoints and, for each
    event from a *watched* process, grabs the user-space call stack.
 2. **Attribute** — user space resolves that stack to a source file, finds the
-   deepest frame inside a `node_modules/<pkg>/` directory, and reads the version
-   from that package's `package.json`.
+   deepest frame inside `node_modules/<pkg>/` or `site-packages/<pkg>/`
+   (or `dist-packages/`), and reads the version from `package.json` or the
+   adjacent `*.dist-info` metadata. Frozen / unresolvable frames stay
+   `<app>` / `<unknown>` — never a guess.
 3. **Fingerprint** — behaviors are canonicalized and aggregated into a set per
    `(service, package, version)`; after a learning window the set becomes a baseline.
-4. **Diff** — new behavior that isn't in the baseline is drift; high-risk drift
-   (secret reads, cloud-metadata, new connects, new execs) is escalated to CRITICAL.
+4. **Diff** — new behavior that isn't in the baseline is drift; high-risk rules
+   escalate with `action: alert | warn | block` (warn = would-block audit;
+   block = same alert path plus optional LSM deny when armed).
+5. **Enforce (optional)** — LSM hooks (`file_open` / `socket_connect` /
+   `bprm_check_security`) exact-match literal deny maps only when the master
+   gate, runtime switch, and `goodman.io/enforce=enabled` scope are all on.
+   Fail-open otherwise. See [`enforcement.md`](enforcement.md).
 
 ## Processes
 
@@ -55,9 +62,13 @@ Runs on every node (a privileged DaemonSet in Kubernetes, or as root locally).
   (`internal/loader`).
 - Maintains the in-kernel `watched_pids` map by periodically scanning `/proc` for
   built-in runtime comm names (`node`, `nodejs`, `MainThread`, `python`,
-  `python3`) plus configured extras (`RefreshWatched`).
+  `python3`, versioned `python3.12`/`python3.13`, `gunicorn`, `celery`,
+  `uwsgi`, `uvicorn`) plus configured extras (`RefreshWatched` / `-comms`).
 - Reads `RawEvent`s from the ring buffer, resolves each to an `Attributed` event
   (`internal/attribute`), and batches them to the collector over gzip'd HTTP.
+  Failed POSTs go into a bounded RAM spool (`-spool-events`) and retry.
+- When `-enforce-enabled`, optionally attaches LSM programs, heartbeats the
+  enforce deadline, and reconciles cgroup scope + deny maps from the collector.
 - **Never blocks the ring-buffer reader on the network:** events flow through a
   buffered channel; if it fills, events are dropped and counted
   (`goodman_sensor_channel_drops_total`).

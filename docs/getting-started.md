@@ -158,7 +158,10 @@ building up in the dashboard's Fingerprint Explorer.
 
 ## Next steps
 
+- [Pilot runbook](pilot-runbook.md) — production pilot install and day-2 ops.
+- [Enforcement](enforcement.md) — optional LSM block mode (off by default).
 - [Configuration](configuration.md) — every flag, env var, and tuning knob.
-- [Deployment](deployment.md) — install on Kubernetes with one Helm command.
+- [Deployment](deployment.md) — Helm, HA, Postgres, multi-cluster baselines.
 - [Architecture](architecture.md) — how the pieces fit together.
+- [Release checklist](release.md) — v0.2.0 gate (e2e, tag, images).
 - [Troubleshooting](troubleshooting.md) — when something doesn't work.

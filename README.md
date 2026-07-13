@@ -5,23 +5,24 @@
 [![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](go.mod)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-helm-326CE5.svg)](deploy/helm/goodman)
 
-Goodman is a runtime dependency-security sensor. It attributes security-relevant
-Linux syscalls to the exact npm package that caused them, learns a behavioral
-baseline per `(service, package, version)`, and raises an alert when a dependency
-version starts doing something new.
+Goodman is a runtime dependency-security sensor by [Heisenbug](https://github.com/hi-heisenbug).
+It attributes security-relevant Linux syscalls to the exact **npm or PyPI**
+package that caused them, learns a behavioral baseline per
+`(service, package, version)`, and raises an alert when a dependency starts
+doing something new. Optional eBPF LSM **block mode** is fail-open and
+**off by default**.
 
 The short version: the kernel can tell you a process opened a file or connected
 to an IP. Goodman tells you which dependency in that process did it.
 
 ![Goodman dashboard showing a critical dependency drift alert](docs/images/dashboard.png)
 
-The embedded Goodman dashboard by Heisenbug is a production React/Vite UI with
-live alert review, fingerprint exploration, SSE updates, and responsive mobile
-layouts.
+The embedded dashboard is a production React/Vite UI with live alert review,
+fingerprints, reachability, coverage/trust, SSE updates, and responsive layouts.
 
 ## Demo
 
-Watch the 54-second product walkthrough:
+Watch the product walkthrough:
 
 <video src="demo_build/goodman_demo.mp4" controls width="100%" title="Goodman product demo"></video>
 
@@ -29,55 +30,51 @@ Watch the 54-second product walkthrough:
 
 ## What It Detects
 
-Goodman is built for dependency behavior drift:
-
 - a package version that starts reading secrets, tokens, SSH keys, `.npmrc`, or
   cloud credentials
 - a dependency that starts connecting to cloud metadata or a new outbound host
 - a package update that adds process execution where the baseline had none
 - any new canonical behavior compared to the learned baseline for that package
+- **always-on** high-risk rules that fire during the learning window (no baseline
+  poisoning gap for credential / metadata access)
 
-It is detection-first in v1. Goodman observes, attributes, fingerprints, and
-alerts; it does not block or sandbox.
+Optional enforcement (`action: "block"` + Helm/sensor gates) can deny matching
+syscalls in opted-in namespaces. See [docs/enforcement.md](docs/enforcement.md).
 
 ## How It Works
 
 ```text
-kernel tracepoints
-open/openat/openat2/connect/execve
+kernel (tracepoints + optional LSM)
+open / connect / execve  (+ deny hooks when armed)
         |
         v
-eBPF sensor captures syscall + user stack
+eBPF sensor: syscall + user stack → attribute → batch/spool → collector
         |
         v
-userspace attribution maps stack frame -> package@version
-        |
-        v
-collector learns fingerprints and diffs new behavior
-        |
-        v
-REST API, SSE stream, Prometheus metrics, dashboard
+collector: fingerprint · diff · alerts · reachability · digest · API/SSE/UI
 ```
 
-1. **Capture:** CO-RE eBPF hooks `open`, `openat`, `openat2`, `connect`, and `execve` for watched
-   Node/Python processes and records the user-space stack.
-2. **Attribute:** userspace resolves stack addresses through V8 perf maps and
-   `/proc/<pid>/maps`, then maps the deepest `node_modules/<pkg>/` frame to its
-   `package.json` version.
-3. **Fingerprint:** events are canonicalized into stable behaviors such as
+1. **Capture:** CO-RE eBPF hooks `open`/`openat`/`openat2`, `connect`, and
+   `execve` for watched Node/Python processes and records the user-space stack.
+2. **Attribute:** userspace resolves stacks through V8 / CPython perf maps and
+   `/proc/<pid>/maps`, then maps the deepest `node_modules/` or
+   `site-packages/` frame to `package.json` / `*.dist-info` version.
+3. **Fingerprint:** events become stable behaviors such as
    `READ /app/node_modules/pkg/**` and `CONNECT 169.254.169.254:80`.
-4. **Diff:** the collector compares live behavior to the learned baseline and
-   applies configurable high-risk rules.
+4. **Diff:** live behavior is compared to the baseline; high-risk rules use
+   `action: alert | warn | block` (warn marks *would-block* audit evidence).
+5. **Enforce (optional):** LSM hooks consult literal deny maps only when the
+   master gate, runtime switch, and namespace label are all on — fail-open
+   otherwise.
 
-Goodman prefers `<unknown>` over a guessed package name. Incorrect attribution is
-worse than no attribution.
-
-## Quick Start
-
-You need an x86-64 Linux host with kernel 5.8+ and BTF, plus Go, clang/LLVM,
-bpftool, and Node if you want to rebuild the dashboard.
+Goodman prefers `<unknown>` over a guessed package name. Incorrect attribution
+is worse than no attribution.
 
 ## Quick Start
+
+You need an x86-64 Linux host with kernel 5.8+ and BTF (5.10+ with `bpf` in
+`lsm=` for enforcement), plus Go, clang/LLVM, and bpftool. Node is only needed
+to rebuild the dashboard.
 
 ```bash
 make doctor
@@ -85,52 +82,20 @@ make build
 make demo
 ```
 
-Open **http://127.0.0.1:8844**. In under a minute you get:
-
-- CRITICAL supply-chain drift alerts with rule chips already in the queue
-- Reachability headline: **1,400 declared / 240 executed**
-- a live replay of the 2018 event-stream / flatmap-stream attack ~12s after start
-
-Same entry point as the CLI: `goodmanctl demo`. Press `Ctrl-C` to stop.
-
-Verify without a browser (CI / DoD):
+Open **http://127.0.0.1:8844**. In under a minute you get seeded CRITICAL
+alerts, reachability stats, and a live event-stream attack replay.
 
 ```bash
-make demo-check
+make demo-check   # CI / DoD without a browser
+make test && make smoke && make replay
+make ha-smoke     # optional: 2 collectors vs Docker Postgres (skips if no Docker)
 ```
 
-The longer local build/test path:
-
-```bash
-make test
-make smoke
-make replay
-```
-
-`make smoke` starts the collector, feeds synthetic baseline and drift events,
-and asserts exactly one CRITICAL alert.
-
-To see Goodman catch real npm supply-chain attacks (event-stream, eslint-scope,
-ua-parser-js, node-ipc) as a regression suite:
-
-```bash
-make replay
-```
-
-Each scenario learns a baseline, replays the attack's runtime behavior, and
-asserts the expected CRITICAL alert. See
-[docs/replay-corpus.md](docs/replay-corpus.md).
-
-For the real eBPF path:
+Live eBPF (root):
 
 ```bash
 sudo make e2e
 ```
-
-That runs a benign drift replay against the included Node workload:
-`good-pkg@1.0.0` is learned as the baseline, then `good-pkg@1.0.1` reads a fake
-credentials file and connects to a localhost sink. The expected result is one
-CRITICAL alert for the new behavior.
 
 ## Local Dashboard
 
@@ -139,8 +104,7 @@ GOODMAN_DSN=goodman.db GOODMAN_LEARN_OBS=50 GOODMAN_LEARN_MIN_AGE=1s \
   ./bin/collector -listen :8844
 ```
 
-Open `http://localhost:8844`. The dashboard is embedded in the collector binary,
-so a fresh Go build can serve the UI without a separate Node server.
+Open `http://localhost:8844`. The UI is embedded in the collector binary.
 
 ## Kubernetes
 
@@ -148,98 +112,99 @@ so a fresh Go build can serve the UI without a separate Node server.
 scripts/install-k8s.sh --cluster prod
 ```
 
-Enable package attribution on the Node workloads you want Goodman to watch:
+Inject Tier-1 attribution flags (or enable the admission webhook):
 
 ```bash
+# Node
 scripts/enable-node-attribution.sh --namespace checkout --selector app=api
+
+# Or label the namespace and set webhook.enabled=true in Helm
+# (injects NODE_OPTIONS + PYTHONPERFSUPPORT=1)
 ```
-
-Or patch every Deployment in a namespace:
-
-```bash
-scripts/enable-node-attribution.sh --namespace checkout --all
-```
-
-Open the dashboard:
 
 ```bash
 kubectl -n goodman-system port-forward svc/goodman-collector 8844:8844
 ```
 
-Tier-1 Node attribution is one environment variable on watched workloads:
-
-```yaml
-env:
-  - name: NODE_OPTIONS
-    value: "--perf-basic-prof --interpreted-frames-native-stack"
-```
-
-See [docs/deployment.md](docs/deployment.md) for production details, Postgres
-configuration, image publishing, and the chart resources.
+Production notes: Postgres for HA (`collector.replicas > 1`), SQLite PVC for
+pilots, multi-cluster baseline export/import, and enforcement defaults.
+See [docs/deployment.md](docs/deployment.md) and
+[docs/pilot-runbook.md](docs/pilot-runbook.md).
 
 ## Repository Map
 
 | Path | Purpose |
 |---|---|
-| `bpf/` | eBPF C program, shared wire struct, generated `vmlinux.h` |
-| `cmd/sensor` | privileged sensor: loads eBPF, attributes events, posts batches |
-| `cmd/collector` | ingestion, fingerprinting, diffing, API, dashboard |
-| `cmd/goodmanctl` | CLI for tailing events, alerts, ack/resolve, fingerprints, reachability report |
-| `internal/attribute` | stack-to-package attribution |
-| `internal/fingerprint` | behavior aggregation and baseline promotion |
-| `internal/diff` | baseline comparison and high-risk rule evaluation |
-| `internal/report` | runtime reachability report (lockfile vs executed + OSV) |
+| `bpf/` | eBPF C (tracepoints + optional LSM), shared wire struct |
+| `cmd/sensor` | privileged sensor: load eBPF, attribute, spool, enforce heartbeat |
+| `cmd/collector` | ingest, fingerprint, diff, enforce state, API, dashboard |
+| `cmd/goodmanctl` | alerts, fingerprints export/import, report, enforce, demo |
+| `internal/attribute` | stack → package@version (npm + PyPI) |
+| `internal/enforce` | literal deny-verdict compilation for LSM |
+| `internal/fingerprint` | behavior sets + baseline promotion |
+| `internal/diff` | drift + high-risk rules (`alert`/`warn`/`block`) |
 | `dashboard/` | React/Vite dashboard source |
 | `deploy/` | Dockerfiles, Helm chart, example rules |
-| `test/` | synthetic smoke driver, workload fixtures, e2e harness |
+| `docs/research/` | Tier-2 / Python / HA / LSM decision + impl plans |
+| `test/` | smoke, replay corpus, e2e harness |
 
 ## Documentation
 
-- [Getting started](docs/getting-started.md)
-- [Setup and usage](docs/setup-and-usage.md)
-- [Architecture](docs/architecture.md)
-- [Attribution](docs/attribution.md)
-- [Configuration](docs/configuration.md)
-- [Deployment](docs/deployment.md)
-- [API reference](docs/api.md)
-- [Development](docs/development.md)
-- [Troubleshooting](docs/troubleshooting.md)
-- [Agent instructions](AGENTS.md)
+| Doc | Purpose |
+|---|---|
+| [Getting started](docs/getting-started.md) | First alert locally |
+| [Setup and usage](docs/setup-and-usage.md) | Full local / k8s / CLI workflow |
+| [Architecture](docs/architecture.md) | Components and data flow |
+| [Attribution](docs/attribution.md) | npm + PyPI stack → package |
+| [Enforcement](docs/enforcement.md) | LSM block mode (fail-open, off by default) |
+| [Pilot runbook](docs/pilot-runbook.md) | Install, noise, digest, rollback |
+| [Release](docs/release.md) | v0.2.0 gate checklist |
+| [Configuration](docs/configuration.md) | Flags, env, Helm values |
+| [Deployment](docs/deployment.md) | Helm, HA, Postgres, multi-cluster |
+| [API](docs/api.md) | REST + SSE + metrics |
+| [Development](docs/development.md) | Dev loop and releasing |
+| [Troubleshooting](docs/troubleshooting.md) | Common failures |
+| [Agent instructions](AGENTS.md) | Invariants for coding agents |
 
 ## Development
 
 ```bash
-make doctor
-make build
-make vet
-make test
-make smoke
+make doctor && make build && make vet && make test && make smoke
 ```
 
-Use [docs/setup-and-usage.md](docs/setup-and-usage.md) for the full local,
-dashboard, CLI, and Kubernetes workflow.
+Touching `bpf/` or `internal/loader/`: also run `sudo make e2e` on a real
+kernel. Enforcement changes need an LSM-capable kernel (`CONFIG_BPF_LSM`,
+`bpf` in `/sys/kernel/security/lsm`).
 
-Run `sudo make e2e` before merging changes to `bpf/`, `internal/loader/`, or
-`internal/attribute/`.
-
-The highest-severity invariant is the shared event layout:
-`bpf/goodman.h` `struct event` and `internal/model/types.go` `RawEvent` must stay
-byte-for-byte identical. `internal/model/types_test.go` enforces this.
+Highest-severity invariant: `bpf/goodman.h` `struct event` and
+`internal/model/types.go` `RawEvent` stay byte-for-byte identical
+(`internal/model/types_test.go`).
 
 ## Status
 
-Goodman v0.1.0 includes:
+Current `main` includes the deferred v0.2/v0.3 codepath (see
+[CHANGELOG](CHANGELOG.md) and [v0.2.0 notes](docs/releases/v0.2.0-notes.md)):
 
-- eBPF capture for file open, network connect, and process exec
-- Tier-1 npm attribution through V8 perf maps
-- SQLite and Postgres storage
-- baseline learning and behavior drift detection
-- configurable high-risk rules
-- REST API, SSE stream, Prometheus metrics, and embedded dashboard
-- Docker images and Helm chart
+- eBPF capture for file open, connect, and exec
+- Tier-1 **npm** (V8 perf maps) and **PyPI** (CPython `PYTHONPERFSUPPORT`)
+- Always-on rules, alert evidence, would-block audit (`action: warn`)
+- Optional LSM enforcement (`action: block`, off by default, fail-open)
+- SQLite (PVC) and Postgres; HA replicas with advisory-lock leader election
+- Sensor event spool across collector outages
+- Multi-cluster baseline export/import with provenance
+- Reachability report, weekly digest, Coverage tab, embedded dashboard
+- Helm chart, Docker images, admission webhook for `NODE_OPTIONS` /
+  `PYTHONPERFSUPPORT`
 
-Fast-follow items are documented in [plan.md](plan.md): mutating-webhook
-auto-injection, Python/PyPI attribution, and Tier-2 native V8 unwinding.
+Still human-gated for a tagged release: `sudo make e2e` on LSM kernels,
+staging two-replica Postgres proof, then tag/push images
+([docs/release.md](docs/release.md)).
+
+Tier-2 flagless V8 attribution remains **PARK** (year-scale) —
+[docs/research/tier2-attribution.md](docs/research/tier2-attribution.md).
+
+Roadmaps: [plan-pilot.md](plan-pilot.md) (pilot path),
+[plan-deferred.md](plan-deferred.md) (v0.2→v0.3 deferred phases — code DONE).
 
 ## License
 

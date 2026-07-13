@@ -8,12 +8,14 @@ working. It is written for both humans and coding agents.
 
 | Goal | Command | Needs root? | What it proves |
 |---|---|---:|---|
-| Check machine readiness | `make doctor` | no | Toolchain, kernel, BTF, and eBPF capability status. |
+| Check machine readiness | `make doctor` | no | Toolchain, kernel, BTF, LSM capability status. |
 | Build everything locally | `make build` | no | eBPF object, sensor, collector, and CLI compile. |
-| Backend correctness | `make smoke` | no | Real collector/store/fingerprint/diff/API path alerts correctly. |
-| Product dashboard demo | `make demo` | no | Seeded alerts, reachability 1,400/240, live event-stream replay. |
+| Backend correctness | `make smoke` | no | Collector/store/fingerprint/diff/API (+ enforce pipeline without kernel). |
+| Attack replay corpus | `make replay` | no | Real npm attack fixtures raise the expected CRITICAL alerts. |
+| Product dashboard demo | `make demo` | no | Seeded alerts, reachability, live event-stream replay. |
 | Demo DoD check | `make demo-check` | no | Non-interactive verification of the five-minute wow. |
-| Real local eBPF demo | `sudo make e2e` | yes | Sensor captures real syscalls and attributes Node package drift. |
+| HA ingest smoke | `make ha-smoke` | Docker | Two collectors vs Postgres: fingerprint parity + alert dedup (skips without Docker). |
+| Real local eBPF demo | `sudo make e2e` | yes | Sensor captures real syscalls and attributes package drift. |
 | Kubernetes install | `scripts/install-k8s.sh --cluster prod` | cluster-dependent | Installs sensor DaemonSet, collector, dashboard, and service. |
 
 If you are a coding agent, do not stop after `make build`. Use `make smoke` for

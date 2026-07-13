@@ -31,17 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   hooks; `action: "block"` on rules; `GOODMAN_ENFORCE_ENABLED` master gate
   (default false); `goodmanctl enforce on|off|status`; dashboard `BLOCKED`
   chip; `docs/enforcement.md` and `docs/pilot-runbook.md`. Human `sudo make e2e`
-  on LSM kernel still required for live proof.
-- Phase 6 scaffold (superseded): `action: "block"` fails rule loading
-  with an explicit enforcement-not-shipped message; `make doctor` adds warn-level
-  `CONFIG_BPF_LSM` and active-LSM checks; posture documented in
-  `docs/configuration.md` and `deploy/rules.example.json`. Kernel LSM enforcement
-  remains gated — `docs/research/lsm-enforcement.md`.
+  on an LSM-capable kernel still required for live deny proof.
 - enforce=warn audit mode (deferred Phase 3): rules accept `action` (`alert`|
   `warn`); matching `warn` sets `would_block` on alerts, increments
   `goodman_enforce_would_block_total{rule}`, surfaces a dashboard chip +
-  Coverage “Would block” KPI, and appears in the weekly digest. Nothing is
-  blocked. Replay scenario `enforce-warn` covers the path.
+  Coverage “Would block” KPI, and appears in the weekly digest.
 - Python Tier-1 attribution (deferred Phase 2): CPython 3.12+ perf
   trampolines via `PYTHONPERFSUPPORT=1`; reuse perf-map resolution for `py::`
   symbols, `PathToPyPackage` + `*.dist-info` versions, admission webhook env

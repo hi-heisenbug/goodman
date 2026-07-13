@@ -35,7 +35,10 @@ Goodman is testable at three levels, in order of how much they need:
      drift pipeline on an in-memory SQLite store, including the
      no-false-positive guarantee for behaviorally identical version bumps.
    - `internal/loader` — parses the embedded eBPF object (no privileges) and
-     asserts the three programs and maps are present and typed correctly.
+     asserts the tracepoint programs, LSM programs (when present in the
+     object), and maps are present and typed correctly.
+   - `internal/enforce` — literal deny-verdict compilation from `action: block`
+     rules (no kernel).
 
 2. **Backend end-to-end, no root** — `make smoke`. Starts the real collector and
    drives synthetic `Attributed` events through the real store, fingerprint, and
@@ -112,16 +115,15 @@ make vmlinux     # bpftool btf dump file /sys/kernel/btf/vmlinux format c > bpf/
 
 ## Cutting a release
 
+Follow the checklist in [`docs/release.md`](release.md) (v0.2.0 gate). Summary:
+
 1. Update `CHANGELOG.md` (move `[Unreleased]` items into a dated version).
 2. Bump `appVersion`/`version` in `deploy/helm/goodman/Chart.yaml`.
-3. Verify `sudo make e2e` on a real kernel.
+3. Verify no-root gates + `sudo make e2e` on a real kernel (LSM kernel if
+   enforcement changed).
 4. Tag: `git tag vX.Y.Z && git push origin vX.Y.Z`.
-5. Confirm the `Images` GitHub Actions workflow published:
-   - `ghcr.io/hi-heisenbug/collector:X.Y.Z`
-   - `ghcr.io/hi-heisenbug/sensor:X.Y.Z`
-   - `ghcr.io/hi-heisenbug/collector:latest`
-   - `ghcr.io/hi-heisenbug/sensor:latest`
-6. Create the GitHub release and attach the demo video if it changed.
+5. Confirm the `Images` GitHub Actions workflow published GHCR images.
+6. Create the GitHub release; attach the demo video if it changed.
 
 The release tag is the source of truth for container publishing. Do not require
 maintainers to push GHCR images from a laptop. For emergency re-publishes, run
