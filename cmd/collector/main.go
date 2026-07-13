@@ -20,6 +20,7 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/diff"
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/notify"
+	"github.com/hi-heisenbug/goodman/internal/report"
 	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
@@ -42,6 +43,9 @@ func main() {
 		webhookMinSev = flag.String("webhook-min-severity", envOr("GOODMAN_WEBHOOK_MIN_SEVERITY", "WARN"), "lowest severity forwarded to the webhook (INFO|WARN|CRITICAL)")
 
 		retention = flag.Duration("retention", envDurOr("GOODMAN_RETENTION", 0), "prune resolved alerts older than this (0 = keep forever)")
+
+		reachInterval = flag.Duration("reachability-interval", envDurOr("GOODMAN_REACHABILITY_INTERVAL", 0), "recompute stored reachability reports on this cadence (0 = disabled)")
+		reachOSV      = flag.Bool("reachability-osv", os.Getenv("GOODMAN_REACHABILITY_OSV") == "1" || os.Getenv("GOODMAN_REACHABILITY_OSV") == "true", "enrich scheduled reachability recomputes with OSV.dev (needs egress)")
 
 		admissionListen = flag.String("admission-listen", os.Getenv("GOODMAN_ADMISSION_LISTEN"), "serve the NODE_OPTIONS mutating webhook on this address (empty = disabled)")
 		admissionCert   = flag.String("admission-tls-cert", os.Getenv("GOODMAN_ADMISSION_TLS_CERT"), "PEM cert for the admission webhook (required when -admission-listen is set)")
@@ -92,6 +96,11 @@ func main() {
 		log.Printf("retention enabled: resolved alerts pruned after %s", *retention)
 	}
 
+	if *reachInterval > 0 {
+		go reachabilityLoop(ctx, st, *reachInterval, *reachOSV)
+		log.Printf("reachability refresh enabled: every %s (osv=%t)", *reachInterval, *reachOSV)
+	}
+
 	if *admissionListen != "" {
 		go func() {
 			log.Printf("admission webhook listening on %s (injects %s=%s)",
@@ -134,6 +143,49 @@ func pruneLoop(ctx context.Context, st *store.Store, retention time.Duration) {
 		case n > 0:
 			log.Printf("retention: pruned %d resolved alerts older than %s", n, retention)
 		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// reachabilityLoop recomputes stored reachability snapshots against the latest
+// fingerprints, once at startup and then every interval, so the dashboard
+// shows current numbers without a manual re-upload.
+func reachabilityLoop(ctx context.Context, st *store.Store, interval time.Duration, osv bool) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		func() {
+			runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			lockfiles, err := st.ListLockfiles(runCtx)
+			if err != nil {
+				if ctx.Err() == nil {
+					log.Printf("reachability: list lockfiles: %v", err)
+				}
+				return
+			}
+			if len(lockfiles) == 0 {
+				return
+			}
+			refresh := make([]report.Lockfile, len(lockfiles))
+			for i, lf := range lockfiles {
+				refresh[i] = report.Lockfile{Service: lf.Service, Content: lf.Content}
+			}
+			var osvClient *report.OSVClient
+			if osv {
+				osvClient = report.NewOSVClient()
+			}
+			n, err := report.RefreshAll(runCtx, st, refresh, osvClient, uint64(time.Now().UnixNano()))
+			if err != nil && ctx.Err() == nil {
+				log.Printf("reachability: refresh: %v", err)
+			} else if n > 0 {
+				log.Printf("reachability: refreshed %d service report(s)", n)
+			}
+		}()
 		select {
 		case <-ctx.Done():
 			return

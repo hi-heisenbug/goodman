@@ -72,3 +72,9 @@ export interface Report {
   vuln_rows: ReportRow[];
   rows: ReportRow[];
 }
+
+export interface StoredReport {
+  computed_at: number; // unix ns
+  osv: boolean;
+  report: Report;
+}

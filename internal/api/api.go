@@ -80,6 +80,7 @@ func (s *Server) Router(ui fs.FS) http.Handler {
 	r.Post("/v1/alerts/{id}/resolve", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertResolved)))
 	r.Get("/v1/fingerprints", requireToken(s.Auth.APIToken, false, s.handleListFingerprints))
 	r.Post("/v1/report", requireToken(s.Auth.APIToken, false, s.handleReport))
+	r.Get("/v1/report", requireToken(s.Auth.APIToken, false, s.handleGetReport))
 	// EventSource cannot set headers, so the stream also accepts ?token=.
 	r.Get("/v1/stream", requireToken(s.Auth.APIToken, true, s.handleStream))
 	r.Handle("/metrics", promhttp.Handler())
@@ -271,15 +272,54 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	osv := r.URL.Query().Get("osv") == "1" || r.URL.Query().Get("osv") == "true"
 	var vulns map[string][]report.Vulnerability
-	if r.URL.Query().Get("osv") == "1" || r.URL.Query().Get("osv") == "true" {
+	if osv {
 		vulns, err = report.NewOSVClient().Query(r.Context(), declared)
 		if err != nil {
 			http.Error(w, "osv: "+err.Error(), http.StatusBadGateway)
 			return
 		}
 	}
-	writeJSON(w, http.StatusOK, report.Build(service, declared, fps, vulns))
+	rep := report.Build(service, declared, fps, vulns)
+
+	// persist=1 stores the lockfile and this snapshot so the dashboard can
+	// load it instantly next time and the collector can recompute it on a
+	// schedule as fingerprints change.
+	if r.URL.Query().Get("persist") == "1" || r.URL.Query().Get("persist") == "true" {
+		now := uint64(time.Now().UnixNano())
+		if err := s.store.SaveLockfile(r.Context(), service, string(body), now); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		repJSON, _ := json.Marshal(rep)
+		if err := s.store.SaveReport(r.Context(), service, string(repJSON), osv, now); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, rep)
+}
+
+// handleGetReport returns the most recently stored reachability snapshot for a
+// service scope (404 when none has been uploaded yet). This lets the dashboard
+// show current numbers on load without re-uploading a lockfile.
+func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
+	service := r.URL.Query().Get("service")
+	repJSON, osv, computedAt, found, err := s.store.GetReport(r.Context(), service)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if !found {
+		http.Error(w, "no stored report for this service", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"computed_at": computedAt,
+		"osv":         osv,
+		"report":      json.RawMessage(repJSON),
+	})
 }
 
 // handleStream is a server-sent-events feed of live events and alerts,

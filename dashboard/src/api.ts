@@ -1,4 +1,4 @@
-import type { Alert, Fingerprint, Report } from "./types";
+import type { Alert, Fingerprint, Report, StoredReport } from "./types";
 
 // The collector can require a bearer token on the API (GOODMAN_API_TOKEN).
 // The token is kept in localStorage; a 401 triggers the registered handler so
@@ -58,13 +58,29 @@ export async function fetchFingerprints(service?: string, pkg?: string): Promise
 
 // buildReport uploads a package-lock.json and returns the reachability report:
 // declared dependencies joined with what Goodman observed executing, optionally
-// enriched with OSV.dev vulnerabilities.
-export async function buildReport(lockfile: string, opts?: { service?: string; osv?: boolean }): Promise<Report> {
+// enriched with OSV.dev vulnerabilities. persist stores the lockfile and
+// snapshot so the collector can refresh it and future loads are instant.
+export async function buildReport(
+  lockfile: string,
+  opts?: { service?: string; osv?: boolean; persist?: boolean },
+): Promise<Report> {
   const u = new URL("/v1/report", location.origin);
   if (opts?.service) u.searchParams.set("service", opts.service);
   if (opts?.osv) u.searchParams.set("osv", "1");
+  if (opts?.persist) u.searchParams.set("persist", "1");
   const r = await request(u, { method: "POST", body: lockfile });
   if (!r.ok) throw new Error(`report: ${r.status} ${await r.text()}`);
+  return r.json();
+}
+
+// fetchStoredReport returns the most recent persisted reachability snapshot for
+// a service scope, or null when none has been uploaded yet.
+export async function fetchStoredReport(service?: string): Promise<StoredReport | null> {
+  const u = new URL("/v1/report", location.origin);
+  if (service) u.searchParams.set("service", service);
+  const r = await request(u);
+  if (r.status === 404) return null;
+  if (!r.ok) throw new Error(`stored report: ${r.status}`);
   return r.json();
 }
 

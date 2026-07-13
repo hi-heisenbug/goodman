@@ -1257,3 +1257,9 @@ button {
   color: var(--ink-muted);
   border-style: dashed;
 }
+
+.reach-freshness {
+  margin: -4px 0 4px;
+  font-size: 13px;
+  color: var(--ink-muted);
+}

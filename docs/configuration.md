@@ -24,6 +24,8 @@ variables take precedence over built-in defaults.
 | `-webhook-token` | `GOODMAN_WEBHOOK_TOKEN` | *(empty)* | Bearer token sent to the webhook endpoint. |
 | `-webhook-min-severity` | `GOODMAN_WEBHOOK_MIN_SEVERITY` | `WARN` | Lowest severity forwarded (`INFO`, `WARN`, `CRITICAL`). |
 | `-retention` | `GOODMAN_RETENTION` | `0` | Prune resolved alerts older than this (`720h` = 30 days). `0` keeps them forever. Open/acknowledged alerts are never pruned. |
+| `-reachability-interval` | `GOODMAN_REACHABILITY_INTERVAL` | `0` | Recompute stored reachability reports on this cadence as fingerprints change (`0` = disabled). |
+| `-reachability-osv` | `GOODMAN_REACHABILITY_OSV` | `false` | Enrich scheduled reachability recomputes with OSV.dev (needs egress). |
 
 **Learning window.** A `(service, package, version)` fingerprint becomes a
 baseline only when it has been observed `learn-obs` times **and** spans at least

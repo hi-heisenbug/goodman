@@ -39,6 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Dashboard Reachability tab: upload a package-lock.json in the browser to see
   declared-vs-executed packages and reachable vulnerabilities (reachable ranked
   first), backed by a new `POST /v1/report` collector endpoint.
+- Persisted, self-refreshing reachability: `POST /v1/report?persist=1` stores
+  the lockfile and snapshot; `GET /v1/report` returns the latest snapshot so
+  the dashboard loads it instantly on open; and the collector recomputes stored
+  snapshots on `GOODMAN_REACHABILITY_INTERVAL` (optionally OSV-enriched via
+  `GOODMAN_REACHABILITY_OSV`) as fingerprints change.
 - `goodmanctl report`: the runtime reachability report. Parses a
   `package-lock.json` (v1/v2/v3), joins declared dependencies against packages
   Goodman observed executing, and optionally enriches with OSV.dev. Ranks

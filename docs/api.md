@@ -159,7 +159,27 @@ report as JSON. Query params:
 }
 ```
 
+Add `persist=1` to store the uploaded lockfile and this snapshot; the collector
+then keeps that snapshot fresh on its `-reachability-interval` cadence and the
+dashboard can load it instantly (see `GET /v1/report`). The service scope is the
+`service` query param (empty = all services).
+
 This backs the dashboard's Reachability tab and mirrors `goodmanctl report`.
+
+### `GET /v1/report?service=<s>`
+
+Return the most recently stored reachability snapshot for a service scope
+(`404` when none has been uploaded with `persist=1`). Lets the dashboard show
+current numbers on load without re-uploading a lockfile.
+
+```jsonc
+// response
+{
+  "computed_at": 1783921240344971762, // unix ns of the snapshot
+  "osv": true,                         // whether it was OSV-enriched
+  "report": { /* the same Report shape as POST returns */ }
+}
+```
 
 ### `GET /v1/stream`
 

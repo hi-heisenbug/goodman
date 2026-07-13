@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Alert, AlertStatus, Fingerprint, Report, ReportRow, Severity } from "./types";
-import { ackAlert, buildReport, fetchAlerts, fetchFingerprints, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
+import { ackAlert, buildReport, fetchAlerts, fetchFingerprints, fetchStoredReport, getToken, onUnauthorized, resolveAlert, setToken, subscribe } from "./api";
 
 type Tab = "alerts" | "fingerprints" | "reachability";
 type Tone = "critical" | "warning" | "good" | "accent" | "neutral";
@@ -629,7 +629,29 @@ function ReachabilityView() {
   const [err, setErr] = useState("");
   const [osv, setOsv] = useState(true);
   const [fileName, setFileName] = useState("");
+  const [computedAt, setComputedAt] = useState<number | null>(null);
+  const [loadingStored, setLoadingStored] = useState(true);
   const fileInput = useRef<HTMLInputElement>(null);
+
+  // On open, show the last persisted snapshot (if any) so numbers appear
+  // without re-uploading. The collector keeps it fresh on its own schedule.
+  useEffect(() => {
+    let active = true;
+    fetchStoredReport()
+      .then((stored) => {
+        if (!active || !stored) return;
+        setReport(stored.report);
+        setComputedAt(stored.computed_at);
+        setOsv(stored.osv);
+      })
+      .catch(() => {
+        /* no stored snapshot: leave the empty state */
+      })
+      .finally(() => active && setLoadingStored(false));
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const onFile = async (file: File) => {
     setBusy(true);
@@ -637,7 +659,9 @@ function ReachabilityView() {
     setFileName(file.name);
     try {
       const text = await file.text();
-      setReport(await buildReport(text, { osv }));
+      // persist so the collector can refresh it and future loads are instant.
+      setReport(await buildReport(text, { osv, persist: true }));
+      setComputedAt(Date.now() * 1e6);
     } catch (e) {
       setErr(String(e));
       setReport(null);
@@ -685,7 +709,11 @@ function ReachabilityView() {
         </div>
       </div>
 
-      {!report && !busy && (
+      {report && computedAt && (
+        <p className="reach-freshness">Snapshot computed {relTime(computedAt)}. The collector refreshes it as new runtime behavior arrives.</p>
+      )}
+
+      {!report && !busy && !loadingStored && (
         <EmptyState
           icon="cube"
           title="No lockfile analyzed yet"

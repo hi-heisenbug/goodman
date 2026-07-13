@@ -142,3 +142,60 @@ func TestReportEndpointRejectsBadLockfile(t *testing.T) {
 		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }
+
+func TestReportPersistAndGet(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "persist.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "web", Package: "express", Version: "4.17.1",
+		Behaviors: map[string]model.BehaviorStat{"READ /a": {Count: 1}}, IsBaseline: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	router := NewServer(st, nil, nil).Router(nil)
+
+	// Before any upload: GET returns 404.
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/report?service=web", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("GET before upload = %d, want 404", rec.Code)
+	}
+
+	// POST with persist=1 stores the snapshot.
+	lockfile := `{"lockfileVersion":3,"packages":{
+		"":{"name":"web"},
+		"node_modules/express":{"version":"4.17.1"},
+		"node_modules/left-pad":{"version":"1.3.0"}}}`
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/report?service=web&persist=1", strings.NewReader(lockfile)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST persist = %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	// GET now returns the stored snapshot envelope.
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/report?service=web", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET after persist = %d", rec.Code)
+	}
+	var env struct {
+		ComputedAt uint64 `json:"computed_at"`
+		Report     struct {
+			DeclaredCount int `json:"declared_count"`
+			ExecutedCount int `json:"executed_count"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &env); err != nil {
+		t.Fatal(err)
+	}
+	if env.ComputedAt == 0 {
+		t.Fatal("stored snapshot missing computed_at")
+	}
+	if env.Report.DeclaredCount != 2 || env.Report.ExecutedCount != 1 {
+		t.Fatalf("stored snapshot wrong: declared=%d executed=%d", env.Report.DeclaredCount, env.Report.ExecutedCount)
+	}
+}

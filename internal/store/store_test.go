@@ -292,3 +292,47 @@ func TestUpsertAlertMergesRulesAndEvidence(t *testing.T) {
 		}
 	}
 }
+
+func TestLockfileAndReportPersistence(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	// No snapshot yet.
+	if _, _, _, found, err := s.GetReport(ctx, "web"); err != nil || found {
+		t.Fatalf("expected no stored report, got found=%v err=%v", found, err)
+	}
+
+	if err := s.SaveLockfile(ctx, "web", `{"lockfileVersion":3}`, 100); err != nil {
+		t.Fatal(err)
+	}
+	// Upsert replaces, does not duplicate.
+	if err := s.SaveLockfile(ctx, "web", `{"lockfileVersion":3,"x":1}`, 200); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SaveLockfile(ctx, "", `{"lockfileVersion":2}`, 150); err != nil {
+		t.Fatal(err)
+	}
+	lfs, err := s.ListLockfiles(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lfs) != 2 {
+		t.Fatalf("lockfiles = %d, want 2 (web + all-scope)", len(lfs))
+	}
+	for _, lf := range lfs {
+		if lf.Service == "web" && lf.UploadedAt != 200 {
+			t.Fatalf("web lockfile not upserted: %+v", lf)
+		}
+	}
+
+	if err := s.SaveReport(ctx, "web", `{"declared_count":5}`, true, 300); err != nil {
+		t.Fatal(err)
+	}
+	rep, osv, at, found, err := s.GetReport(ctx, "web")
+	if err != nil || !found {
+		t.Fatalf("GetReport = (found %v, err %v)", found, err)
+	}
+	if rep != `{"declared_count":5}` || !osv || at != 300 {
+		t.Fatalf("stored report mismatch: %q osv=%v at=%d", rep, osv, at)
+	}
+}

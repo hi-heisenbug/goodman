@@ -84,6 +84,67 @@ func (s *Store) PruneResolvedAlerts(ctx context.Context, cutoff time.Time) (int6
 	return res.RowsAffected()
 }
 
+// StoredLockfile is a persisted package-lock.json for one service scope.
+type StoredLockfile struct {
+	Service    string
+	Content    string
+	UploadedAt uint64
+}
+
+// SaveLockfile persists (or replaces) the lockfile for a service scope so the
+// reachability report can be recomputed on a schedule as fingerprints change.
+func (s *Store) SaveLockfile(ctx context.Context, service, content string, uploadedAt uint64) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO lockfiles (service, content, uploaded_at)
+		VALUES ($1,$2,$3)
+		ON CONFLICT (service) DO UPDATE SET content=EXCLUDED.content, uploaded_at=EXCLUDED.uploaded_at`,
+		service, content, uploadedAt)
+	return err
+}
+
+// ListLockfiles returns every stored lockfile (all service scopes).
+func (s *Store) ListLockfiles(ctx context.Context) ([]StoredLockfile, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT service, content, uploaded_at FROM lockfiles ORDER BY service`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StoredLockfile
+	for rows.Next() {
+		var lf StoredLockfile
+		if err := rows.Scan(&lf.Service, &lf.Content, &lf.UploadedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, lf)
+	}
+	return out, rows.Err()
+}
+
+// SaveReport stores the latest computed reachability report for a service.
+func (s *Store) SaveReport(ctx context.Context, service, reportJSON string, osv bool, computedAt uint64) error {
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO reachability_reports (service, report, osv, computed_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (service) DO UPDATE SET report=EXCLUDED.report, osv=EXCLUDED.osv, computed_at=EXCLUDED.computed_at`,
+		service, reportJSON, osv, computedAt)
+	return err
+}
+
+// GetReport returns the stored report snapshot for a service. found is false
+// when no snapshot exists yet.
+func (s *Store) GetReport(ctx context.Context, service string) (reportJSON string, osv bool, computedAt uint64, found bool, err error) {
+	row := s.db.QueryRowContext(ctx,
+		`SELECT report, osv, computed_at FROM reachability_reports WHERE service=$1`, service)
+	err = row.Scan(&reportJSON, &osv, &computedAt)
+	if err == sql.ErrNoRows {
+		return "", false, 0, false, nil
+	}
+	if err != nil {
+		return "", false, 0, false, err
+	}
+	return reportJSON, osv, computedAt, true, nil
+}
+
 // migrate applies pending migration files in name order. Applied files are
 // recorded in schema_migrations so non-idempotent statements (ALTER TABLE on
 // SQLite) run exactly once per database.
