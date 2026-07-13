@@ -33,19 +33,25 @@ type Report struct {
 // vulnerabilities. fingerprints is what /v1/fingerprints returns; vulns is
 // keyed by "name@version" ("" when OSV enrichment was skipped).
 func Build(service string, declared []DeclaredPackage, fingerprints []model.Fingerprint, vulns map[string][]Vulnerability) Report {
-	// Index observed packages by name -> (version, distinct behaviors).
-	type observed struct {
-		version   string
-		behaviors int
-	}
-	byName := map[string]observed{}
+	// Index observed packages by exact "name@version" -> distinct behaviors.
+	// The match is version-exact on purpose: a vulnerability in a declared
+	// version is only reachable if THAT version actually ran. Marking a
+	// declared version executed because a different version of the same
+	// package ran would over-report reachability, which is the opposite of
+	// what vulnerability triage needs. Fingerprints with an empty (unresolved)
+	// version are additionally indexed by bare name as a best-effort fallback.
+	behaviorsByKey := map[string]int{}
+	ranByName := map[string]bool{}
 	for _, fp := range fingerprints {
 		if service != "" && fp.Service != service {
 			continue
 		}
-		o := byName[fp.Package]
-		if len(fp.Behaviors) >= o.behaviors {
-			byName[fp.Package] = observed{version: fp.Version, behaviors: len(fp.Behaviors)}
+		key := fp.Package + "@" + fp.Version
+		if len(fp.Behaviors) > behaviorsByKey[key] {
+			behaviorsByKey[key] = len(fp.Behaviors)
+		}
+		if fp.Version == "" {
+			ranByName[fp.Package] = true
 		}
 	}
 
@@ -59,10 +65,15 @@ func Build(service string, declared []DeclaredPackage, fingerprints []model.Fing
 			Dev:             d.Dev,
 			Vulns:           vulns[d.Name+"@"+d.Version],
 		}
-		if o, ok := byName[d.Name]; ok {
+		if b, ok := behaviorsByKey[d.Name+"@"+d.Version]; ok {
 			row.Executed = true
-			row.ExecutedVersion = o.version
-			row.Behaviors = o.behaviors
+			row.ExecutedVersion = d.Version
+			row.Behaviors = b
+			rep.ExecutedCount++
+		} else if ranByName[d.Name] {
+			// Package ran but attribution could not resolve its version;
+			// count it as executed without asserting a version.
+			row.Executed = true
 			rep.ExecutedCount++
 		}
 		if len(row.Vulns) > 0 {

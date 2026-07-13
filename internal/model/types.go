@@ -78,8 +78,8 @@ type Attributed struct {
 	Package   string    `json:"package"` // e.g. "@tanstack/react-router"; "<app>" if app code
 	Version   string    `json:"version"` // e.g. "1.120.17"; "" if unknown
 	Type      EventType `json:"type"`
-	Behavior  string    `json:"behavior"`  // canonicalized: "READ /app/src/**" or "CONNECT 1.2.3.4:443"
-	Timestamp uint64    `json:"timestamp"` // ns since boot converted to unix ns by the sensor
+	Behavior  string    `json:"behavior"`         // canonicalized: "READ /app/src/**" or "CONNECT 1.2.3.4:443"
+	Timestamp uint64    `json:"timestamp"`        // ns since boot converted to unix ns by the sensor
 	Sensor    string    `json:"sensor,omitempty"` // stamped by the collector from the batch header
 }
 
@@ -129,8 +129,8 @@ type Alert struct {
 	NewBehaviors      []string   `json:"new_behaviors"`
 	MatchedRules      []string   `json:"matched_rules,omitempty"` // union of matched rule names
 	Evidence          []Evidence `json:"evidence,omitempty"`      // per-behavior triage context
-	DetectedAt        uint64     `json:"detected_at"` // unix ns
-	Status            string     `json:"status"`      // open | acknowledged | resolved
+	DetectedAt        uint64     `json:"detected_at"`             // unix ns
+	Status            string     `json:"status"`                  // open | acknowledged | resolved
 }
 
 const (

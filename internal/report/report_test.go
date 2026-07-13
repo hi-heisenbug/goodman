@@ -138,3 +138,46 @@ func TestBuildNoVulns(t *testing.T) {
 		t.Fatalf("expected 0 of 1 executed:\n%s", md)
 	}
 }
+
+// TestBuildVersionExactReachability locks in that a declared version is only
+// "executed" when THAT version ran, not merely another version of the package.
+func TestBuildVersionExactReachability(t *testing.T) {
+	declared := []DeclaredPackage{
+		{Name: "semver", Version: "5.7.0"}, // vulnerable, idle
+		{Name: "semver", Version: "7.5.0"}, // the version that actually runs
+	}
+	fingerprints := []model.Fingerprint{
+		{Service: "web", Package: "semver", Version: "7.5.0",
+			Behaviors: map[string]model.BehaviorStat{"READ /a": {}}},
+	}
+	rep := Build("web", declared, fingerprints, map[string][]Vulnerability{
+		"semver@5.7.0": {{ID: "GHSA-old", Severity: "HIGH"}},
+	})
+	byVer := map[string]bool{}
+	for _, r := range rep.Rows {
+		byVer[r.DeclaredVersion] = r.Executed
+	}
+	if byVer["7.5.0"] != true {
+		t.Fatal("the running version 7.5.0 must be executed")
+	}
+	if byVer["5.7.0"] != false {
+		t.Fatal("idle vulnerable 5.7.0 must NOT be reported executed just because 7.5.0 ran")
+	}
+	if rep.ExecutedCount != 1 {
+		t.Fatalf("executed = %d, want 1", rep.ExecutedCount)
+	}
+}
+
+// TestBuildRanWithUnresolvedVersion covers the fallback: a fingerprint with an
+// empty version still counts its package as executed.
+func TestBuildRanWithUnresolvedVersion(t *testing.T) {
+	declared := []DeclaredPackage{{Name: "left-pad", Version: "1.3.0"}}
+	fingerprints := []model.Fingerprint{
+		{Service: "web", Package: "left-pad", Version: "",
+			Behaviors: map[string]model.BehaviorStat{"READ /x": {}}},
+	}
+	rep := Build("web", declared, fingerprints, nil)
+	if rep.ExecutedCount != 1 || !rep.Rows[0].Executed {
+		t.Fatalf("package with unresolved version should count as executed: %+v", rep.Rows)
+	}
+}

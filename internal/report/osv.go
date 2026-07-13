@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -29,10 +30,17 @@ func NewOSVClient() *OSVClient {
 	return &OSVClient{Endpoint: defaultOSVEndpoint, client: &http.Client{Timeout: 20 * time.Second}}
 }
 
+// maxBatch is the OSV querybatch per-request query cap. Larger package sets
+// are split into multiple batches.
+const maxBatch = 1000
+
+// resolveConcurrency bounds how many advisory-detail GETs run at once.
+const resolveConcurrency = 8
+
 // Query returns vulnerabilities per package (keyed by "name@version") for the
-// given packages. The batch endpoint returns only IDs, so this resolves each
-// hit to a summary/severity via the per-vuln endpoint (bounded by the number
-// of distinct advisories, typically small).
+// given packages. Packages are queried in batches of at most maxBatch; the
+// batch endpoint returns only IDs, so each distinct advisory is then resolved
+// to a summary/severity concurrently (bounded by resolveConcurrency).
 func (c *OSVClient) Query(ctx context.Context, pkgs []DeclaredPackage) (map[string][]Vulnerability, error) {
 	if c.client == nil {
 		c.client = &http.Client{Timeout: 20 * time.Second}
@@ -42,6 +50,34 @@ func (c *OSVClient) Query(ctx context.Context, pkgs []DeclaredPackage) (map[stri
 		endpoint = defaultOSVEndpoint
 	}
 
+	// out maps "name@version" -> advisory IDs; detail is resolved afterward so
+	// each distinct advisory is fetched at most once, concurrently.
+	out := map[string][]Vulnerability{}
+	ids := map[string]bool{}
+	for start := 0; start < len(pkgs); start += maxBatch {
+		end := start + maxBatch
+		if end > len(pkgs) {
+			end = len(pkgs)
+		}
+		if err := c.queryBatch(ctx, endpoint, pkgs[start:end], out, ids); err != nil {
+			return nil, err
+		}
+	}
+
+	detail := c.resolveAll(ctx, endpoint, ids)
+	for key, vulns := range out {
+		for i := range vulns {
+			if d, ok := detail[vulns[i].ID]; ok {
+				out[key][i] = d
+			}
+		}
+	}
+	return out, nil
+}
+
+// queryBatch posts one <=1000-query batch and records advisory IDs per package
+// into out (and the global id set) without resolving detail.
+func (c *OSVClient) queryBatch(ctx context.Context, endpoint string, pkgs []DeclaredPackage, out map[string][]Vulnerability, ids map[string]bool) error {
 	type osvQuery struct {
 		Version string            `json:"version"`
 		Package map[string]string `json:"package"`
@@ -57,20 +93,20 @@ func (c *OSVClient) Query(ctx context.Context, pkgs []DeclaredPackage) (map[stri
 	}
 	buf, err := json.Marshal(body)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(buf))
 	if err != nil {
-		return nil, err
+		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := c.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("osv querybatch: %w", err)
+		return fmt.Errorf("osv querybatch: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("osv querybatch returned %s", resp.Status)
+		return fmt.Errorf("osv querybatch returned %s", resp.Status)
 	}
 	var batch struct {
 		Results []struct {
@@ -80,26 +116,42 @@ func (c *OSVClient) Query(ctx context.Context, pkgs []DeclaredPackage) (map[stri
 		} `json:"results"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&batch); err != nil {
-		return nil, err
+		return err
 	}
-
-	out := map[string][]Vulnerability{}
-	cache := map[string]Vulnerability{}
 	for i, res := range batch.Results {
 		if i >= len(pkgs) || len(res.Vulns) == 0 {
 			continue
 		}
 		key := pkgs[i].Name + "@" + pkgs[i].Version
 		for _, v := range res.Vulns {
-			vuln, ok := cache[v.ID]
-			if !ok {
-				vuln = c.resolve(ctx, endpoint, v.ID)
-				cache[v.ID] = vuln
-			}
-			out[key] = append(out[key], vuln)
+			out[key] = append(out[key], Vulnerability{ID: v.ID})
+			ids[v.ID] = true
 		}
 	}
-	return out, nil
+	return nil
+}
+
+// resolveAll fetches advisory detail for every id concurrently (bounded).
+func (c *OSVClient) resolveAll(ctx context.Context, endpoint string, ids map[string]bool) map[string]Vulnerability {
+	detail := make(map[string]Vulnerability, len(ids))
+	var mu sync.Mutex
+	sem := make(chan struct{}, resolveConcurrency)
+	var wg sync.WaitGroup
+	for id := range ids {
+		id := id
+		wg.Add(1)
+		sem <- struct{}{}
+		go func() {
+			defer wg.Done()
+			defer func() { <-sem }()
+			v := c.resolve(ctx, endpoint, id)
+			mu.Lock()
+			detail[id] = v
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return detail
 }
 
 // resolve fetches advisory detail; on any error it degrades to just the ID so

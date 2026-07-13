@@ -117,8 +117,10 @@ func (s *Store) migrate(ctx context.Context) error {
 		if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
 			return fmt.Errorf("%s: %w", e.Name(), err)
 		}
+		// ON CONFLICT DO NOTHING so concurrently-starting replicas do not
+		// crash on a duplicate-key race (valid in both Postgres and SQLite).
 		if _, err := s.db.ExecContext(ctx,
-			`INSERT INTO schema_migrations (name, applied_at) VALUES ($1,$2)`,
+			`INSERT INTO schema_migrations (name, applied_at) VALUES ($1,$2) ON CONFLICT (name) DO NOTHING`,
 			e.Name(), time.Now().UTC().Format(time.RFC3339)); err != nil {
 			return err
 		}

@@ -62,11 +62,13 @@ type envVar struct {
 // unit-testable: no network, no cluster. Returns nil when nothing needs to
 // change (idempotent re-admission).
 func Mutate(podObject json.RawMessage) ([]byte, error) {
+	type container struct {
+		Env []envVar `json:"env"`
+	}
 	var pod struct {
 		Spec struct {
-			Containers []struct {
-				Env []envVar `json:"env"`
-			} `json:"containers"`
+			Containers     []container `json:"containers"`
+			InitContainers []container `json:"initContainers"`
 		} `json:"spec"`
 	}
 	if err := json.Unmarshal(podObject, &pod); err != nil {
@@ -74,44 +76,57 @@ func Mutate(podObject json.RawMessage) ([]byte, error) {
 	}
 
 	var ops []patchOp
-	for i, c := range pod.Spec.Containers {
-		idx, cur := findEnv(c.Env, NodeOptionsEnv)
-		switch {
-		case idx < 0 && len(c.Env) == 0:
-			// No env array at all: create it with our var.
-			ops = append(ops, patchOp{
-				Op:    "add",
-				Path:  fmt.Sprintf("/spec/containers/%d/env", i),
-				Value: []envVar{{Name: NodeOptionsEnv, Value: InjectedNodeOptions}},
-			})
-		case idx < 0:
-			// Has env, but no NODE_OPTIONS: append.
-			ops = append(ops, patchOp{
-				Op:    "add",
-				Path:  fmt.Sprintf("/spec/containers/%d/env/-", i),
-				Value: envVar{Name: NodeOptionsEnv, Value: InjectedNodeOptions},
-			})
-		default:
-			// NODE_OPTIONS present: append our flags if missing. A valueFrom
-			// NODE_OPTIONS is left untouched (we cannot safely merge it).
-			if cur.ValueFrom != nil {
-				continue
-			}
-			merged := appendFlags(cur.Value)
-			if merged == cur.Value {
-				continue // already has both flags
-			}
-			ops = append(ops, patchOp{
-				Op:    "replace",
-				Path:  fmt.Sprintf("/spec/containers/%d/env/%d/value", i, idx),
-				Value: merged,
-			})
+	// Node workloads may run in regular containers or in initContainers
+	// (migrations, warmups); both need NODE_OPTIONS for attribution.
+	add := func(field string, containers []container) {
+		for i, c := range containers {
+			ops = append(ops, containerOps(field, i, c.Env)...)
 		}
 	}
+	add("containers", pod.Spec.Containers)
+	add("initContainers", pod.Spec.InitContainers)
+
 	if len(ops) == 0 {
 		return nil, nil
 	}
 	return json.Marshal(ops)
+}
+
+// containerOps returns the patch ops (0 or 1) that ensure NODE_OPTIONS carries
+// the perf-map flags for one container at /spec/<field>/<i>.
+func containerOps(field string, i int, env []envVar) []patchOp {
+	idx, cur := findEnv(env, NodeOptionsEnv)
+	switch {
+	case idx < 0 && len(env) == 0:
+		// No env array at all: create it with our var.
+		return []patchOp{{
+			Op:    "add",
+			Path:  fmt.Sprintf("/spec/%s/%d/env", field, i),
+			Value: []envVar{{Name: NodeOptionsEnv, Value: InjectedNodeOptions}},
+		}}
+	case idx < 0:
+		// Has env, but no NODE_OPTIONS: append.
+		return []patchOp{{
+			Op:    "add",
+			Path:  fmt.Sprintf("/spec/%s/%d/env/-", field, i),
+			Value: envVar{Name: NodeOptionsEnv, Value: InjectedNodeOptions},
+		}}
+	default:
+		// NODE_OPTIONS present: append our flags if missing. A valueFrom
+		// NODE_OPTIONS is left untouched (we cannot safely merge it).
+		if cur.ValueFrom != nil {
+			return nil
+		}
+		merged := appendFlags(cur.Value)
+		if merged == cur.Value {
+			return nil // already has both flags
+		}
+		return []patchOp{{
+			Op:    "replace",
+			Path:  fmt.Sprintf("/spec/%s/%d/env/%d/value", field, i, idx),
+			Value: merged,
+		}}
+	}
 }
 
 func findEnv(env []envVar, name string) (int, envVar) {

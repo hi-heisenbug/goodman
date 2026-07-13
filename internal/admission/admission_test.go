@@ -186,3 +186,24 @@ func TestHandlerEndToEnd(t *testing.T) {
 		t.Fatalf("patch missing injected options: %s", out.Response.Patch)
 	}
 }
+
+func TestMutateInitContainers(t *testing.T) {
+	pod := json.RawMessage(`{"spec":{
+		"containers":[{"name":"app"}],
+		"initContainers":[{"name":"migrate","env":[{"name":"X","value":"1"}]}]}}`)
+	patch, err := Mutate(pod)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops := decodeOps(t, patch)
+	if len(ops) != 2 {
+		t.Fatalf("expected one op for the container and one for the initContainer, got %v", ops)
+	}
+	paths := map[string]bool{}
+	for _, o := range ops {
+		paths[o["path"].(string)] = true
+	}
+	if !paths["/spec/containers/0/env"] || !paths["/spec/initContainers/0/env/-"] {
+		t.Fatalf("initContainer not patched: %v", paths)
+	}
+}
