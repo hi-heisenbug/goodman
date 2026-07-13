@@ -724,9 +724,9 @@ function ReachabilityView() {
       {report && (
         <>
           <div className="metrics-grid">
-            <MetricCard label="Declared" value={report.declared_count} icon="cube" detail={fileName || "packages in lockfile"} />
-            <MetricCard label="Executed" value={report.executed_count} tone="accent" icon="activity" detail={`${coverage}% reachable`} />
-            <MetricCard label="Never executed" value={idle} tone={idle ? "warning" : "good"} icon="archive" detail="Pruning candidates" />
+            <MetricCard label="Declared" value={report.declared_count.toLocaleString()} icon="cube" detail={fileName || "packages in lockfile"} />
+            <MetricCard label="Executed" value={report.executed_count.toLocaleString()} tone="accent" icon="activity" detail={`${coverage}% reachable`} />
+            <MetricCard label="Never executed" value={idle.toLocaleString()} tone={idle ? "warning" : "good"} icon="archive" detail="Pruning candidates" />
             <MetricCard
               label="Reachable vulns"
               value={execVulns.length}

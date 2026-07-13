@@ -11,7 +11,8 @@ working. It is written for both humans and coding agents.
 | Check machine readiness | `make doctor` | no | Toolchain, kernel, BTF, and eBPF capability status. |
 | Build everything locally | `make build` | no | eBPF object, sensor, collector, and CLI compile. |
 | Backend correctness | `make smoke` | no | Real collector/store/fingerprint/diff/API path alerts correctly. |
-| Product dashboard demo | `make demo` | no | Dashboard runs with realistic seeded alerts and fingerprints. |
+| Product dashboard demo | `make demo` | no | Seeded alerts, reachability 1,400/240, live event-stream replay. |
+| Demo DoD check | `make demo-check` | no | Non-interactive verification of the five-minute wow. |
 | Real local eBPF demo | `sudo make e2e` | yes | Sensor captures real syscalls and attributes Node package drift. |
 | Kubernetes install | `scripts/install-k8s.sh --cluster prod` | cluster-dependent | Installs sensor DaemonSet, collector, dashboard, and service. |
 
@@ -26,7 +27,6 @@ Local development needs an x86-64 Linux host or VM:
 - Go 1.23+
 - `clang`, `llvm`, `bpftool`
 - Node 20.19+ only when rebuilding the dashboard
-- `python3` for the local demo data loader
 
 Kubernetes deployment needs:
 
@@ -54,21 +54,31 @@ git clone https://github.com/hi-heisenbug/goodman
 cd goodman
 make doctor
 make build
-make smoke
+make demo
 ```
 
-Expected result:
+Open **http://127.0.0.1:8844**. Expected result:
 
-- `make build` creates `bin/sensor`, `bin/collector`, and `bin/goodmanctl`
-- `make smoke` ends with `SMOKE TEST PASSED`
+- CRITICAL alerts with rule chips already in the queue
+- Reachability tab shows **1,400 declared / 240 executed**
+- ~12s later, the event-stream / flatmap-stream attack appears live
 - no root is required for this path
 
-## Run The Dashboard With Realistic Data
+Backend regression without the UI:
 
-Use this when you want to evaluate the product UI quickly:
+```bash
+make smoke
+make replay
+make demo-check
+```
+
+## Run The Five-Minute Product Wow
+
+Use this on every discovery call and every "try it yourself" link:
 
 ```bash
 make demo
+# or: goodmanctl demo
 ```
 
 Open:
@@ -79,16 +89,19 @@ http://127.0.0.1:8844
 
 What happens:
 
-- starts the real collector
+- starts the real collector (`goodmanctl demo`)
 - uses a local SQLite database at `demo_build/goodman_demo.db`
-- injects realistic baseline fingerprints and dependency drift alerts through
-  the real `/v1/events` API
+- seeds multi-service fingerprints and CRITICAL drift alerts via `/v1/events`
+- persists a reachability snapshot (1,400 declared / 240 executed)
+- prints a 60-second guided script
+- after ~12s, replays the 2018 event-stream attack live
 - keeps the embedded React dashboard running until `Ctrl-C`
 
 If port `8844` is busy:
 
 ```bash
 GOODMAN_DEMO_PORT=8855 make demo
+# or: goodmanctl demo -port 8855
 ```
 
 Useful dashboard routes:
@@ -96,6 +109,7 @@ Useful dashboard routes:
 ```text
 http://127.0.0.1:8844/#alerts
 http://127.0.0.1:8844/#fingerprints
+http://127.0.0.1:8844/#reachability
 ```
 
 ## Run The Collector Manually

@@ -77,21 +77,41 @@ worse than no attribution.
 You need an x86-64 Linux host with kernel 5.8+ and BTF, plus Go, clang/LLVM,
 bpftool, and Node if you want to rebuild the dashboard.
 
-The complete setup and usage guide is in
-[docs/setup-and-usage.md](docs/setup-and-usage.md). The shortest local path is:
+## Quick Start
 
 ```bash
 make doctor
 make build
-make test
-make smoke
+make demo
 ```
 
-`make smoke` is the no-root demo. It starts the collector, feeds synthetic
-baseline and drift events, and asserts exactly one CRITICAL alert.
+Open **http://127.0.0.1:8844**. In under a minute you get:
+
+- CRITICAL supply-chain drift alerts with rule chips already in the queue
+- Reachability headline: **1,400 declared / 240 executed**
+- a live replay of the 2018 event-stream / flatmap-stream attack ~12s after start
+
+Same entry point as the CLI: `goodmanctl demo`. Press `Ctrl-C` to stop.
+
+Verify without a browser (CI / DoD):
+
+```bash
+make demo-check
+```
+
+The longer local build/test path:
+
+```bash
+make test
+make smoke
+make replay
+```
+
+`make smoke` starts the collector, feeds synthetic baseline and drift events,
+and asserts exactly one CRITICAL alert.
 
 To see Goodman catch real npm supply-chain attacks (event-stream, eslint-scope,
-ua-parser-js, node-ipc) reproduced as benign fixtures:
+ua-parser-js, node-ipc) as a regression suite:
 
 ```bash
 make replay
@@ -100,16 +120,6 @@ make replay
 Each scenario learns a baseline, replays the attack's runtime behavior, and
 asserts the expected CRITICAL alert. See
 [docs/replay-corpus.md](docs/replay-corpus.md).
-
-To explore the product UI with realistic data:
-
-```bash
-make demo
-```
-
-Then open `http://127.0.0.1:8844`. This no-root path starts the collector with a
-local SQLite database, seeds baseline fingerprints and dependency-drift alerts,
-and keeps the dashboard running until you press `Ctrl-C`.
 
 For the real eBPF path:
 

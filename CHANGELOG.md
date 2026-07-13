@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Five-minute product wow (`make demo` / `goodmanctl demo` / `make demo-check`):
+  seeds alerts and fingerprints, preloads Reachability at 1,400 declared /
+  240 executed, prints a 60-second guided script, then live-replays the
+  2018 event-stream / flatmap-stream attack with rule chips. README
+  quickstart is this path.
 - Always-on high-risk rules (`always_on` in the rules JSON): credential reads
   and cloud-metadata access now alert from the first observation, during the
   learning window and with no baseline, closing the baseline-poisoning gap.

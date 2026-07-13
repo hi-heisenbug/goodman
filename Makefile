@@ -88,8 +88,12 @@ bench: ## Benchmark the collector ingest pipeline and canonicalization (no root)
 	go test -run='^$$' -bench=. -benchmem ./internal/fingerprint/ ./internal/attribute/
 
 .PHONY: demo
-demo: build ## Start a no-root local product demo with seeded alerts and fingerprints
-	bash scripts/demo.sh
+demo: build ## Five-minute product wow: seeded alerts, reachability, live event-stream replay
+	./bin/goodmanctl demo
+
+.PHONY: demo-check
+demo-check: build ## Non-interactive demo verification (CI / DoD check)
+	./bin/goodmanctl demo -check -port $${GOODMAN_DEMO_PORT:-8855}
 
 ## --- Docker / Helm ---
 .PHONY: docker

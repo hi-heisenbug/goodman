@@ -65,16 +65,25 @@ new secret read and metadata connect — and that no baseline behavior leaked in
 it. If it prints `SMOKE TEST PASSED`, your backend, store, fingerprint engine,
 diff engine, and API all work.
 
-## 4. Open the product dashboard with demo data (`make demo`)
+## 4. Five-minute product wow (`make demo`)
 
-For a no-root product walkthrough, start the collector with realistic seeded
-fingerprints and drift alerts:
+For a no-root product walkthrough — the command used on every discovery call —
+start the collector with seeded alerts, a preloaded reachability report, and a
+live event-stream attack replay:
 
 ```bash
 make demo
+# or: goodmanctl demo
 ```
 
-Open **http://127.0.0.1:8844**. The command keeps the collector running until
+Open **http://127.0.0.1:8844**. On first load:
+
+- **Alerts** already shows CRITICAL drifts with rule chips
+- **Reachability** shows **1,400 declared / 240 executed** (no lockfile upload)
+- ~12 seconds later, the 2018 event-stream / flatmap-stream attack appears live
+  as a new CRITICAL row (`secret-read`, `new-outbound-connect`)
+
+The terminal prints a 60-second guided script. The collector keeps running until
 you press `Ctrl-C`. It uses a local SQLite database at
 `demo_build/goodman_demo.db`, which is ignored by git.
 
@@ -82,6 +91,13 @@ If port `8844` is already in use:
 
 ```bash
 GOODMAN_DEMO_PORT=8855 make demo
+# or: goodmanctl demo -port 8855
+```
+
+Non-interactive verification (no browser):
+
+```bash
+make demo-check
 ```
 
 ## 5. The full live demo with real eBPF (`sudo make e2e`)
