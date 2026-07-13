@@ -174,10 +174,11 @@ configuration, image publishing, and the chart resources.
 | `bpf/` | eBPF C program, shared wire struct, generated `vmlinux.h` |
 | `cmd/sensor` | privileged sensor: loads eBPF, attributes events, posts batches |
 | `cmd/collector` | ingestion, fingerprinting, diffing, API, dashboard |
-| `cmd/goodmanctl` | CLI for tailing events, alerts, ack/resolve, fingerprints |
+| `cmd/goodmanctl` | CLI for tailing events, alerts, ack/resolve, fingerprints, reachability report |
 | `internal/attribute` | stack-to-package attribution |
 | `internal/fingerprint` | behavior aggregation and baseline promotion |
 | `internal/diff` | baseline comparison and high-risk rule evaluation |
+| `internal/report` | runtime reachability report (lockfile vs executed + OSV) |
 | `dashboard/` | React/Vite dashboard source |
 | `deploy/` | Dockerfiles, Helm chart, example rules |
 | `test/` | synthetic smoke driver, workload fixtures, e2e harness |

@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/attribute"
 	"github.com/hi-heisenbug/goodman/internal/loader"
 	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/report"
 )
 
 const usage = `goodmanctl — Goodman dev CLI
@@ -28,6 +30,8 @@ Usage:
   goodmanctl ack ID        [-collector URL]                acknowledge an alert
   goodmanctl resolve ID    [-collector URL]                resolve an alert
   goodmanctl fingerprints  [-collector URL] [-service S] [-package P]
+  goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]
+                                                            runtime reachability report
   goodmanctl attribute -pid N [-duration 15s] [-proc-root /proc]
                                                             live-attribute one pid (needs root)
 
@@ -53,6 +57,8 @@ func main() {
 		cmdResolve(args)
 	case "fingerprints":
 		cmdFingerprints(args)
+	case "report":
+		cmdReport(args)
 	case "attribute":
 		cmdAttribute(args)
 	default:
@@ -245,6 +251,58 @@ func cmdFingerprints(args []string) {
 			st := fp.Behaviors[b]
 			fmt.Printf("    %-60s x%d\n", b, st.Count)
 		}
+	}
+}
+
+// cmdReport builds the runtime reachability report: declared dependencies
+// (from a lockfile) joined against packages Goodman observed executing, with
+// optional OSV vulnerability enrichment.
+func cmdReport(args []string) {
+	fs := flag.NewFlagSet("report", flag.ExitOnError)
+	collector := collectorFlag(fs)
+	token := tokenFlag(fs)
+	lockfile := fs.String("lockfile", "package-lock.json", "path to package-lock.json")
+	service := fs.String("service", "", "limit to one service (pod/deployment)")
+	useOSV := fs.Bool("osv", false, "enrich with OSV.dev vulnerability data (needs network)")
+	out := fs.String("o", "", "write the markdown report to this file (default stdout)")
+	fs.Parse(args)
+
+	data, err := os.ReadFile(*lockfile)
+	if err != nil {
+		log.Fatalf("read lockfile: %v", err)
+	}
+	declared, err := report.ParseLockfile(data)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if len(declared) == 0 {
+		log.Fatalf("no packages found in %s", *lockfile)
+	}
+
+	u := *collector + "/v1/fingerprints"
+	if *service != "" {
+		u += "?service=" + url.QueryEscape(*service)
+	}
+	var fps []model.Fingerprint
+	getJSON(u, *token, &fps)
+
+	var vulns map[string][]report.Vulnerability
+	if *useOSV {
+		log.Printf("querying OSV.dev for %d packages…", len(declared))
+		vulns, err = report.NewOSVClient().Query(context.Background(), declared)
+		if err != nil {
+			log.Fatalf("osv: %v", err)
+		}
+	}
+
+	rep := report.Build(*service, declared, fps, vulns)
+	md := rep.Markdown()
+	if *out == "" {
+		fmt.Print(md)
+	} else if err := os.WriteFile(*out, []byte(md), 0o644); err != nil {
+		log.Fatalf("write report: %v", err)
+	} else {
+		log.Printf("wrote %s (%d declared, %d executed)", *out, rep.DeclaredCount, rep.ExecutedCount)
 	}
 }
 

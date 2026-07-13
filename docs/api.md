@@ -195,7 +195,27 @@ being shed under load — investigate before trusting completeness.
 | `goodmanctl alerts [-status S] [-json]` | `GET /v1/alerts` |
 | `goodmanctl ack <id>` | `POST /v1/alerts/{id}/ack` |
 | `goodmanctl fingerprints [-service S] [-package P] [-json]` | `GET /v1/fingerprints` |
+| `goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]` | `GET /v1/fingerprints` + OSV.dev |
 | `goodmanctl attribute -pid N [-stacks]` | loads eBPF directly (needs root) |
+
+### `goodmanctl report`
+
+Builds the **runtime reachability report**: it parses an npm
+`package-lock.json` (v1/v2/v3), joins the declared dependencies against the
+packages Goodman observed executing, and (with `-osv`) enriches them with
+OSV.dev advisories. The markdown output ranks vulnerabilities in
+**executing** packages first, since those are reachable at runtime, and lists
+declared-but-never-executed packages separately as deprioritization / pruning
+candidates.
+
+```bash
+goodmanctl report -lockfile package-lock.json -service web -osv -o reachability.md
+```
+
+`-osv` needs outbound network to `api.osv.dev`; without it the report still
+shows executed-vs-declared reachability. This is the artifact to hand a
+security team: it turns "you have N vulnerable dependencies" into "these few
+actually run, patch them first."
 
 Point any of them at a remote collector with `-collector URL` or
 `GOODMAN_COLLECTOR_URL`.

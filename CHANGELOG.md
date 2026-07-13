@@ -23,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   event-stream, eslint-scope, ua-parser-js, and node-ipc npm supply-chain
   attacks, each asserting Goodman raises the expected CRITICAL alert. See
   `docs/replay-corpus.md`.
+- `goodmanctl report`: the runtime reachability report. Parses a
+  `package-lock.json` (v1/v2/v3), joins declared dependencies against packages
+  Goodman observed executing, and optionally enriches with OSV.dev. Ranks
+  vulnerabilities in executing packages first and lists never-executed
+  packages as pruning candidates.
 - Bearer-token authentication for the collector API: `GOODMAN_INGEST_TOKEN`
   protects sensor ingestion and `GOODMAN_API_TOKEN` protects the
   alerts/fingerprints/stream API. The sensor, `goodmanctl`, and the dashboard
