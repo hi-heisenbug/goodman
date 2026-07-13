@@ -42,7 +42,7 @@ root and exits non-zero unless every scenario raises exactly the expected
 CRITICAL alert with the expected matched rule. Documented in
 `docs/replay-corpus.md`.
 
-## Phase 2: Always-on high-risk rules + alert evidence
+## Phase 2: Always-on high-risk rules + alert evidence (DONE)
 
 Two product gaps, one change surface (`internal/diff`):
 
