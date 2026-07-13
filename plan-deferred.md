@@ -6,6 +6,16 @@
 > Work the phases **in order**; each has a Definition of Done (DoD). Read
 > `AGENTS.md` before touching anything — every invariant there applies here.
 
+## Status (2026-07-13): Phases 0–1 DONE
+
+| Phase | Outcome |
+|---|---|
+| 0. Tier-2 research spike | **PARK (year-scale)** — `docs/research/tier2-attribution.md` |
+| 1. Collector durability | PVC + sensor RAM spool + recovery test — this change |
+
+Next: Phase 2 (Python) is customer-gated; Phase 3 (enforce=warn) is the next
+ungated build.
+
 ## Sequencing rationale
 
 Three forces order these phases:

@@ -106,3 +106,45 @@ func TestHelmWebhookOnlyRendersWhenEnabled(t *testing.T) {
 		}
 	}
 }
+
+func TestHelmSQLitePersistencePVC(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	out, err := exec.Command("helm", "template", "goodman", ".").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template: %v\n%s", err, out)
+	}
+	rendered := string(out)
+	for _, want := range []string{
+		"kind: PersistentVolumeClaim",
+		"name: goodman-collector-data",
+		"claimName: goodman-collector-data",
+		"GOODMAN_SPOOL_EVENTS",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Fatalf("default SQLite persistence missing %q\n%s", want, rendered)
+		}
+	}
+
+	out, err = exec.Command("helm", "template", "goodman", ".",
+		"--set", "store.persistence.enabled=false").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template no-pvc: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "kind: PersistentVolumeClaim") {
+		t.Fatal("PVC must not render when store.persistence.enabled=false")
+	}
+	if !strings.Contains(string(out), "emptyDir: {}") {
+		t.Fatal("expected emptyDir when persistence disabled")
+	}
+
+	out, err = exec.Command("helm", "template", "goodman", ".",
+		"--set", "postgres.dsn=postgres://x").CombinedOutput()
+	if err != nil {
+		t.Fatalf("helm template postgres: %v\n%s", err, out)
+	}
+	if strings.Contains(string(out), "kind: PersistentVolumeClaim") {
+		t.Fatal("PVC must not render when postgres.dsn is set")
+	}
+}

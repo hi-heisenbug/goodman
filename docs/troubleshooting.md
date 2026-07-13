@@ -87,6 +87,19 @@ Check the DSN and network reachability. The collector pings the store at startup
 and exits if it can't connect. For a quick local run, drop the DSN to use SQLite:
 `GOODMAN_DSN=goodman.db`.
 
+**Baselines disappeared after a collector restart**
+With SQLite, the chart defaults to a PVC at `/data`
+(`store.persistence.enabled=true`). If you set `enabled=false`, data is on
+`emptyDir` and is wiped on reschedule. Confirm the PVC is Bound and the pod
+mounts it (`kubectl describe pod …-collector`). Postgres does not need this PVC.
+
+**Events missing while the collector was down**
+Sensors spool failed batches in memory (`GOODMAN_SPOOL_EVENTS`, default 50k)
+and retry on the next flush. If the outage outlasts that budget,
+`goodman_sensor_spool_dropped_total` increments and oldest events are gone.
+Channel drops (`goodman_sensor_events_dropped_total`) are a different path —
+ring-buffer pressure, not collector reachability.
+
 **Dashboard shows "connecting" and no data**
 The SSE stream connects on first event. If it stays "connecting", confirm the
 collector is reachable (`curl http://<collector>:8844/v1/healthz`) and that events

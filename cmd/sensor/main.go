@@ -32,6 +32,7 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/coverage"
 	"github.com/hi-heisenbug/goodman/internal/loader"
 	"github.com/hi-heisenbug/goodman/internal/model"
+	"github.com/hi-heisenbug/goodman/internal/spool"
 )
 
 var (
@@ -50,6 +51,12 @@ var (
 		Name: "goodman_sensor_watched_pids", Help: "Currently watched pids."})
 	mBatches = promauto.NewCounterVec(prometheus.CounterOpts{
 		Name: "goodman_sensor_batches_total", Help: "Batch POSTs to the collector."}, []string{"result"})
+	mSpoolDropped = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "goodman_sensor_spool_dropped_total",
+		Help: "Events evicted from the collector-retry spool when it was full."})
+	mSpoolDepth = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "goodman_sensor_spool_depth",
+		Help: "Events waiting in the collector-retry spool."})
 )
 
 func main() {
@@ -65,6 +72,7 @@ func main() {
 		ingestToken   = flag.String("ingest-token", os.Getenv("GOODMAN_INGEST_TOKEN"), "bearer token sent with event batches")
 		tlsCA         = flag.String("tls-ca", os.Getenv("GOODMAN_TLS_CA"), "PEM CA bundle to trust for an https collector (empty = system roots)")
 		connectCIDR   = flag.Int("connect-cidr", envIntOr("GOODMAN_CONNECT_CIDR", 0), "aggregate public destination IPs to this IPv4 prefix in CONNECT behaviors (8-32; 0 = exact IPs)")
+		spoolEvents   = flag.Int("spool-events", envIntOr("GOODMAN_SPOOL_EVENTS", 50_000), "max attributed events to retain when the collector is unreachable")
 	)
 	flag.Parse()
 	log.SetPrefix("sensor: ")
@@ -181,7 +189,7 @@ func main() {
 		log.Fatalf("collector TLS: %v", err)
 	}
 	go reportCoverageLoop(ctx, client, *collectorURL, *ingestToken, sensorName)
-	sendBatches(ctx, client, *collectorURL, *ingestToken, sensorName, out, *batchEvery, &dropped)
+	sendBatches(ctx, client, *collectorURL, *ingestToken, sensorName, out, *batchEvery, *spoolEvents, &dropped)
 }
 
 // newCollectorClient builds the HTTP client for collector POSTs; a non-empty
@@ -203,26 +211,23 @@ func newCollectorClient(caFile string) (*http.Client, error) {
 	return client, nil
 }
 
-func sendBatches(ctx context.Context, client *http.Client, baseURL, token, sensor string, in <-chan model.Attributed, every time.Duration, dropped *atomic.Uint64) {
+func sendBatches(ctx context.Context, client *http.Client, baseURL, token, sensor string, in <-chan model.Attributed, every time.Duration, spoolCap int, dropped *atomic.Uint64) {
 	var buf []model.Attributed
+	sp := spool.New(spoolCap)
 	t := time.NewTicker(every)
 	defer t.Stop()
 
-	flush := func() {
-		batch := model.EventBatch{Sensor: sensor, Events: buf}
-		n := len(buf)
-		buf = nil
+	post := func(events []model.Attributed) error {
+		batch := model.EventBatch{Sensor: sensor, Events: events}
 		var body bytes.Buffer
 		gz := gzip.NewWriter(&body)
 		if err := json.NewEncoder(gz).Encode(batch); err != nil {
-			log.Printf("encode batch: %v", err)
-			return
+			return err
 		}
 		gz.Close()
 		req, err := http.NewRequest(http.MethodPost, baseURL+"/v1/events", &body)
 		if err != nil {
-			log.Printf("build request: %v", err)
-			return
+			return err
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Content-Encoding", "gzip")
@@ -231,17 +236,43 @@ func sendBatches(ctx context.Context, client *http.Client, baseURL, token, senso
 		}
 		resp, err := client.Do(req)
 		if err != nil {
-			mBatches.WithLabelValues("error").Inc()
-			log.Printf("send batch (%d events): %v", n, err)
-			return
+			return err
 		}
-		resp.Body.Close()
+		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
-			mBatches.WithLabelValues("error").Inc()
-			log.Printf("collector returned %s", resp.Status)
+			return fmt.Errorf("collector returned %s", resp.Status)
+		}
+		return nil
+	}
+
+	flush := func() {
+		// Drain spool first, then the current buffer, as one combined send.
+		pending := sp.TakeAll()
+		if len(buf) > 0 {
+			pending = append(pending, buf...)
+			buf = nil
+		}
+		if len(pending) == 0 {
+			// Heartbeat so quiet sensors stay visible on the Coverage panel.
+			if err := post(nil); err != nil {
+				mBatches.WithLabelValues("error").Inc()
+			} else {
+				mBatches.WithLabelValues("ok").Inc()
+			}
+			mSpoolDepth.Set(float64(sp.Len()))
 			return
 		}
-		mBatches.WithLabelValues("ok").Inc()
+		if err := post(pending); err != nil {
+			mBatches.WithLabelValues("error").Inc()
+			log.Printf("send batch (%d events): %v — spooling", len(pending), err)
+			if n := sp.Push(pending); n > 0 {
+				mSpoolDropped.Add(float64(n))
+				log.Printf("spool full: evicted %d oldest events", n)
+			}
+		} else {
+			mBatches.WithLabelValues("ok").Inc()
+		}
+		mSpoolDepth.Set(float64(sp.Len()))
 	}
 
 	for {

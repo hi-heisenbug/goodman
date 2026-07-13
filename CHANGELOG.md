@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Collector durability (deferred Phase 1): Helm `store.persistence` mounts a
+  PVC for SQLite by default; sensors buffer failed collector POSTs in a
+  bounded RAM spool (`-spool-events` / `GOODMAN_SPOOL_EVENTS`, metrics
+  `goodman_sensor_spool_*`) and drain on recovery.
+- Tier-2 research decision (`docs/research/tier2-attribution.md`): PARK
+  (year-scale); keep Tier-1 + admission webhook as the production path.
 - Coverage and trust panel (Phase 9): `GET /v1/coverage` + dashboard Coverage
   tab with sensor health, attribution KPI, namespace injection gaps, and
   alert-budget burn rate. Sensors heartbeat on empty batches and POST

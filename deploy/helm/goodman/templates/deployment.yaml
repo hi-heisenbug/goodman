@@ -139,7 +139,17 @@ spec:
 {{- end }}
       volumes:
         - name: data
+{{- if and .Values.store.persistence.enabled (not .Values.postgres.dsn) }}
+{{- if .Values.store.persistence.existingClaim }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.store.persistence.existingClaim | quote }}
+{{- else }}
+          persistentVolumeClaim:
+            claimName: {{ .Release.Name }}-collector-data
+{{- end }}
+{{- else }}
           emptyDir: {}
+{{- end }}
 {{- if .Values.rules }}
         - name: config
           configMap:

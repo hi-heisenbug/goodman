@@ -78,6 +78,7 @@ the dashboard. The same webhook also receives the weekly digest when
 | `-ingest-token` | `GOODMAN_INGEST_TOKEN` | *(empty)* | Bearer token sent with every event batch (must match the collector's ingest token). |
 | `-tls-ca` | `GOODMAN_TLS_CA` | *(empty)* | PEM CA bundle to trust for an `https://` collector (private CA / self-signed). Empty uses system roots. |
 | `-connect-cidr` | `GOODMAN_CONNECT_CIDR` | `0` | Aggregate public destination IPs to this IPv4 prefix (8-32) in `CONNECT` behaviors. `0` keeps exact IPs. See noise control below. |
+| `-spool-events` | `GOODMAN_SPOOL_EVENTS` | `50000` | Max attributed events retained in RAM when the collector is unreachable. Oldest are evicted first; see `goodman_sensor_spool_*` metrics. |
 | `-watch-interval` | — | `3s` | How often to rescan `/proc` for runtime processes. |
 | `-stdout` | — | `false` | Print attributed events to stdout instead of sending to the collector (debugging). |
 | `-raw` | — | `false` | With `-stdout`: also print raw events including stack depth. |
@@ -165,11 +166,16 @@ in [`deploy/helm/goodman/values.yaml`](../deploy/helm/goodman/values.yaml).
 | `registries` | `npm` | Comma-separated registries watched (informational in v1). |
 | `sensor.image` / `collector.image` | `ghcr.io/hi-heisenbug/*:0.1.0` | Container images. |
 | `sensor.extraComms` | `""` | Extra process names to watch. |
+| `sensor.spoolEvents` | `50000` | Sensor in-memory retry spool when the collector is down. |
 | `sensor.metricsPort` | `9478` | Sensor Prometheus port. |
 | `collector.replicas` | `1` | Collector replica count. |
 | `collector.service.type` / `.port` | `ClusterIP` / `8844` | Collector service. |
 | `postgres.dsn` | `""` | Postgres DSN; empty → embedded SQLite. |
 | `postgres.sqlitePath` | `/data/goodman.db` | SQLite path (when `dsn` is empty). |
+| `store.persistence.enabled` | `true` | Mount a PVC at `/data` for SQLite (ignored when `postgres.dsn` is set). |
+| `store.persistence.size` | `10Gi` | PVC size when the chart creates the claim. |
+| `store.persistence.storageClass` | `""` | StorageClass; empty uses the cluster default. |
+| `store.persistence.existingClaim` | `""` | Use an existing PVC name instead of creating one. |
 | `learningWindow.obsCount` | `500` | Observations before baseline promotion. |
 | `learningWindow.minAgeHours` | `24` | Wall-clock hours before promotion. |
 | `attribution.tier` | `perfmap` | `perfmap` (Tier 1) or `v8native` (Tier 2, not in v1). |

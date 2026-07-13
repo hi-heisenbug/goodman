@@ -82,6 +82,11 @@ function name`. It is genuinely hard (V8 layout changes across versions, string
 type handling, GC races). It is **architected for but not built** in v1; the
 perf-map path stays as a permanent fallback. See `plan.md` §5.3.
 
+**Research status (2026-07):** a timeboxed spike parked Tier-2 as year-scale
+work — see [`docs/research/tier2-attribution.md`](research/tier2-attribution.md).
+The NODE_OPTIONS webhook remains the shipping answer to zero-config objections.
+Do not start a production build until that doc's GO criteria are met.
+
 ## Behavior canonicalization
 
 Raw syscall arguments are noisy — unique temp files, ephemeral ports. The same

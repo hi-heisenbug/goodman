@@ -179,5 +179,19 @@ helm uninstall goodman
 ```
 
 This removes the DaemonSet, Deployment, Service, and RBAC cleanly. With the
-default SQLite store, fingerprint/alert data lives on the collector pod's
-`emptyDir` and is discarded; with Postgres it persists in your database.
+default SQLite store and `store.persistence.enabled=true`, fingerprint/alert
+data lives on the PVC (`<release>-collector-data`) and survives collector
+restarts; set `store.persistence.enabled=false` for an ephemeral `emptyDir`
+(data discarded on reschedule). With Postgres it persists in your database.
+
+## Collector restart / short outages
+
+A collector restart or brief outage should not wipe a pilot:
+
+- **Baselines:** with SQLite, keep `store.persistence.enabled=true` (default)
+  so `/data/goodman.db` is on a PVC. Postgres needs no PVC for durability.
+- **In-flight events:** sensors keep failed batches in a bounded RAM spool
+  (`sensor.spoolEvents` / `-spool-events`, default 50k) and retry on the next
+  flush tick. Watch `goodman_sensor_spool_depth` and
+  `goodman_sensor_spool_dropped_total` if the collector is down for longer
+  than the spool can absorb.

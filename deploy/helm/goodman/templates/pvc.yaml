@@ -1,0 +1,15 @@
+{{- if and .Values.store.persistence.enabled (not .Values.postgres.dsn) (not .Values.store.persistence.existingClaim) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Release.Name }}-collector-data
+  labels: {{- include "goodman.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: {{ .Values.store.persistence.size | quote }}
+  {{- with .Values.store.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+{{- end }}

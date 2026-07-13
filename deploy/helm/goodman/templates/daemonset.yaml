@@ -32,6 +32,8 @@ spec:
               valueFrom: { fieldRef: { fieldPath: spec.nodeName } }
             - name: GOODMAN_EXTRA_COMMS
               value: {{ .Values.sensor.extraComms | quote }}
+            - name: GOODMAN_SPOOL_EVENTS
+              value: {{ .Values.sensor.spoolEvents | quote }}
 {{- if .Values.auth.enabled }}
             - name: GOODMAN_INGEST_TOKEN
               valueFrom: { secretKeyRef: { name: {{ include "goodman.authSecretName" . }}, key: ingest-token } }

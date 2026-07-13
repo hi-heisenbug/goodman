@@ -11,6 +11,8 @@ sensor:
   imagePullPolicy: IfNotPresent
   # Extra process comm names to watch beyond the built-in runtime defaults.
   extraComms: ""
+  # Max attributed events kept in RAM when the collector is unreachable.
+  spoolEvents: 50000
   resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: 500m, memory: 512Mi }
@@ -81,11 +83,21 @@ webhook:
   failurePolicy: Ignore
 
 # Datastore. Provide a Postgres DSN in production; the default embedded SQLite
-# file is fine for a pilot / kind cluster (data lives on the collector pod).
+# file is fine for a pilot / kind cluster.
 postgres:
   dsn: ""                       # e.g. postgres://user:pass@host:5432/goodman?sslmode=require
-  # When dsn is empty the collector uses this SQLite path on an emptyDir.
+  # When dsn is empty the collector uses this SQLite path under /data.
   sqlitePath: /data/goodman.db
+
+# SQLite durability when postgres.dsn is empty. A PVC keeps baselines across
+# collector restarts; emptyDir (persistence.enabled=false) is wiped on reschedule.
+# Postgres remains the production answer; the PVC is the pilot-grade default.
+store:
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: ""            # empty = cluster default
+    existingClaim: ""           # if set, use this PVC instead of creating one
 
 # Learning window before a fingerprint is promoted to a baseline.
 learningWindow:
