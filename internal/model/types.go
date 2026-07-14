@@ -11,12 +11,12 @@ import (
 type EventType uint8
 
 const (
-	EventFileOpen      EventType = 1
-	EventNetConnect    EventType = 2
-	EventProcExec      EventType = 3
-	EventDenyFileOpen  EventType = 4
-	EventDenyConnect   EventType = 5
-	EventDenyExec      EventType = 6
+	EventFileOpen     EventType = 1
+	EventNetConnect   EventType = 2
+	EventProcExec     EventType = 3
+	EventDenyFileOpen EventType = 4
+	EventDenyConnect  EventType = 5
+	EventDenyExec     EventType = 6
 )
 
 func (t EventType) String() string {

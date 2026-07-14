@@ -41,7 +41,7 @@ From `docs/attribution.md` and `internal/attribute/`:
 
 1. Kernel captures user stacks via frame pointers (`bpf_get_stack`).
 2. JIT frames resolve through V8's `/tmp/perf-<pid>.map` when
-   `--perf-basic-prof --interpreted-frames-native-stack` is set.
+   `--perf-basic-prof-only-functions --interpreted-frames-native-stack` is set.
 3. Deepest `/node_modules/` frame wins; else `<app>`; else `<unknown>`.
 4. Paths resolve through `/proc/<pid>/root` for containers.
 
@@ -103,7 +103,7 @@ capped. Expect several redesigns.
 
 ```bash
 # Terminal A — victim with a stable handleRequest-style function
-node --perf-basic-prof --interpreted-frames-native-stack -e '
+node --perf-basic-prof-only-functions --interpreted-frames-native-stack -e '
   const http = require("http");
   http.createServer((req,res)=>res.end("ok")).listen(9999);
   setInterval(()=>{}, 1000);

@@ -113,7 +113,7 @@ unit tests cover lockfile parsing (v2/v3) and report assembly; documented in
 
 ## Phase 4: NODE_OPTIONS admission webhook (DONE)
 
-Tier-1 attribution needs `NODE_OPTIONS=--perf-basic-prof
+Tier-1 attribution needs `NODE_OPTIONS=--perf-basic-prof-only-functions
 --interpreted-frames-native-stack` on workloads. Manual injection is the
 number one install objection. Ship a mutating admission webhook (part of the
 collector binary, enabled by Helm) that injects the env var into pods in

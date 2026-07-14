@@ -33,8 +33,8 @@ What it does (no root, no cluster):
 2. Seeds multi-service fingerprints and CRITICAL drift alerts
 3. Persists a reachability snapshot: **1,400 declared / 240 executed**
 4. Prints a 60-second guided script
-5. After `-attack-delay` (default 12s), replays the 2018 event-stream /
-   flatmap-stream attack so a new CRITICAL alert appears live with rule chips
+5. After `-attack-delay` (default 12s), replays the 2026 Mini-Shai-Hulud
+   behavior profile so a new CRITICAL alert appears live with rule chips
 
 Non-interactive DoD check:
 

@@ -56,6 +56,8 @@ budget; enable **`block`** + enforcement only on a volunteer namespace.
 
 Enforcement requires: Helm `enforce.enabled=true`, namespace
 `goodman.io/enforce=enabled`, and `goodmanctl enforce on`.
+Run the pilot collector as a single replica while enforcement is enabled; the
+chart rejects HA enforcement until verdict state is database-coordinated.
 
 ## Weekly digest
 

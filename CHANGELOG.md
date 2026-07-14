@@ -59,7 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Five-minute product wow (`make demo` / `goodmanctl demo` / `make demo-check`):
   seeds alerts and fingerprints, preloads Reachability at 1,400 declared /
   240 executed, prints a 60-second guided script, then live-replays the
-  2018 event-stream / flatmap-stream attack with rule chips. README
+  2026 Mini-Shai-Hulud behavior profile with rule chips. README
   quickstart is this path.
 - Always-on high-risk rules (`always_on` in the rules JSON): credential reads
   and cloud-metadata access now alert from the first observation, during the
@@ -67,7 +67,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-rule `exclude` patterns for noise tuning without deleting a rule.
 - Performance benchmarks (`make bench`) for the collector ingest pipeline and
   sensor canonicalization, and `docs/performance.md` documenting measured
-  throughput (~16k events/sec on SQLite), sensor overhead methodology, and the
+  throughput (~11.4k events/sec on SQLite), sensor overhead methodology, and the
   attribution-quality KPI.
 - Sensor CONNECT noise control: `-connect-cidr` / `GOODMAN_CONNECT_CIDR`
   aggregates public destination IPs to an IPv4 prefix (e.g. /16), collapsing

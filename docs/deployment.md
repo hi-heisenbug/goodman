@@ -65,7 +65,7 @@ Deployment:
 ```yaml
 env:
   - name: NODE_OPTIONS
-    value: "--perf-basic-prof --interpreted-frames-native-stack"
+    value: "--perf-basic-prof-only-functions --interpreted-frames-native-stack"
 ```
 
 Patch selected Deployments:
@@ -116,6 +116,10 @@ helm upgrade goodman deploy/helm/goodman --set enforce.enabled=true
 kubectl label namespace checkout goodman.io/enforce=enabled
 goodmanctl enforce on
 ```
+
+Keep `collector.replicas=1` while enforcement is enabled. The chart fails
+rendering for HA + enforcement because replica-local verdict state is not yet
+safe to serve interchangeably. HA detection remains supported with Postgres.
 
 Requires kernel ≥ 5.10, `CONFIG_BPF_LSM`, `bpf` in `lsm=`, and cgroup v2. See
 [`docs/enforcement.md`](enforcement.md) and [`docs/pilot-runbook.md`](pilot-runbook.md).
@@ -253,6 +257,10 @@ Run multiple collector replicas when a security review demands no single point
 of failure. **Postgres is required** — SQLite is single-writer and the
 collector fails fast at startup when `GOODMAN_HA_REPLICAS` (or `-ha-replicas`)
 is greater than 1 and the DSN is SQLite.
+
+HA currently covers detection, ingest, fingerprints, alerts, reachability, and
+digests. Kernel enforcement remains single-collector only; leave
+`enforce.enabled=false` in an HA deployment.
 
 ```bash
 helm upgrade goodman deploy/helm/goodman \

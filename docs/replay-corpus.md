@@ -8,6 +8,11 @@ self-contained fixtures and asserts that Goodman raises exactly the expected
 CRITICAL alert for each. It is a regression suite, a live demo, and sales
 evidence in one artifact.
 
+The corpus also includes the 2026 Mini-Shai-Hulud behavior profile: credential
+reads, cloud metadata, outbound C2, and a forked shell exec. The synthetic
+replay validates rule/diff behavior; `sudo make e2e` is the live-kernel gate for
+the `sched_process_fork` propagation that keeps the short-lived exec visible.
+
 ```bash
 make replay
 ```
@@ -26,6 +31,7 @@ attributed events.
 | `eslint-scope` | eslint-scope (Jul 2018) | A brand-new malicious version reads `~/.npmrc` (npm token) with **no prior baseline**, caught in minute one by the always-on secret-read rule. | secret-read |
 | `ua-parser-js` | ua-parser-js (Oct 2021) | A hijacked version adds process execution (a dropped miner) and download traffic on top of a clean baseline. | new-exec, new-outbound-connect |
 | `node-ipc` | node-ipc / peacenotwar (Mar 2022) | Protestware adds a geo-IP lookup and file access far outside the package's own directory. | new-outbound-connect |
+| `mini-shai-hulud` | Mini-Shai-Hulud behavior profile (Apr-May 2026) | Credential reads, metadata access, C2, and a forked shell helper. | secret-read, cloud-metadata, new-outbound-connect, new-exec |
 
 The `eslint-scope` case is the important one for the product story: it has no
 baseline at all, so it exercises the **always-on rule path** that closes the

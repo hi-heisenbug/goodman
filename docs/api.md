@@ -17,11 +17,12 @@ Authorization: Bearer <token>
 | Endpoints | Token | 
 |---|---|
 | `POST /v1/events` | ingest token (`GOODMAN_INGEST_TOKEN`) |
-| `/v1/alerts*`, `/v1/fingerprints`, `/v1/stream` | API token (`GOODMAN_API_TOKEN`) |
-| `/v1/healthz`, `/v1/readyz`, `/metrics`, dashboard assets | none |
+| `/v1/alerts*`, `/v1/fingerprints`, `/v1/stream`, `/metrics` | API token (`GOODMAN_API_TOKEN`) |
+| `/v1/healthz`, `/v1/readyz`, dashboard assets | none |
 
-`GET /v1/stream` also accepts `?token=<api-token>` because `EventSource`
-cannot set request headers. A missing or wrong token returns
+Browser `EventSource` clients mirror the API token into a SameSite cookie scoped
+to `/v1/stream`, because EventSource cannot set request headers. Query-string
+tokens are rejected so they do not leak into proxy access logs. A missing or wrong token returns
 `401 {"error": "unauthorized"}`. With no tokens configured (bare local runs),
 all endpoints are open.
 
@@ -69,9 +70,10 @@ broadcasts to the SSE stream. Body limit 64 MiB.
 { "ingested": 1, "alerts": 0 }
 ```
 
-### `GET /v1/alerts?status=<open|acknowledged|resolved>`
+### `GET /v1/alerts?status=<open|acknowledged|resolved>&limit=100&offset=0`
 
-List alerts, newest first (max 500). Omit `status` for all.
+List alerts, newest first. `limit` defaults to 100 and is capped at 500;
+advance `offset` to retrieve older pages. Omit `status` for all states.
 
 ```json
 [
@@ -222,9 +224,9 @@ This backs the dashboard's Reachability tab and mirrors `goodmanctl report`.
 
 Return the most recently stored reachability snapshot for a service scope
 (`404` when none has been uploaded with `persist=1`). Lets the dashboard show
-current numbers on load without re-uploading a lockfile. When a previous
-snapshot exists (after a scheduled refresh or a second upload), the response
-includes a week-over-week `delta`.
+current numbers on load without re-uploading a lockfile. When at least seven
+days of snapshot history exists, the response includes a week-over-week
+`delta`; hourly refreshes do not move that comparison point forward.
 
 ```jsonc
 // response
@@ -308,7 +310,9 @@ returns `409` if the collector master gate (`-enforce-enabled`) is off.
 ### `GET /v1/stream`
 
 
-Requires the API token via header or `?token=` (see Authentication).
+Requires the API token via bearer header. Browser EventSource clients use the
+path-scoped stream cookie described under Authentication; query-string tokens
+are rejected.
 
 Server-Sent Events. Two event types are pushed as they happen:
 
@@ -326,7 +330,8 @@ data: [{"id":"3fa05cdd…","severity":"CRITICAL",…}]
 
 ### `GET /metrics`
 
-Prometheus metrics (see [Observability](#observability)).
+Prometheus metrics (see [Observability](#observability)). Requires the API token
+when authentication is enabled.
 
 ### `GET /*`
 
@@ -351,6 +356,7 @@ Both binaries expose Prometheus metrics.
 | `goodman_sensor_attributed_total` | counter | `outcome` (package/app/unknown) |
 | `goodman_sensor_channel_drops_total` | counter | — |
 | `goodman_sensor_ringbuf_drops_total` | gauge | — |
+| `goodman_sensor_ringbuf_discards_total` | gauge | — |
 | `goodman_sensor_watched_pids` | gauge | — |
 | `goodman_sensor_batches_total` | counter | `result` (ok/error) |
 
@@ -363,7 +369,7 @@ being shed under load — investigate before trusting completeness.
 | Command | Uses |
 |---|---|
 | `goodmanctl tail` | `GET /v1/stream` |
-| `goodmanctl alerts [-status S] [-json]` | `GET /v1/alerts` |
+| `goodmanctl alerts [-status S] [-limit N] [-offset N] [-json]` | `GET /v1/alerts` |
 | `goodmanctl ack <id>` | `POST /v1/alerts/{id}/ack` |
 | `goodmanctl fingerprints [-service S] [-package P] [-json]` | `GET /v1/fingerprints` |
 | `goodmanctl fingerprints export` | `GET /v1/fingerprints/export` |

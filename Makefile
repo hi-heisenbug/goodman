@@ -2,7 +2,8 @@
 SHELL := /bin/bash
 GO ?= go
 CLANG ?= clang
-ARCH ?= x86
+HOST_ARCH := $(shell uname -m)
+ARCH ?= $(if $(filter x86_64 amd64,$(HOST_ARCH)),x86,$(if $(filter aarch64 arm64,$(HOST_ARCH)),arm64,$(HOST_ARCH)))
 REGISTRY ?= goodman
 TAG ?= dev
 
@@ -50,6 +51,15 @@ $(UI_DIST)/index.html:
 	@[ -f $(UI_DIST)/index.html ] || printf '<!doctype html><title>Goodman</title><p>Run: make dashboard</p>' > $(UI_DIST)/index.html
 
 ## --- Go ---
+.PHONY: fmt
+fmt: ## Format all Go source files
+	gofmt -w $$(find . -name '*.go' -not -path './dashboard/node_modules/*')
+
+.PHONY: fmt-check
+fmt-check: ## Fail when any Go source file needs gofmt
+	@test -z "$$(gofmt -l $$(find . -name '*.go' -not -path './dashboard/node_modules/*'))" || \
+	  { echo "Go files need formatting (run: make fmt)"; gofmt -l $$(find . -name '*.go' -not -path './dashboard/node_modules/*'); exit 1; }
+
 .PHONY: build
 build: bpf $(UI_DIST)/index.html ## Build sensor, collector, goodmanctl into bin/
 	$(GO) build -o bin/sensor ./cmd/sensor
@@ -92,7 +102,7 @@ bench: ## Benchmark the collector ingest pipeline and canonicalization (no root)
 	go test -run='^$$' -bench=. -benchmem ./internal/fingerprint/ ./internal/attribute/
 
 .PHONY: demo
-demo: build ## Five-minute product wow: seeded alerts, reachability, live event-stream replay
+demo: build ## Five-minute product wow: seeded alerts, reachability, live Mini-Shai-Hulud replay
 	./bin/goodmanctl demo
 
 .PHONY: demo-check
@@ -119,4 +129,4 @@ kind-e2e: ## Create a kind cluster, install Goodman, run the in-cluster drift te
 
 .PHONY: clean
 clean: ## Remove build artifacts
-	rm -rf bin $(BPF_OBJ) $(LOADER_OBJ) goodman.db goodman.db-* dashboard/dist demo_build/*.db demo_build/*.db-shm demo_build/*.db-wal
+	rm -rf bin $(BPF_OBJ) $(LOADER_OBJ) goodman.db goodman.db-* goodman_demo.db goodman_demo.db-* dashboard/dist demo_build/*.db demo_build/*.db-shm demo_build/*.db-wal

@@ -54,8 +54,12 @@ There are two kinds of frame:
 
 ## Tier 1 — perf-map JIT resolution (what ships in v1)
 
-When Node runs with `--perf-basic-prof --interpreted-frames-native-stack`, V8
+When Node runs with `--perf-basic-prof-only-functions --interpreted-frames-native-stack`, V8
 continuously appends to `/tmp/perf-<pid>.map`. Each line is:
+
+The `only-functions` variant is deliberate: it preserves the function symbols
+Goodman needs without enabling the broader `--perf-basic-prof` mode that can
+disable code compaction and grow long-lived process memory.
 
 ```
 <hex_start_addr> <hex_size> <symbol>
@@ -110,6 +114,20 @@ perf-map path stays as a permanent fallback. See `plan.md` §5.3.
 work — see [`docs/research/tier2-attribution.md`](research/tier2-attribution.md).
 The NODE_OPTIONS webhook remains the shipping answer to zero-config objections.
 Do not start a production build until that doc's GO criteria are met.
+
+## Known blind spots
+
+- `io_uring` operations can bypass the syscall tracepoints Goodman currently
+  hooks, so workloads using io_uring for file or network I/O may have incomplete
+  behavior coverage.
+- User-stack attribution depends on frame pointers. Runtimes or native
+  extensions built with frame pointers omitted can produce an empty stack and
+  are reported as `<unknown>` rather than guessed.
+- Bundled or heavily minified JavaScript can resolve to the bundle owner rather
+  than the original transitive package when source paths are erased.
+
+Track the Coverage tab and `goodman_sensor_attributed_total{outcome="unknown"}`.
+Goodman treats rising unknowns as a trust signal, not as a package match.
 
 ## Python / PyPI — Tier 1 (perf trampoline)
 

@@ -17,13 +17,14 @@ make bench
 fingerprint aggregation, diff-engine evaluation against the high-risk rules,
 and persistence. It uses the SQLite backend (the pilot default) with WAL.
 
-Measured on an AMD Ryzen 5 5625U (12 threads), Go 1.23, SQLite backend:
+Measured on 2026-07-14 on an AMD Ryzen 5 5625U (12 threads), Go 1.26.4,
+SQLite backend:
 
 | Metric | Value |
 |---|---|
-| Throughput | ~16,000 events/sec (single collector) |
-| Per-event cost | ~62 µs/event |
-| Allocations | ~27 B and ~0.03 allocs per event (amortized over a 200-event batch) |
+| Throughput | ~11,446 events/sec (single collector) |
+| Per-event cost | ~87.4 µs/event |
+| Allocations | ~1.7 KiB and ~32 allocs/event (amortized from a 200-event batch) |
 
 This is a write-heavy shape: every batch re-touches 50 distinct fingerprints,
 so it is close to a worst case for the store. A single pilot collector on
@@ -43,7 +44,7 @@ aggregation):
 
 | Metric | Value |
 |---|---|
-| Canonicalization | ~330 ns/event, 2 allocs |
+| Canonicalization | ~435 ns/event, 66 B/event, 2 allocs |
 
 The dominant sensor cost in production is not this but **stack resolution**
 (walking `/proc/<pid>/maps` and the V8 perf map). That path needs a real kernel
@@ -57,7 +58,7 @@ in a unit benchmark. Guidance for a pilot:
   metrics below), so the sensor cannot stall a workload.
 
 Budget the sensor DaemonSet at the chart's default request (50m CPU / 128Mi)
-and cap (500m / 512Mi); raise the cap only if `goodman_sensor_ringbuf_drops`
+and cap (500m / 512Mi); raise the cap only if `goodman_sensor_ringbuf_drops_total`
 climbs under your real load.
 
 ## The metric that matters: attribution quality
@@ -84,7 +85,8 @@ Watch these to know whether you are seeing everything:
 
 | Metric | Meaning |
 |---|---|
-| `goodman_sensor_ringbuf_drops` | events the kernel dropped because the ring buffer was full |
+| `goodman_sensor_ringbuf_drops_total` | events the kernel dropped because the ring buffer was full |
+| `goodman_sensor_ringbuf_discards_total` | malformed or undersized ring-buffer records rejected in userspace |
 | `goodman_sensor_channel_drops_total` | events the sensor dropped because the send buffer was full |
 | `goodman_sensor_batches_total{result="error"}` | failed collector POSTs |
 

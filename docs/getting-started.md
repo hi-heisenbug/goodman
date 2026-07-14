@@ -69,7 +69,7 @@ diff engine, and API all work.
 
 For a no-root product walkthrough — the command used on every discovery call —
 start the collector with seeded alerts, a preloaded reachability report, and a
-live event-stream attack replay:
+live Mini-Shai-Hulud attack replay:
 
 ```bash
 make demo
@@ -80,8 +80,9 @@ Open **http://127.0.0.1:8844**. On first load:
 
 - **Alerts** already shows CRITICAL drifts with rule chips
 - **Reachability** shows **1,400 declared / 240 executed** (no lockfile upload)
-- ~12 seconds later, the 2018 event-stream / flatmap-stream attack appears live
-  as a new CRITICAL row (`secret-read`, `new-outbound-connect`)
+- ~12 seconds later, the 2026 Mini-Shai-Hulud behavior profile appears live as
+  a new CRITICAL row (`secret-read`, `cloud-metadata`,
+  `new-outbound-connect`, `new-exec`)
 
 The terminal prints a 60-second guided script. The collector keeps running until
 you press `Ctrl-C`. It uses a local SQLite database at
@@ -143,7 +144,7 @@ attribution needs (one flag, no code change), then point the sensor at it:
 # terminal 2 — the workload
 make workload                    # installs good-pkg@1.0.0 into test/workload
 cd test/workload
-node --perf-basic-prof --interpreted-frames-native-stack server.js
+node --perf-basic-prof-only-functions --interpreted-frames-native-stack server.js
 
 # terminal 3 — the sensor (root)
 sudo ./bin/sensor -collector http://127.0.0.1:8844

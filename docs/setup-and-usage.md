@@ -12,7 +12,7 @@ working. It is written for both humans and coding agents.
 | Build everything locally | `make build` | no | eBPF object, sensor, collector, and CLI compile. |
 | Backend correctness | `make smoke` | no | Collector/store/fingerprint/diff/API (+ enforce pipeline without kernel). |
 | Attack replay corpus | `make replay` | no | Real npm attack fixtures raise the expected CRITICAL alerts. |
-| Product dashboard demo | `make demo` | no | Seeded alerts, reachability, live event-stream replay. |
+| Product dashboard demo | `make demo` | no | Seeded alerts, reachability, live Mini-Shai-Hulud replay. |
 | Demo DoD check | `make demo-check` | no | Non-interactive verification of the five-minute wow. |
 | HA ingest smoke | `make ha-smoke` | Docker | Two collectors vs Postgres: fingerprint parity + alert dedup (skips without Docker). |
 | Real local eBPF demo | `sudo make e2e` | yes | Sensor captures real syscalls and attributes package drift. |
@@ -63,7 +63,7 @@ Open **http://127.0.0.1:8844**. Expected result:
 
 - CRITICAL alerts with rule chips already in the queue
 - Reachability tab shows **1,400 declared / 240 executed**
-- ~12s later, the event-stream / flatmap-stream attack appears live
+- ~12s later, the 2026 Mini-Shai-Hulud behavior replay appears live
 - no root is required for this path
 
 Backend regression without the UI:
@@ -96,7 +96,7 @@ What happens:
 - seeds multi-service fingerprints and CRITICAL drift alerts via `/v1/events`
 - persists a reachability snapshot (1,400 declared / 240 executed)
 - prints a 60-second guided script
-- after ~12s, replays the 2018 event-stream attack live
+- after ~12s, replays the 2026 Mini-Shai-Hulud behavior profile live
 - keeps the embedded React dashboard running until `Ctrl-C`
 
 If port `8844` is busy:
@@ -181,7 +181,7 @@ GOODMAN_DSN=goodman.db GOODMAN_LEARN_OBS=50 GOODMAN_LEARN_MIN_AGE=1s \
 # terminal 2: Node workload with Tier-1 attribution flags
 make workload
 cd test/workload
-node --perf-basic-prof --interpreted-frames-native-stack server.js
+node --perf-basic-prof-only-functions --interpreted-frames-native-stack server.js
 
 # terminal 3: sensor
 sudo ./bin/sensor -collector http://127.0.0.1:8844
@@ -239,7 +239,7 @@ This adds:
 ```yaml
 env:
   - name: NODE_OPTIONS
-    value: "--perf-basic-prof --interpreted-frames-native-stack"
+    value: "--perf-basic-prof-only-functions --interpreted-frames-native-stack"
 ```
 
 The env var changes pod templates, so Kubernetes will roll the selected
@@ -309,7 +309,7 @@ verified.
 - dashboard shows no data: confirm the collector is healthy and events were
   ingested with `curl http://127.0.0.1:8844/v1/healthz`.
 - Node events show `<unknown>`: start the workload with
-  `--perf-basic-prof --interpreted-frames-native-stack`.
+  `--perf-basic-prof-only-functions --interpreted-frames-native-stack`.
 - dashboard source changed but UI did not: run `make dashboard`; the collector
   serves `internal/api/ui/dist`, not `dashboard/src`.
 

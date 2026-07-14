@@ -17,8 +17,27 @@ Enforcement arms only when **all** of the following are true:
    `goodman.io/enforce=enabled` (sensor maps pod cgroups into
    `enforced_cgroups`).
 
+Enforcement currently requires a **single collector replica**. Detection and
+Postgres-backed ingestion support HA, but verdict compilation and the runtime
+enforcement revision are intentionally not advertised as HA-safe yet. The Helm
+chart rejects `enforce.enabled=true` with `collector.replicas>1` instead of
+allowing sensors to flap between divergent replica state.
+
 A `block` rule alone never denies anything — it compiles verdicts and sets
 `would_block` on alerts exactly like `warn`, plus kernel denies once armed.
+
+### Current scope limitations
+
+- Verdict maps are node-wide. Every cgroup explicitly placed in
+  `enforced_cgroups` receives the same compiled path/address/exec verdict set;
+  verdicts are not yet keyed by service or cgroup. Keep the enforced scope
+  narrow and do not assume one service's verdicts are isolated from another
+  enforced service on the same node.
+- File detection records the syscall path argument while `file_open`
+  enforcement checks the kernel-resolved `d_path`. Relative and placeholder
+  paths are rejected as uncompilable, but a symlink alias can still make an
+  observed absolute path differ from the resolved enforcement path. That case
+  fails open and is not a block guarantee.
 
 ## Fail-open matrix (summary)
 

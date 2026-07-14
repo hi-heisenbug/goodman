@@ -27,6 +27,7 @@ variables take precedence over built-in defaults.
 | `-retention` | `GOODMAN_RETENTION` | `0` | Prune resolved alerts older than this (`720h` = 30 days). `0` keeps them forever. Open/acknowledged alerts are never pruned. |
 | `-reachability-interval` | `GOODMAN_REACHABILITY_INTERVAL` | `0` | Recompute stored reachability reports on this cadence as fingerprints change (`0` = disabled). |
 | `-reachability-osv` | `GOODMAN_REACHABILITY_OSV` | `false` | Enrich scheduled reachability recomputes with OSV.dev (needs egress). |
+| `-osv-endpoint` | `GOODMAN_OSV_ENDPOINT` | public OSV.dev | Override the OSV querybatch endpoint for an internal proxy or air-gapped mirror; advisory-detail requests use the same base URL. |
 | `-digest-interval` | `GOODMAN_DIGEST_INTERVAL` | `0` | Emit a weekly digest to the webhook on this cadence (`168h` = weekly). `0` = disabled. Requires `-webhook-url`. Fires once at startup. |
 | `-digest-alert-budget` | `GOODMAN_DIGEST_ALERT_BUDGET` | `5` | Soft open-alert noise target quoted in the digest. |
 | `-ha-replicas` | `GOODMAN_HA_REPLICAS` | `1` | Expected collector replica count. When `>1`, Postgres is required and singleton background loops use advisory-lock leader election. Helm sets this from `collector.replicas`. |
@@ -50,10 +51,11 @@ GOODMAN_DSN='postgres://goodman:secret@db:5432/goodman?sslmode=require' ./bin/co
 
 **Authentication.** Production deployments should set both tokens; the Helm
 chart generates them automatically. Sensors authenticate with the ingest token;
-the dashboard, `goodmanctl`, and any API client use the API token. The SSE
-stream additionally accepts `?token=<api-token>` because `EventSource` cannot
-set headers. `/v1/healthz`, `/v1/readyz`, `/metrics`, and the static dashboard
-assets are never token-protected. When the dashboard receives a 401 it shows a
+the dashboard, `goodmanctl`, and any API client use the API token. Browser SSE
+clients mirror that token into a SameSite cookie scoped to `/v1/stream` because
+`EventSource` cannot set headers; query-string tokens are rejected. `/metrics`
+also requires the API token. Only `/v1/healthz`, `/v1/readyz`, and the static
+dashboard assets remain public. When the dashboard receives a 401 it shows a
 token prompt and stores the entered token in the browser's localStorage.
 
 **Alert notifications.** With `GOODMAN_WEBHOOK_URL` set, every alert at or above
@@ -208,6 +210,7 @@ in [`deploy/helm/goodman/values.yaml`](../deploy/helm/goodman/values.yaml).
 | `publicUrl` | `""` | Dashboard base URL for Slack deep links. |
 | `reachability.interval` | `1h` | Recompute stored reachability reports (`""` / `0` disables). |
 | `reachability.osv` | `false` | Enrich scheduled recomputes with OSV.dev. |
+| `reachability.osvEndpoint` | `""` | Optional internal/proxied OSV querybatch endpoint. |
 | `retention` | `""` | Prune resolved alerts older than this Go duration (e.g. `720h`). |
 | `webhook.enabled` | `false` | Enable the NODE_OPTIONS mutating admission webhook (injects the perf-map flags into pods in namespaces labeled `goodman.io/inject=enabled`). |
 | `webhook.port` | `8443` | Port the collector serves the webhook on. |

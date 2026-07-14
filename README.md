@@ -83,7 +83,9 @@ make demo
 ```
 
 Open **http://127.0.0.1:8844**. In under a minute you get seeded CRITICAL
-alerts, reachability stats, and a live event-stream attack replay.
+alerts, reachability stats, and a live 2026 Mini-Shai-Hulud behavior replay:
+credential access, cloud metadata, outbound C2, and a child-process exec
+attributed to the package that caused it.
 
 ```bash
 make demo-check   # CI / DoD without a browser

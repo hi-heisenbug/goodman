@@ -157,7 +157,7 @@ The types that flow through the system live in `internal/model`:
 
 Goodman v1 **detects and alerts**; it does not block or kill processes
 (enforcement is a v2 concern). Attribution uses **Tier 1** (perf-map JIT
-resolution), which needs the target Node process started with `--perf-basic-prof`
+resolution), which needs the target Node process started with `--perf-basic-prof-only-functions`
 — a launch flag, not a code change. **Tier 2** (in-kernel V8 stack unwinding)
 removes even that flag and is the future zero-config upgrade; the perf-map path
 remains a permanent fallback. See [attribution.md](attribution.md) for both tiers.

@@ -36,6 +36,9 @@ jobs:
       - name: Compile eBPF object (make bpf)
         run: make bpf
 
+      - name: Check Go formatting
+        run: make fmt-check
+
       - name: Go vet
         run: make vet
 

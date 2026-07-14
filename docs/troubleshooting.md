@@ -56,7 +56,7 @@ on the host (or a privileged DaemonSet with `hostPID`).
 **Events show `<unknown>` or `<app>` instead of a package**
 This is attribution falling back honestly, not a crash. Common causes:
 - The Node process wasn't started with
-  `--perf-basic-prof --interpreted-frames-native-stack`, so there's no
+  `--perf-basic-prof-only-functions --interpreted-frames-native-stack`, so there's no
   `/tmp/perf-<pid>.map` for JIT frames. This is the **most common** cause on Node.
 - Python: missing `PYTHONPERFSUPPORT=1` (or CPython < 3.12) — no `py::` entries
   in the perf map; attribution falls back to `<app>` / `<unknown>`.

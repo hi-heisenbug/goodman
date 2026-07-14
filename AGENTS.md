@@ -81,7 +81,7 @@ Bad updates:
 ```
 goodman/
 ├── bpf/                      # kernel side (eBPF C, CO-RE)
-│   ├── goodman.bpf.c         # the eBPF program: 3 tracepoints + user-stack capture
+│   ├── goodman.bpf.c         # syscall + fork/exit tracepoints, user-stack capture, optional LSM
 │   ├── goodman.h             # struct event — MUST match internal/model RawEvent byte-for-byte
 │   ├── vmlinux.h             # generated from kernel BTF (make vmlinux); do not hand-edit
 │   └── include/bpf/          # vendored libbpf headers (v1.5.0)
@@ -151,7 +151,7 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make smoke` | Backend end-to-end via synthetic events → asserts one CRITICAL alert | **no** |
 | `make replay` | Replay real npm attacks (event-stream, eslint-scope, ua-parser-js, node-ipc); assert each is caught | **no** |
 | `make bench` | Benchmark the collector ingest pipeline and canonicalization | **no** |
-| `make demo` | Five-minute product wow: seeded alerts, reachability 1,400/240, live event-stream replay | **no** |
+| `make demo` | Five-minute product wow: seeded alerts, reachability 1,400/240, live Mini-Shai-Hulud replay | **no** |
 | `make demo-check` | Non-interactive demo DoD check (CI) | **no** |
 | `make e2e` | **Real eBPF** drift replay: sensor + Node workload → alert | **yes** |
 | `make docker` | Build both container images | no (docker daemon) |
@@ -190,7 +190,7 @@ environment:
   with synthetic `Attributed` events. Use it as your fast feedback loop.
 - The kernel-side artifact is still checked without root by
   `internal/loader/loader_test.go`, which parses the embedded `.o` and asserts
-  the three tracepoint programs and the ringbuf/hash/percpu maps exist and are
+  the syscall plus fork/exit tracepoint programs and the ringbuf/hash/percpu maps exist and are
   typed correctly.
 - The attribution logic is unit-tested against a **simulated `/proc`** tree in
   `internal/attribute/attribute_test.go` — you can change and verify attribution
@@ -257,7 +257,10 @@ prefix tries. New `EventType` deny values (`EVENT_DENY_*`) mirror in
 existing `type` field, not layout changes (`types_test.go` stays unedited).
 Denied events skip fingerprint learning; ring-buffer reader stays non-blocking.
 Live proof requires human `sudo make e2e` on an LSM kernel — see
-`docs/enforcement.md`.
+`docs/enforcement.md`. Verdict maps are currently node-wide across all
+explicitly enforced cgroups, and symlink aliases can make detection paths differ
+from the kernel-resolved enforcement path; both limitations fail open and are
+documented there.
 
 **Add a high-risk rule** — edit `deploy/rules.example.json` (or `DefaultRules`
 in `internal/diff/diff.go`). Patterns are case-insensitive regexes matched
@@ -267,8 +270,9 @@ against the canonical behavior string (`READ …`, `CONNECT …`, `EXEC …`).
 implement the handler, document it in [`docs/api.md`](docs/api.md), and add a
 `goodmanctl` subcommand if it's operator-facing. Decide its auth class
 explicitly: ingest endpoints use `requireToken(s.Auth.IngestToken, …)`, operator
-endpoints use `requireToken(s.Auth.APIToken, …)`, and only probes/metrics/static
-UI stay open. Add matching cases to `internal/api/auth_test.go`.
+endpoints use `requireToken(s.Auth.APIToken, …)`, and only probes/static UI stay
+open (`/metrics` uses the API token). Add matching cases to
+`internal/api/auth_test.go`.
 
 **Change attribution** — work in `internal/attribute/`; extend the simulated
 `/proc` fixtures in `attribute_test.go` to cover the new case. Do not weaken the
@@ -343,6 +347,9 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
   fingerprint, diff, API, and alert behavior without root.
 - Do not claim live eBPF coverage if `sudo make e2e` did not run. Say clearly
   when only the no-root test path was verified.
+- Keep enforcement programs in their separate load/attach path. An LSM verifier
+  or attach failure must close only LSM resources and leave syscall/fork
+  detection attached.
 - Do not leave temporary servers, collectors, sensors, Chrome instances, or test
   databases running after local verification.
 - Do not commit stale Vite hashed assets. If `dashboard/dist` changes, old hashed

