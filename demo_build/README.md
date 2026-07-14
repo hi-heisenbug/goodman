@@ -4,21 +4,19 @@ This directory contains the Goodman product demo assets.
 
 Final outputs:
 
-- `goodman_demo.mp4` — final 720p product demo, 54 seconds, 24 fps.
+- `goodman_demo.mp4` — final 720p Mini-Shai-Hulud product demo, 53.5 seconds,
+  24 fps.
 
 Reusable inputs:
 
-- `backdoor_preview.html` — light Goodman-styled malicious-update evidence scene.
-- `inject_demo.py` — injects realistic baseline and drift data (used by the
-  video capture path; the interactive `make demo` / `goodmanctl demo` path
-  seeds via `internal/demo` instead).
-- `capture_screens.py` — starts the collector, injects data, captures screenshots, and stops the collector.
+- `capture_screens.py` — starts the real `goodmanctl demo` Mini-Shai-Hulud
+  flow, captures bounded headless Chromium screenshots, and stops all local
+  processes.
 - `assemble.py` — assembles proof screenshots and designed story scenes into
   the final video.
 - `screenshots/` — sequential live proof captures used by the assembler:
-  `01_malicious_update.png`, `02_alerts_open.png`,
-  `03_fingerprints_all.png`, `04_alerts_triaged.png`, and
-  `05_fingerprints_learning.png`.
+  seeded alerts, the live Mini-Shai-Hulud alert, Reachability, Coverage, and
+  Fingerprints.
 
 ## Interactive five-minute wow
 

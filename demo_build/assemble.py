@@ -181,8 +181,8 @@ def scene_problem():
     )
 
     cards = [
-        ("What changed?", "jsonwebtoken 9.0.0 -> 9.0.1", "Package update", AMBER),
-        ("What happened?", "EXEC /bin/sh and READ ~/.aws", "Runtime behavior", RED),
+        ("What changed?", "mini-shai-hulud-loader 1.0.0 -> 1.0.1", "Package update", AMBER),
+        ("What happened?", "Credential read + IMDS + C2 + exec", "Runtime behavior", RED),
         ("Who did it?", "Package attribution, not just PID", "Goodman's answer", TURQ),
     ]
     x = 960
@@ -362,52 +362,52 @@ def main():
     FRAMES.mkdir(parents=True, exist_ok=True)
 
     print("Loading proof screenshots...")
-    malicious = load_screen("01_malicious_update")
-    alerts_open = load_screen("02_alerts_open")
-    fingerprints_all = load_screen("03_fingerprints_all")
-    alerts_triaged = load_screen("04_alerts_triaged")
-    fingerprints_learning = load_screen("05_fingerprints_learning")
+    alerts_seeded = load_screen("01_alerts_seeded")
+    mini_shai = load_screen("02_mini_shai_hulud")
+    reachability = load_screen("03_reachability")
+    coverage = load_screen("04_coverage")
+    fingerprints = load_screen("05_fingerprints")
 
     scenes = [
         ("opener", lambda: write_still(scene_opener(), 4.5)),
         ("problem", lambda: write_still(scene_problem(), 5.5)),
         (
-            "malicious update",
+            "seeded alert queue",
             lambda: write_still(
                 proof_scene(
-                    malicious,
+                    alerts_seeded,
                     "Step 1",
-                    "A dependency update introduces new runtime behavior",
-                    "The suspicious code path is package-scoped before the operator ever starts triage.",
-                    "node_modules/jsonwebtoken/index.js",
+                    "Start with real package-attributed drift",
+                    "The demo opens on an operational queue with service, package, version, and behavior evidence already populated.",
+                    "dashboard: seeded alerts",
                     AMBER,
                 ),
-                6.5,
+                6.0,
             ),
         ),
         (
-            "open alerts",
+            "Mini-Shai-Hulud alert",
             lambda: write_still(
                 proof_scene(
-                    alerts_open,
+                    mini_shai,
                     "Step 2",
-                    "Goodman shows the live dependency drift queue",
-                    "Operators see severity, affected service, package version shift, and risky new behavior in one review surface.",
-                    "dashboard: open alerts",
+                    "Mini-Shai-Hulud appears live as one package",
+                    "Credential access, cloud metadata, C2, and exec drift land in one attributed CRITICAL alert.",
+                    "dashboard: Mini-Shai-Hulud",
                     RED,
                 ),
                 7.0,
             ),
         ),
         (
-            "fingerprint proof",
+            "reachability proof",
             lambda: write_still(
                 proof_scene(
-                    fingerprints_all,
+                    reachability,
                     "Step 3",
-                    "Goodman learns package behavior baselines",
-                    "The fingerprint library shows what each package normally reads, executes, and connects to.",
-                    "dashboard: fingerprint explorer",
+                    "Prioritize what shipped and actually executed",
+                    "The same runtime evidence reduces 1,400 declared dependencies to 240 executed packages and highlights reachable advisories.",
+                    "dashboard: reachability",
                     TURQ,
                 ),
                 7.0,
@@ -415,28 +415,28 @@ def main():
         ),
         ("attribution pipeline", lambda: write_still(scene_pipeline(), 5.0)),
         (
-            "triage proof",
+            "coverage proof",
             lambda: write_still(
                 proof_scene(
-                    alerts_triaged,
+                    coverage,
                     "Step 4",
-                    "Goodman turns drift into an operator action",
-                    "After real API updates, the dashboard reflects acknowledged and resolved work without leaving the alert workflow.",
-                    "dashboard: triage queue",
+                    "Know whether the signal is trustworthy",
+                    "Coverage exposes sensor health, attribution quality, injection gaps, and the alert budget before operators enable blocking.",
+                    "dashboard: coverage and trust",
                     RED,
                 ),
                 7.0,
             ),
         ),
         (
-            "learning fingerprints",
+            "fingerprint library",
             lambda: write_still(
                 proof_scene(
-                    fingerprints_learning,
+                    fingerprints,
                     "Step 5",
-                    "Separate learning packages from stable baselines",
-                    "The same product surface exposes which dependencies are trusted and which still need runtime observations.",
-                    "dashboard: learning fingerprints",
+                    "Inspect the learned behavior library",
+                    "Promoted package baselines show the reads, connects, and execs Goodman uses to explain future drift.",
+                    "dashboard: fingerprint library",
                     LIME,
                 ),
                 6.5,
