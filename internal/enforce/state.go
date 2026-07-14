@@ -10,6 +10,8 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/store"
 )
 
+const maxTrackedBehaviors = 1024
+
 // Manager holds runtime enforcement state and compiled verdicts.
 type Manager struct {
 	mu           sync.RWMutex
@@ -34,7 +36,8 @@ func NewManager(st *store.Store, masterGate bool) *Manager {
 		store:        st,
 	}
 	if st != nil {
-		ctx := context.Background()
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
 		en, rev, _ := st.GetEnforceState(ctx)
 		m.enabled = en && masterGate
 		m.rev = rev
@@ -44,9 +47,10 @@ func NewManager(st *store.Store, masterGate bool) *Manager {
 
 func (m *Manager) SetRules(rules []diff.Rule) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.rules = rules
-	m.recomputeLocked()
+	rev := m.recomputeLocked()
+	m.mu.Unlock()
+	m.persistRev(rev)
 }
 
 func (m *Manager) MasterGate() bool { return m.masterGate }
@@ -56,18 +60,75 @@ func (m *Manager) RecordBehavior(behavior string) {
 		return
 	}
 	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.behaviors[behavior] {
+	if m.behaviors[behavior] || len(m.behaviors) >= maxTrackedBehaviors || !m.matchesBlockRuleLocked(behavior) {
+		m.mu.Unlock()
 		return
 	}
 	m.behaviors[behavior] = true
-	m.recomputeLocked()
+	m.verdicts = mergeVerdictSets(m.verdicts, CompileVerdicts(m.rules, []string{behavior}))
+	m.rev++
+	rev := m.rev
+	m.mu.Unlock()
+	m.persistRev(rev)
 }
 
-func (m *Manager) recomputeLocked() {
+func mergeVerdictSets(current, added VerdictSet) VerdictSet {
+	open := make(map[string]bool, len(current.Open))
+	for _, path := range current.Open {
+		open[path] = true
+	}
+	for _, path := range added.Open {
+		if !open[path] {
+			open[path] = true
+			current.Open = append(current.Open, path)
+		}
+	}
+	connect := make(map[ConnectVerdict]bool, len(current.Connect))
+	for _, addr := range current.Connect {
+		connect[addr] = true
+	}
+	for _, addr := range added.Connect {
+		if !connect[addr] {
+			connect[addr] = true
+			current.Connect = append(current.Connect, addr)
+		}
+	}
+	exec := make(map[string]bool, len(current.Exec))
+	for _, path := range current.Exec {
+		exec[path] = true
+	}
+	for _, path := range added.Exec {
+		if !exec[path] {
+			exec[path] = true
+			current.Exec = append(current.Exec, path)
+		}
+	}
+	skipped := make(map[string]bool, len(current.Skipped))
+	for _, verdict := range current.Skipped {
+		skipped[verdict.Behavior] = true
+	}
+	for _, verdict := range added.Skipped {
+		if !skipped[verdict.Behavior] {
+			skipped[verdict.Behavior] = true
+			current.Skipped = append(current.Skipped, verdict)
+		}
+	}
+	return current
+}
+
+func (m *Manager) matchesBlockRuleLocked(behavior string) bool {
+	for i := range m.rules {
+		if m.rules[i].Action == diff.ActionBlock && m.rules[i].Matches(behavior) {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *Manager) recomputeLocked() int {
 	if !m.masterGate {
 		m.verdicts = VerdictSet{}
-		return
+		return m.rev
 	}
 	beh := make([]string, 0, len(m.behaviors))
 	for b := range m.behaviors {
@@ -75,24 +136,32 @@ func (m *Manager) recomputeLocked() {
 	}
 	m.verdicts = CompileVerdicts(m.rules, beh)
 	m.rev++
+	return m.rev
+}
+
+func (m *Manager) persistRev(rev int) {
 	if m.store != nil {
-		_ = m.store.SetEnforceRev(context.Background(), m.rev)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		_ = m.store.SetEnforceRev(ctx, rev)
 	}
 }
 
 func (m *Manager) SetEnabled(ctx context.Context, on bool) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
 	if on && !m.masterGate {
 		return ErrMasterGateOff
 	}
-	m.enabled = on && m.masterGate
+	enabled := on && m.masterGate
 	if m.store != nil {
-		if err := m.store.SetEnforceEnabled(ctx, m.enabled); err != nil {
+		if err := m.store.SetEnforceEnabled(ctx, enabled); err != nil {
 			return err
 		}
 	}
-	m.recomputeLocked()
+	m.mu.Lock()
+	m.enabled = enabled
+	rev := m.recomputeLocked()
+	m.mu.Unlock()
+	m.persistRev(rev)
 	return nil
 }
 

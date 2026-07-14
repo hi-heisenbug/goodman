@@ -68,6 +68,7 @@ publicUrl: ""
 reachability:
   interval: 1h              # 0/empty disables; requires a persisted lockfile
   osv: false                # enrich scheduled recomputes with OSV.dev (needs egress)
+  osvEndpoint: ""           # optional internal/proxied /v1/querybatch endpoint
 
 # Prune resolved alerts older than this Go duration (e.g. 720h = 30 days).
 # Empty keeps resolved alerts forever. Open/acknowledged alerts are never pruned.
@@ -125,6 +126,7 @@ rbac:
 # CONFIG_BPF_LSM=y and "bpf" in the active lsm= list, and cgroup v2.
 # Denies apply only inside namespaces labeled goodman.io/enforce=enabled,
 # only for behaviors matching rules with action: "block", and only while the
-# sensor heartbeat is live. Everything fails open.
+# sensor heartbeat is live. Everything fails open. Enforcement currently
+# requires collector.replicas=1; the chart rejects HA + enforcement together.
 enforce:
   enabled: false

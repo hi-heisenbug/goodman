@@ -55,7 +55,8 @@ func TestAuthRejectsAndAccepts(t *testing.T) {
 		{"ack no token", http.MethodPost, "/v1/alerts/x/ack", "", "", http.StatusUnauthorized},
 		{"healthz open", http.MethodGet, "/v1/healthz", "", "", http.StatusOK},
 		{"readyz open", http.MethodGet, "/v1/readyz", "", "", http.StatusOK},
-		{"metrics open", http.MethodGet, "/metrics", "", "", http.StatusOK},
+		{"metrics no token", http.MethodGet, "/metrics", "", "", http.StatusUnauthorized},
+		{"metrics api token", http.MethodGet, "/metrics", "Bearer api-secret", "", http.StatusOK},
 		{"enforce state no token", http.MethodGet, "/v1/enforce/state", "", "", http.StatusUnauthorized},
 		{"enforce state ingest token", http.MethodGet, "/v1/enforce/state", "Bearer ingest-secret", "", http.StatusOK},
 		{"enforce status no token", http.MethodGet, "/v1/enforce", "", "", http.StatusUnauthorized},
@@ -82,24 +83,26 @@ func TestAuthRejectsAndAccepts(t *testing.T) {
 	}
 }
 
-// The SSE stream must accept ?token= because EventSource cannot set headers.
-func TestStreamQueryToken(t *testing.T) {
+// The SSE stream uses a path-scoped cookie because EventSource cannot set
+// headers; query-string tokens are rejected so proxies do not log them.
+func TestStreamCookieToken(t *testing.T) {
 	router := newAuthedServer(t).Router(nil)
 
-	req := httptest.NewRequest(http.MethodGet, "/v1/stream?token=wrong", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/stream?token=api-secret", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("wrong query token = %d, want 401", rec.Code)
+		t.Fatalf("query token = %d, want 401", rec.Code)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	req = httptest.NewRequest(http.MethodGet, "/v1/stream?token=api-secret", nil).WithContext(ctx)
+	req = httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx)
+	req.AddCookie(&http.Cookie{Name: streamTokenCookie, Value: "api-secret"})
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, req) // returns when ctx times out
 	if rec.Code != http.StatusOK {
-		t.Fatalf("right query token = %d, want 200", rec.Code)
+		t.Fatalf("right cookie token = %d, want 200", rec.Code)
 	}
 }
 

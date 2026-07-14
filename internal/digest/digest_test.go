@@ -44,10 +44,11 @@ func TestBuildDigestWithDelta(t *testing.T) {
 			{Name: "b", DeclaredVersion: "1", Executed: true, Vulns: []report.Vulnerability{{ID: "GHSA-1"}}},
 		},
 	})
-	if err := st.SaveReport(ctx, "", string(prev), false, 100); err != nil {
+	previousAt := uint64(time.Now().Add(-8 * 24 * time.Hour).UnixNano())
+	if err := st.SaveReport(ctx, "", string(prev), false, previousAt); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.SaveReport(ctx, "", string(cur), false, 200); err != nil {
+	if err := st.SaveReport(ctx, "", string(cur), false, uint64(time.Now().UnixNano())); err != nil {
 		t.Fatal(err)
 	}
 

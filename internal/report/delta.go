@@ -2,8 +2,8 @@ package report
 
 import "sort"
 
-// Delta is the week-over-week (or last-snapshot) change between two
-// reachability reports. Surfaced on GET /v1/report and in the weekly digest.
+// Delta is the week-over-week change between two reachability reports.
+// Surfaced on GET /v1/report and in the weekly digest.
 type Delta struct {
 	Executed           int      `json:"executed"`
 	Declared           int      `json:"declared"`

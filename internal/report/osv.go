@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -157,8 +159,11 @@ func (c *OSVClient) resolveAll(ctx context.Context, endpoint string, ids map[str
 // resolve fetches advisory detail; on any error it degrades to just the ID so
 // the report still lists the vulnerability.
 func (c *OSVClient) resolve(ctx context.Context, batchEndpoint, id string) Vulnerability {
-	base := "https://api.osv.dev/v1/vulns/"
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+id, nil)
+	detailURL, err := osvDetailURL(batchEndpoint, id)
+	if err != nil {
+		return Vulnerability{ID: id, Severity: "UNKNOWN"}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, detailURL, nil)
 	if err != nil {
 		return Vulnerability{ID: id, Severity: "UNKNOWN"}
 	}
@@ -184,4 +189,17 @@ func (c *OSVClient) resolve(ctx context.Context, batchEndpoint, id string) Vulne
 		sev = "UNKNOWN"
 	}
 	return Vulnerability{ID: id, Summary: v.Summary, Severity: sev}
+}
+
+func osvDetailURL(batchEndpoint, id string) (string, error) {
+	u, err := url.Parse(batchEndpoint)
+	if err != nil {
+		return "", err
+	}
+	basePath := strings.TrimSuffix(u.Path, "/")
+	basePath = strings.TrimSuffix(basePath, "/querybatch")
+	u.Path = strings.TrimSuffix(basePath, "/") + "/vulns/" + url.PathEscape(id)
+	u.RawQuery = ""
+	u.Fragment = ""
+	return u.String(), nil
 }

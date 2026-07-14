@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -30,7 +31,8 @@ const usage = `goodmanctl — Goodman dev CLI
 
 Usage:
   goodmanctl tail          [-collector URL]                stream live events + alerts
-  goodmanctl alerts        [-collector URL] [-status S]    list alerts
+  goodmanctl alerts        [-collector URL] [-status S] [-limit N] [-offset N]
+                                                            list alert pages
   goodmanctl ack ID        [-collector URL]                acknowledge an alert
   goodmanctl resolve ID    [-collector URL]                resolve an alert
   goodmanctl fingerprints  [-collector URL] [-service S] [-package P]
@@ -130,12 +132,53 @@ func cmdTail(args []string) {
 	token := tokenFlag(fs)
 	fs.Parse(args)
 
-	resp := doRequest(http.MethodGet, *collector+"/v1/stream", *token)
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Fatalf("collector returned %s", resp.Status)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	delay := time.Second
+	for {
+		err := tailStream(ctx, *collector, *token)
+		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, errUnauthorized) {
+			log.Fatal("collector returned 401 unauthorized: set GOODMAN_API_TOKEN or pass -token")
+		}
+		log.Printf("stream disconnected (%v); reconnecting in %s", err, delay)
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return
+		case <-timer.C:
+		}
+		if delay < 30*time.Second {
+			delay *= 2
+		}
 	}
-	log.Printf("connected to %s — streaming (Ctrl-C to stop)", *collector)
+}
+
+var errUnauthorized = errors.New("unauthorized")
+
+func tailStream(ctx context.Context, collector, token string) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, collector+"/v1/stream", nil)
+	if err != nil {
+		return err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnauthorized {
+		return errUnauthorized
+	}
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("collector returned %s", resp.Status)
+	}
+	log.Printf("connected to %s — streaming (Ctrl-C to stop)", collector)
 
 	sc := bufio.NewScanner(resp.Body)
 	sc.Buffer(make([]byte, 64*1024), 16*1024*1024)
@@ -175,6 +218,10 @@ func cmdTail(args []string) {
 			}
 		}
 	}
+	if err := sc.Err(); err != nil {
+		return err
+	}
+	return io.EOF
 }
 
 func cmdAlerts(args []string) {
@@ -182,15 +229,24 @@ func cmdAlerts(args []string) {
 	collector := collectorFlag(fs)
 	token := tokenFlag(fs)
 	status := fs.String("status", "", "filter by status (open|acknowledged|resolved)")
+	limit := fs.Int("limit", 100, "alerts per page (1-500)")
+	offset := fs.Int("offset", 0, "number of newest alerts to skip")
 	asJSON := fs.Bool("json", false, "raw JSON output")
 	fs.Parse(args)
 
-	u := *collector + "/v1/alerts"
-	if *status != "" {
-		u += "?status=" + url.QueryEscape(*status)
+	u, err := url.Parse(*collector + "/v1/alerts")
+	if err != nil {
+		log.Fatal(err)
 	}
+	q := u.Query()
+	if *status != "" {
+		q.Set("status", *status)
+	}
+	q.Set("limit", fmt.Sprint(*limit))
+	q.Set("offset", fmt.Sprint(*offset))
+	u.RawQuery = q.Encode()
 	var alerts []model.Alert
-	getJSON(u, *token, &alerts)
+	getJSON(u.String(), *token, &alerts)
 	if *asJSON {
 		json.NewEncoder(os.Stdout).Encode(alerts)
 		return
@@ -392,14 +448,14 @@ func cmdReport(args []string) {
 }
 
 // cmdDemo starts a local collector with seeded alerts, a preloaded
-// reachability report (1,400 / 240), and a live event-stream attack replay.
+// reachability report (1,400 / 240), and a live Mini-Shai-Hulud attack replay.
 func cmdDemo(args []string) {
 	fs := flag.NewFlagSet("demo", flag.ExitOnError)
 	host := fs.String("host", envOr("GOODMAN_DEMO_HOST", "127.0.0.1"), "listen host")
 	port := fs.String("port", envOr("GOODMAN_DEMO_PORT", "8844"), "listen port")
 	db := fs.String("db", envOr("GOODMAN_DEMO_DB", "demo_build/goodman_demo.db"), "sqlite path")
 	bin := fs.String("collector-bin", envOr("GOODMAN_COLLECTOR_BIN", "bin/collector"), "path to collector binary")
-	delay := fs.Duration("attack-delay", 12*time.Second, "wait before replaying the event-stream attack")
+	delay := fs.Duration("attack-delay", 12*time.Second, "wait before replaying the Mini-Shai-Hulud attack")
 	check := fs.Bool("check", false, "seed, verify reachability + attack, then exit (CI)")
 	fs.Parse(args)
 

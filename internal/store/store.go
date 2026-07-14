@@ -10,6 +10,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"strings"
 	"time"
 
@@ -39,7 +40,11 @@ func Open(dsn string) (*Store, error) {
 	}
 	if dialect == "sqlite" {
 		// Single writer + busy timeout: SQLite is the dev harness, keep it robust.
-		connStr += "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
+		separator := "?"
+		if strings.Contains(connStr, "?") {
+			separator = "&"
+		}
+		connStr += separator + "_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 	}
 	db, err := sql.Open(driver, connStr)
 	if err != nil {
@@ -120,8 +125,8 @@ func (s *Store) ListLockfiles(ctx context.Context) ([]StoredLockfile, error) {
 	return out, rows.Err()
 }
 
-// StoredReachability is one persisted reachability snapshot, plus the
-// immediately previous snapshot used for week-over-week deltas.
+// StoredReachability is one persisted reachability snapshot plus the newest
+// historical snapshot at least a week older, used for week-over-week deltas.
 type StoredReachability struct {
 	Report             string
 	OSV                bool
@@ -130,20 +135,42 @@ type StoredReachability struct {
 	PreviousComputedAt uint64
 }
 
-// SaveReport stores the latest computed reachability report for a service,
-// shifting the prior snapshot into previous_* so the API can return deltas.
+const reachabilityComparisonWindow = 7 * 24 * time.Hour
+
+// SaveReport stores the latest computed reachability report and an append-only
+// history point. GetReport selects the newest point at least seven days old so
+// frequent refreshes do not turn a week-over-week delta into an hourly delta.
 func (s *Store) SaveReport(ctx context.Context, service, reportJSON string, osv bool, computedAt uint64) error {
-	_, err := s.db.ExecContext(ctx, `
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback() //nolint:errcheck
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO reachability_report_history (service, report, osv, computed_at)
+		VALUES ($1,$2,$3,$4)
+		ON CONFLICT (service, computed_at) DO UPDATE SET report=EXCLUDED.report, osv=EXCLUDED.osv`,
+		service, reportJSON, osv, computedAt); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO reachability_reports (service, report, osv, computed_at, previous_report, previous_computed_at)
 		VALUES ($1,$2,$3,$4,'',0)
 		ON CONFLICT (service) DO UPDATE SET
-			previous_report=reachability_reports.report,
-			previous_computed_at=reachability_reports.computed_at,
 			report=EXCLUDED.report,
 			osv=EXCLUDED.osv,
 			computed_at=EXCLUDED.computed_at`,
-		service, reportJSON, osv, computedAt)
-	return err
+		service, reportJSON, osv, computedAt); err != nil {
+		return err
+	}
+	if computedAt > uint64((30 * 24 * time.Hour).Nanoseconds()) {
+		cutoff := computedAt - uint64((30 * 24 * time.Hour).Nanoseconds())
+		if _, err := tx.ExecContext(ctx,
+			`DELETE FROM reachability_report_history WHERE service=$1 AND computed_at < $2`, service, cutoff); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // GetReport returns the stored report snapshot for a service. found is false
@@ -160,6 +187,22 @@ func (s *Store) GetReport(ctx context.Context, service string) (StoredReachabili
 	if err != nil {
 		return StoredReachability{}, false, err
 	}
+	windowNs := uint64(reachabilityComparisonWindow.Nanoseconds())
+	if out.ComputedAt >= windowNs {
+		threshold := out.ComputedAt - windowNs
+		err = s.db.QueryRowContext(ctx, `
+			SELECT report, computed_at FROM reachability_report_history
+			WHERE service=$1 AND computed_at <= $2
+			ORDER BY computed_at DESC LIMIT 1`, service, threshold).
+			Scan(&out.PreviousReport, &out.PreviousComputedAt)
+		if err != nil && err != sql.ErrNoRows {
+			return StoredReachability{}, false, err
+		}
+		if err == sql.ErrNoRows {
+			out.PreviousReport = ""
+			out.PreviousComputedAt = 0
+		}
+	}
 	return out, true, nil
 }
 
@@ -167,7 +210,21 @@ func (s *Store) GetReport(ctx context.Context, service string) (StoredReachabili
 // recorded in schema_migrations so non-idempotent statements (ALTER TABLE on
 // SQLite) run exactly once per database.
 func (s *Store) migrate(ctx context.Context) error {
-	if _, err := s.db.ExecContext(ctx,
+	conn, err := s.db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close() //nolint:errcheck
+	if s.dialect == "postgres" {
+		const migrationLock int64 = 0x474f4f444d414e
+		if _, err := conn.ExecContext(ctx, `SELECT pg_advisory_lock($1)`, migrationLock); err != nil {
+			return err
+		}
+		defer func() {
+			_, _ = conn.ExecContext(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, migrationLock)
+		}()
+	}
+	if _, err := conn.ExecContext(ctx,
 		`CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)`); err != nil {
 		return err
 	}
@@ -180,27 +237,37 @@ func (s *Store) migrate(ctx context.Context) error {
 		if !strings.HasSuffix(e.Name(), suffix) {
 			continue
 		}
-		var applied int
-		err := s.db.QueryRowContext(ctx,
-			`SELECT COUNT(*) FROM schema_migrations WHERE name=$1`, e.Name()).Scan(&applied)
+		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return err
 		}
+		var applied int
+		err = tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM schema_migrations WHERE name=$1`, e.Name()).Scan(&applied)
+		if err != nil {
+			tx.Rollback() //nolint:errcheck
+			return err
+		}
 		if applied > 0 {
+			tx.Rollback() //nolint:errcheck
 			continue
 		}
 		sqlText, err := migrations.ReadFile("migrations/" + e.Name())
 		if err != nil {
+			tx.Rollback() //nolint:errcheck
 			return err
 		}
-		if _, err := s.db.ExecContext(ctx, string(sqlText)); err != nil {
+		if _, err := tx.ExecContext(ctx, string(sqlText)); err != nil {
+			tx.Rollback() //nolint:errcheck
 			return fmt.Errorf("%s: %w", e.Name(), err)
 		}
-		// ON CONFLICT DO NOTHING so concurrently-starting replicas do not
-		// crash on a duplicate-key race (valid in both Postgres and SQLite).
-		if _, err := s.db.ExecContext(ctx,
+		if _, err := tx.ExecContext(ctx,
 			`INSERT INTO schema_migrations (name, applied_at) VALUES ($1,$2) ON CONFLICT (name) DO NOTHING`,
 			e.Name(), time.Now().UTC().Format(time.RFC3339)); err != nil {
+			tx.Rollback() //nolint:errcheck
+			return err
+		}
+		if err := tx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -236,6 +303,66 @@ func (s *Store) GetFingerprint(ctx context.Context, service, pkg, version string
 	return &fp, nil
 }
 
+// FingerprintKey identifies one service/package/version fingerprint.
+type FingerprintKey struct {
+	Service string
+	Package string
+	Version string
+}
+
+// GetFingerprints loads a bounded set of fingerprints in batches. This avoids
+// issuing one query per alert when the API enriches a page with baseline
+// behaviors. Missing keys are omitted from the result.
+func (s *Store) GetFingerprints(ctx context.Context, keys []FingerprintKey) ([]model.Fingerprint, error) {
+	const keysPerQuery = 250
+	var out []model.Fingerprint
+	for start := 0; start < len(keys); start += keysPerQuery {
+		end := min(start+keysPerQuery, len(keys))
+		batch, err := s.getFingerprints(ctx, keys[start:end])
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, batch...)
+	}
+	return out, nil
+}
+
+func (s *Store) getFingerprints(ctx context.Context, keys []FingerprintKey) ([]model.Fingerprint, error) {
+	if len(keys) == 0 {
+		return nil, nil
+	}
+	q := `SELECT service, package, version, behaviors, first_seen, last_seen, obs_count, is_baseline, origin
+	      FROM fingerprints WHERE `
+	args := make([]any, 0, len(keys)*3)
+	for i, key := range keys {
+		if i > 0 {
+			q += " OR "
+		}
+		args = append(args, key.Service, key.Package, key.Version)
+		q += fmt.Sprintf("(service=$%d AND package=$%d AND version=$%d)", len(args)-2, len(args)-1, len(args))
+	}
+	rows, err := s.db.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []model.Fingerprint
+	for rows.Next() {
+		var fp model.Fingerprint
+		var behaviorsJSON []byte
+		if err := rows.Scan(&fp.Service, &fp.Package, &fp.Version, &behaviorsJSON,
+			&fp.FirstSeen, &fp.LastSeen, &fp.ObsCount, &fp.IsBaseline, &fp.Origin); err != nil {
+			return nil, err
+		}
+		if err := json.Unmarshal(behaviorsJSON, &fp.Behaviors); err != nil {
+			return nil, err
+		}
+		fp.Origin = normalizeOrigin(fp.Origin)
+		out = append(out, fp)
+	}
+	return out, rows.Err()
+}
+
 // MergeFingerprint runs merge on the current row (or a fresh one) inside a
 // transaction, then writes it back. Postgres uses SELECT FOR UPDATE for
 // row-level locking; SQLite relies on the single connection plus the tx.
@@ -245,6 +372,11 @@ func (s *Store) MergeFingerprint(ctx context.Context, service, pkg, version stri
 		return nil, err
 	}
 	defer tx.Rollback() //nolint:errcheck
+	if s.dialect == "postgres" {
+		if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, fingerprintLockKey(service, pkg, version)); err != nil {
+			return nil, err
+		}
+	}
 
 	q := `SELECT behaviors, first_seen, last_seen, obs_count, is_baseline, origin
 	      FROM fingerprints WHERE service=$1 AND package=$2 AND version=$3`
@@ -292,6 +424,16 @@ func (s *Store) MergeFingerprint(ctx context.Context, service, pkg, version stri
 	}
 	fp.Origin = origin
 	return fp, nil
+}
+
+func fingerprintLockKey(service, pkg, version string) int64 {
+	h := fnv.New64a()
+	_, _ = h.Write([]byte(service))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(pkg))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write([]byte(version))
+	return int64(h.Sum64())
 }
 
 // UpsertFingerprint writes the full fingerprint state. Origin is set on insert
@@ -517,6 +659,12 @@ func mergeIntoAlert(existing, incoming *model.Alert) {
 	incoming.NewBehaviors = mergeBehaviors(existing.NewBehaviors, incoming.NewBehaviors)
 	incoming.Evidence = mergeEvidence(existing.Evidence, incoming.Evidence)
 	incoming.Severity = maxSeverity(existing.Severity, incoming.Severity)
+	if existing.Status == model.AlertResolved {
+		incoming.Status = model.AlertOpen
+		return
+	}
+	incoming.Status = existing.Status
+	incoming.DetectedAt = existing.DetectedAt
 }
 
 func (s *Store) updateAlertRow(ctx context.Context, tx *sql.Tx, a *model.Alert) error {
@@ -524,8 +672,8 @@ func (s *Store) updateAlertRow(ctx context.Context, tx *sql.Tx, a *model.Alert) 
 	ruJSON, _ := json.Marshal(orEmpty(a.MatchedRules))
 	evJSON, _ := json.Marshal(orEmptyEvidence(a.Evidence))
 	_, err := tx.ExecContext(ctx,
-		`UPDATE alerts SET new_behaviors=$1, severity=$2, matched_rules=$3, evidence=$4, would_block=$5, blocked=$6 WHERE id=$7`,
-		string(nbJSON), a.Severity, string(ruJSON), string(evJSON), a.WouldBlock, a.Blocked, a.ID)
+		`UPDATE alerts SET new_behaviors=$1, severity=$2, matched_rules=$3, evidence=$4, would_block=$5, blocked=$6, status=$7, detected_at=$8 WHERE id=$9`,
+		string(nbJSON), a.Severity, string(ruJSON), string(evJSON), a.WouldBlock, a.Blocked, a.Status, a.DetectedAt, a.ID)
 	return err
 }
 
@@ -621,6 +769,21 @@ func scanAlert(row rowScanner) (*model.Alert, error) {
 }
 
 func (s *Store) ListAlerts(ctx context.Context, status string) ([]model.Alert, error) {
+	return s.ListAlertsPage(ctx, status, 500, 0)
+}
+
+// ListAlertsPage returns one newest-first page. limit is capped to protect the
+// collector while offset lets operators reach alerts beyond the first 500.
+func (s *Store) ListAlertsPage(ctx context.Context, status string, limit, offset int) ([]model.Alert, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if offset < 0 {
+		offset = 0
+	}
 	q := `SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, would_block, blocked, detected_at, status
 	      FROM alerts`
 	var args []any
@@ -628,7 +791,8 @@ func (s *Store) ListAlerts(ctx context.Context, status string) ([]model.Alert, e
 		q += " WHERE status=$1"
 		args = append(args, status)
 	}
-	q += " ORDER BY detected_at DESC LIMIT 500"
+	q += fmt.Sprintf(" ORDER BY detected_at DESC LIMIT $%d OFFSET $%d", len(args)+1, len(args)+2)
+	args = append(args, limit, offset)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, err
@@ -643,6 +807,32 @@ func (s *Store) ListAlerts(ctx context.Context, status string) ([]model.Alert, e
 		out = append(out, *a)
 	}
 	return out, rows.Err()
+}
+
+// FindUnblockedAlertByBehavior finds a matching alert without relying on the
+// global alert-list page cap. The SQL narrows by service/package; behavior
+// matching stays in Go for identical Postgres JSONB and SQLite TEXT semantics.
+func (s *Store) FindUnblockedAlertByBehavior(ctx context.Context, service, pkg, behavior string) (*model.Alert, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT id, service, package, old_version, new_version, severity, new_behaviors, matched_rules, evidence, would_block, blocked, detected_at, status
+		FROM alerts WHERE service=$1 AND package=$2 AND blocked=FALSE
+		ORDER BY detected_at DESC`, service, pkg)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		a, err := scanAlert(rows)
+		if err != nil {
+			return nil, err
+		}
+		for _, candidate := range a.NewBehaviors {
+			if candidate == behavior {
+				return a, nil
+			}
+		}
+	}
+	return nil, rows.Err()
 }
 
 // CountAlertsSince returns how many alerts (any status) were detected at or

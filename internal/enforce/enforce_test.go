@@ -1,6 +1,7 @@
 package enforce
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/hi-heisenbug/goodman/internal/diff"
@@ -55,5 +56,26 @@ func TestCompileVerdictsExcludeSuppresses(t *testing.T) {
 	vs := CompileVerdicts(compiled, []string{"CONNECT 10.0.0.5:5432", "CONNECT 8.8.8.8:443"})
 	if len(vs.Connect) != 1 || vs.Connect[0].Addr != "8.8.8.8" {
 		t.Fatalf("connect = %v", vs.Connect)
+	}
+}
+
+func TestManagerTracksOnlyBoundedBlockRuleBehaviors(t *testing.T) {
+	rules, err := diff.CompileRules([]diff.Rule{{
+		Name: "connect", Pattern: `^CONNECT `, Action: diff.ActionBlock,
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(nil, true)
+	m.SetRules(rules)
+	m.RecordBehavior("READ /tmp/benign")
+	if len(m.behaviors) != 0 {
+		t.Fatalf("non-block behavior was retained: %v", m.behaviors)
+	}
+	for i := 0; i < maxTrackedBehaviors+100; i++ {
+		m.RecordBehavior(fmt.Sprintf("CONNECT 10.0.%d.%d:443", i/256, i%256))
+	}
+	if len(m.behaviors) != maxTrackedBehaviors {
+		t.Fatalf("tracked behaviors = %d, want cap %d", len(m.behaviors), maxTrackedBehaviors)
 	}
 }

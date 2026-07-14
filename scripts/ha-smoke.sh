@@ -84,13 +84,12 @@ wait_health() {
   return 1
 }
 
-echo "== starting two collector replicas (sequential — migrations race if parallel) =="
+echo "== starting two collector replicas concurrently (migration lock proof) =="
 env "${COMMON_ENV[@]}" "GOODMAN_LISTEN=:${COLL_A}" ./bin/collector >/dev/null 2>&1 &
 COLL_A_PID=$!
-wait_health "http://127.0.0.1:${COLL_A}" || fail "collector A not healthy"
-sleep 0.5
 env "${COMMON_ENV[@]}" "GOODMAN_LISTEN=:${COLL_B}" ./bin/collector >/dev/null 2>&1 &
 COLL_B_PID=$!
+wait_health "http://127.0.0.1:${COLL_A}" || fail "collector A not healthy"
 wait_health "http://127.0.0.1:${COLL_B}" || fail "collector B not healthy"
 
 post() {

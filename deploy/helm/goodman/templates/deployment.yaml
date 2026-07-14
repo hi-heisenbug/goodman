@@ -1,6 +1,9 @@
 {{- if and (gt (int .Values.collector.replicas) 1) (not .Values.postgres.dsn) }}
 {{- fail "collector.replicas > 1 requires postgres.dsn (SQLite is single-replica only)" }}
 {{- end }}
+{{- if and (gt (int .Values.collector.replicas) 1) .Values.enforce.enabled }}
+{{- fail "enforce.enabled requires collector.replicas=1; HA enforcement state is not yet supported" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -107,6 +110,10 @@ spec:
 {{- if .Values.reachability.osv }}
             - name: GOODMAN_REACHABILITY_OSV
               value: "true"
+{{- end }}
+{{- if .Values.reachability.osvEndpoint }}
+            - name: GOODMAN_OSV_ENDPOINT
+              value: {{ .Values.reachability.osvEndpoint | quote }}
 {{- end }}
 {{- end }}
 {{- if .Values.retention }}

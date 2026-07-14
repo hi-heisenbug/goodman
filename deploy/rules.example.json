@@ -1,7 +1,7 @@
 [
   {
     "name": "secret-read",
-    "pattern": "^READ .*(secret|token|credential|password|shadow|wallet|\\.pem|\\.key|\\.aws|\\.ssh|\\.npmrc|\\.env|id_rsa)",
+    "pattern": "^READ .*(/(secrets?|tokens?|credentials?|passwords?|shadow|wallet)([/.]|$)|\\.pem|\\.key|\\.aws|\\.ssh|\\.npmrc|\\.env|id_rsa)",
     "always_on": true,
     "action": "alert"
   },

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -61,6 +62,9 @@ type Server struct {
 	Auth AuthConfig
 	// Notifier, when set, receives every emitted alert (webhook delivery).
 	Notifier Alerter
+	// OSVClient controls vulnerability enrichment. NewServer defaults to the
+	// public OSV endpoint; deployments may replace it with an internal proxy.
+	OSVClient *report.OSVClient
 
 	mu   sync.Mutex
 	subs map[chan []byte]bool // SSE subscribers
@@ -69,8 +73,9 @@ type Server struct {
 func NewServer(s *store.Store, fpEng *fingerprint.Engine, diffEng *diff.Engine) *Server {
 	return &Server{
 		store: s, fpEng: fpEng, diffEng: diffEng,
-		cover: coverage.NewRegistry(),
-		subs:  map[chan []byte]bool{},
+		cover:     coverage.NewRegistry(),
+		subs:      map[chan []byte]bool{},
+		OSVClient: report.NewOSVClient(),
 	}
 }
 
@@ -87,49 +92,58 @@ func (s *Server) SetAlertBudget(n int) {
 }
 
 func (s *Server) Router(ui fs.FS) http.Handler {
+	return s.router(ui, 60*time.Second)
+}
+
+func (s *Server) router(ui fs.FS, requestTimeout time.Duration) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
-
-	r.Get("/v1/healthz", func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
-	})
-	r.Get("/v1/readyz", s.handleReadyz)
-	r.Post("/v1/events", requireToken(s.Auth.IngestToken, false, s.handleIngest))
-	r.Post("/v1/coverage", requireToken(s.Auth.IngestToken, false, s.handlePostCoverage))
-	r.Get("/v1/coverage", requireToken(s.Auth.APIToken, false, s.handleGetCoverage))
-	r.Get("/v1/alerts", requireToken(s.Auth.APIToken, false, s.handleListAlerts))
-	r.Post("/v1/alerts/{id}/ack", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertAcknowledged)))
-	r.Post("/v1/alerts/{id}/resolve", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertResolved)))
-	r.Get("/v1/fingerprints", requireToken(s.Auth.APIToken, false, s.handleListFingerprints))
-	r.Get("/v1/fingerprints/export", requireToken(s.Auth.APIToken, false, s.handleExportFingerprints))
-	r.Post("/v1/fingerprints/import", requireToken(s.Auth.APIToken, false, s.handleImportFingerprints))
-	r.Post("/v1/report", requireToken(s.Auth.APIToken, false, s.handleReport))
-	r.Get("/v1/report", requireToken(s.Auth.APIToken, false, s.handleGetReport))
-	// EventSource cannot set headers, so the stream also accepts ?token=.
+	// EventSource cannot set headers, so browser clients use a path-scoped
+	// cookie instead of putting the API token in proxy-visible query strings.
 	r.Get("/v1/stream", requireToken(s.Auth.APIToken, true, s.handleStream))
-	r.Get("/v1/enforce/state", requireToken(s.Auth.IngestToken, false, s.handleEnforceState))
-	r.Get("/v1/enforce", requireToken(s.Auth.APIToken, false, s.handleEnforceStatus))
-	r.Post("/v1/enforce/on", requireToken(s.Auth.APIToken, false, s.handleEnforceOn))
-	r.Post("/v1/enforce/off", requireToken(s.Auth.APIToken, false, s.handleEnforceOff))
-	r.Handle("/metrics", promhttp.Handler())
 
-	if ui != nil {
-		fileServer := http.FileServer(http.FS(ui))
-		r.Get("/*", func(w http.ResponseWriter, req *http.Request) {
-			p := strings.TrimPrefix(req.URL.Path, "/")
-			if p != "" {
-				if f, err := ui.Open(p); err == nil {
-					f.Close()
-					fileServer.ServeHTTP(w, req)
-					return
-				}
-			}
-			// SPA fallback
-			req.URL.Path = "/"
-			fileServer.ServeHTTP(w, req)
+	r.Group(func(timed chi.Router) {
+		if requestTimeout > 0 {
+			timed.Use(middleware.Timeout(requestTimeout))
+		}
+		timed.Get("/v1/healthz", func(w http.ResponseWriter, _ *http.Request) {
+			writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 		})
-	}
+		timed.Get("/v1/readyz", s.handleReadyz)
+		timed.Post("/v1/events", requireToken(s.Auth.IngestToken, false, s.handleIngest))
+		timed.Post("/v1/coverage", requireToken(s.Auth.IngestToken, false, s.handlePostCoverage))
+		timed.Get("/v1/coverage", requireToken(s.Auth.APIToken, false, s.handleGetCoverage))
+		timed.Get("/v1/alerts", requireToken(s.Auth.APIToken, false, s.handleListAlerts))
+		timed.Post("/v1/alerts/{id}/ack", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertAcknowledged)))
+		timed.Post("/v1/alerts/{id}/resolve", requireToken(s.Auth.APIToken, false, s.alertStatusHandler(model.AlertResolved)))
+		timed.Get("/v1/fingerprints", requireToken(s.Auth.APIToken, false, s.handleListFingerprints))
+		timed.Get("/v1/fingerprints/export", requireToken(s.Auth.APIToken, false, s.handleExportFingerprints))
+		timed.Post("/v1/fingerprints/import", requireToken(s.Auth.APIToken, false, s.handleImportFingerprints))
+		timed.Post("/v1/report", requireToken(s.Auth.APIToken, false, s.handleReport))
+		timed.Get("/v1/report", requireToken(s.Auth.APIToken, false, s.handleGetReport))
+		timed.Get("/v1/enforce/state", requireToken(s.Auth.IngestToken, false, s.handleEnforceState))
+		timed.Get("/v1/enforce", requireToken(s.Auth.APIToken, false, s.handleEnforceStatus))
+		timed.Post("/v1/enforce/on", requireToken(s.Auth.APIToken, false, s.handleEnforceOn))
+		timed.Post("/v1/enforce/off", requireToken(s.Auth.APIToken, false, s.handleEnforceOff))
+		timed.Handle("/metrics", requireToken(s.Auth.APIToken, false, promhttp.Handler().ServeHTTP))
+
+		if ui != nil {
+			fileServer := http.FileServer(http.FS(ui))
+			timed.Get("/*", func(w http.ResponseWriter, req *http.Request) {
+				p := strings.TrimPrefix(req.URL.Path, "/")
+				if p != "" {
+					if f, err := ui.Open(p); err == nil {
+						f.Close()
+						fileServer.ServeHTTP(w, req)
+						return
+					}
+				}
+				// SPA fallback
+				req.URL.Path = "/"
+				fileServer.ServeHTTP(w, req)
+			})
+		}
+	})
 	return r
 }
 
@@ -299,7 +313,7 @@ func (s *Server) handleEnforceOn(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "enable enforcement", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": true})
@@ -311,20 +325,30 @@ func (s *Server) handleEnforceOff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err := s.enforce.SetEnabled(r.Context(), false); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "disable enforcement", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
 }
 
 func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
-	alerts, err := s.store.ListAlerts(r.Context(), r.URL.Query().Get("status"))
+	limit, err := queryInt(r, "limit", 100)
+	if err != nil || limit < 1 || limit > 500 {
+		http.Error(w, "limit must be between 1 and 500", http.StatusBadRequest)
+		return
+	}
+	offset, err := queryInt(r, "offset", 0)
+	if err != nil || offset < 0 {
+		http.Error(w, "offset must be a non-negative integer", http.StatusBadRequest)
+		return
+	}
+	alerts, err := s.store.ListAlertsPage(r.Context(), r.URL.Query().Get("status"), limit, offset)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "list alerts", err)
 		return
 	}
 	if err := s.enrichAlerts(r.Context(), alerts); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "enrich alerts", err)
 		return
 	}
 	if alerts == nil {
@@ -333,21 +357,51 @@ func (s *Server) handleListAlerts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, alerts)
 }
 
+func queryInt(r *http.Request, name string, fallback int) (int, error) {
+	value := r.URL.Query().Get(name)
+	if value == "" {
+		return fallback, nil
+	}
+	return strconv.Atoi(value)
+}
+
 func (s *Server) enrichAlerts(ctx context.Context, alerts []model.Alert) error {
+	keys := make([]store.FingerprintKey, 0, len(alerts))
+	wanted := make(map[string]bool, len(alerts))
 	for i := range alerts {
 		if alerts[i].OldVersion == "" || len(alerts[i].BaselineBehaviors) > 0 {
 			continue
 		}
-		fp, err := s.store.GetFingerprint(ctx, alerts[i].Service, alerts[i].Package, alerts[i].OldVersion)
-		if err != nil {
-			return err
-		}
-		if fp == nil {
+		key := fingerprintLookupKey(alerts[i].Service, alerts[i].Package, alerts[i].OldVersion)
+		if wanted[key] {
 			continue
 		}
-		alerts[i].BaselineBehaviors = behaviorKeys(fp.Behaviors)
+		wanted[key] = true
+		keys = append(keys, store.FingerprintKey{
+			Service: alerts[i].Service,
+			Package: alerts[i].Package,
+			Version: alerts[i].OldVersion,
+		})
+	}
+	fps, err := s.store.GetFingerprints(ctx, keys)
+	if err != nil {
+		return err
+	}
+	baselines := make(map[string][]string, len(fps))
+	for i := range fps {
+		baselines[fingerprintLookupKey(fps[i].Service, fps[i].Package, fps[i].Version)] = behaviorKeys(fps[i].Behaviors)
+	}
+	for i := range alerts {
+		if len(alerts[i].BaselineBehaviors) > 0 {
+			continue
+		}
+		alerts[i].BaselineBehaviors = baselines[fingerprintLookupKey(alerts[i].Service, alerts[i].Package, alerts[i].OldVersion)]
 	}
 	return nil
+}
+
+func fingerprintLookupKey(service, pkg, version string) string {
+	return service + "\x00" + pkg + "\x00" + version
 }
 
 func behaviorKeys(behaviors map[string]model.BehaviorStat) []string {
@@ -367,7 +421,7 @@ func (s *Server) alertStatusHandler(status string) http.HandlerFunc {
 			return
 		}
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "set alert status", err)
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": status})
@@ -378,7 +432,7 @@ func (s *Server) handleListFingerprints(w http.ResponseWriter, r *http.Request) 
 	fps, err := s.store.ListFingerprints(r.Context(),
 		r.URL.Query().Get("service"), r.URL.Query().Get("package"))
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "list fingerprints", err)
 		return
 	}
 	if fps == nil {
@@ -406,7 +460,7 @@ type fingerprintImportResult struct {
 func (s *Server) handleExportFingerprints(w http.ResponseWriter, r *http.Request) {
 	fps, err := s.store.ListBaselines(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "export fingerprints", err)
 		return
 	}
 	if fps == nil {
@@ -438,7 +492,7 @@ func (s *Server) handleImportFingerprints(w http.ResponseWriter, r *http.Request
 	for i := range body.Fingerprints {
 		outcome, err := s.store.ImportFingerprint(r.Context(), &body.Fingerprints[i])
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "import fingerprint", err)
 			return
 		}
 		switch outcome {
@@ -477,13 +531,13 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	}
 	fps, err := s.store.ListFingerprints(r.Context(), service, "")
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "list report fingerprints", err)
 		return
 	}
 	osv := r.URL.Query().Get("osv") == "1" || r.URL.Query().Get("osv") == "true"
 	var vulns map[string][]report.Vulnerability
 	if osv {
-		vulns, err = report.NewOSVClient().Query(r.Context(), declared)
+		vulns, err = s.OSVClient.Query(r.Context(), declared)
 		if err != nil {
 			http.Error(w, "osv: "+err.Error(), http.StatusBadGateway)
 			return
@@ -497,12 +551,12 @@ func (s *Server) handleReport(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("persist") == "1" || r.URL.Query().Get("persist") == "true" {
 		now := uint64(time.Now().UnixNano())
 		if err := s.store.SaveLockfile(r.Context(), service, string(body), now); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "save lockfile", err)
 			return
 		}
 		repJSON, _ := json.Marshal(rep)
 		if err := s.store.SaveReport(r.Context(), service, string(repJSON), osv, now); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			writeInternalError(w, "save reachability report", err)
 			return
 		}
 	}
@@ -517,8 +571,28 @@ func (s *Server) handleGetReport(w http.ResponseWriter, r *http.Request) {
 	service := r.URL.Query().Get("service")
 	stored, found, err := s.store.GetReport(r.Context(), service)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "get reachability report", err)
 		return
+	}
+	if !found && service == "" {
+		lockfiles, listErr := s.store.ListLockfiles(r.Context())
+		if listErr != nil {
+			writeInternalError(w, "list stored lockfiles", listErr)
+			return
+		}
+		for _, lockfile := range lockfiles {
+			if lockfile.Service == "" {
+				continue
+			}
+			stored, found, err = s.store.GetReport(r.Context(), lockfile.Service)
+			if err != nil {
+				writeInternalError(w, "get fallback reachability report", err)
+				return
+			}
+			if found {
+				break
+			}
+		}
 	}
 	if !found {
 		http.Error(w, "no stored report for this service", http.StatusNotFound)
@@ -549,15 +623,20 @@ func (s *Server) handleGetCoverage(w http.ResponseWriter, r *http.Request) {
 	since := uint64(now.Add(-24 * time.Hour).UnixNano())
 	n, err := s.store.CountAlertsSince(r.Context(), since)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "count recent alerts", err)
 		return
 	}
 	wb, err := s.store.CountWouldBlockSince(r.Context(), since)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeInternalError(w, "count would-block alerts", err)
 		return
 	}
 	writeJSON(w, http.StatusOK, s.cover.Snapshot(now, n, wb))
+}
+
+func writeInternalError(w http.ResponseWriter, operation string, err error) {
+	log.Printf("api: %s: %v", operation, err)
+	http.Error(w, "internal server error", http.StatusInternalServerError)
 }
 
 // handlePostCoverage accepts a namespace injection coverage report from a sensor.
@@ -646,7 +725,7 @@ func Serve(ctx context.Context, addr string, h http.Handler, tls TLSFiles) error
 	if (tls.CertFile == "") != (tls.KeyFile == "") {
 		return fmt.Errorf("tls: certificate and key must both be set (cert=%q key=%q)", tls.CertFile, tls.KeyFile)
 	}
-	srv := &http.Server{Addr: addr, Handler: h}
+	srv := newHTTPServer(addr, h)
 	errCh := make(chan error, 1)
 	go func() {
 		if tls.CertFile != "" {
@@ -662,5 +741,13 @@ func Serve(ctx context.Context, addr string, h http.Handler, tls TLSFiles) error
 		return srv.Shutdown(shutdownCtx)
 	case err := <-errCh:
 		return err
+	}
+}
+
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           h,
+		ReadHeaderTimeout: 10 * time.Second,
 	}
 }

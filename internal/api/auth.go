@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/subtle"
 	"net/http"
+	"net/url"
 	"strings"
 )
 
@@ -15,26 +16,30 @@ type AuthConfig struct {
 	// "Authorization: Bearer <token>".
 	IngestToken string
 	// APIToken protects the read/mutate API (/v1/alerts, /v1/fingerprints,
-	// /v1/stream). Sent as "Authorization: Bearer <token>", or as a "token"
-	// query parameter for EventSource clients that cannot set headers.
+	// /v1/stream). Sent as "Authorization: Bearer <token>"; browser EventSource
+	// clients use the path-scoped goodman_stream_token cookie.
 	APIToken string
 }
+
+const streamTokenCookie = "goodman_stream_token"
 
 // Enabled reports whether any endpoint is token-protected.
 func (a AuthConfig) Enabled() bool { return a.IngestToken != "" || a.APIToken != "" }
 
 // requireToken wraps h so it only runs when the request carries the expected
-// bearer token. A zero-value token disables the check. allowQuery additionally
-// accepts ?token= for SSE clients (EventSource cannot set request headers).
-func requireToken(token string, allowQuery bool, h http.HandlerFunc) http.HandlerFunc {
+// bearer token. A zero-value token disables the check. allowStreamCookie
+// accepts the path-scoped SSE cookie for EventSource, which cannot set headers.
+func requireToken(token string, allowStreamCookie bool, h http.HandlerFunc) http.HandlerFunc {
 	if token == "" {
 		return h
 	}
 	want := []byte(token)
 	return func(w http.ResponseWriter, r *http.Request) {
 		got := bearerToken(r)
-		if got == "" && allowQuery {
-			got = r.URL.Query().Get("token")
+		if got == "" && allowStreamCookie {
+			if cookie, err := r.Cookie(streamTokenCookie); err == nil {
+				got, _ = url.QueryUnescape(cookie.Value)
+			}
 		}
 		if subtle.ConstantTimeCompare([]byte(got), want) != 1 {
 			w.Header().Set("WWW-Authenticate", `Bearer realm="goodman"`)

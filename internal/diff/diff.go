@@ -65,7 +65,7 @@ const (
 // legitimate "learning", so they alert from minute one. Connects and execs
 // are drift-only; almost every package does one legitimately.
 var DefaultRules = []Rule{
-	{Name: "secret-read", AlwaysOn: true, Pattern: `^READ .*(secret|token|credential|password|shadow|wallet|\.pem|\.key|\.aws|\.ssh|\.npmrc|\.env|id_rsa)`},
+	{Name: "secret-read", AlwaysOn: true, Pattern: `^READ .*(/(secrets?|tokens?|credentials?|passwords?|shadow|wallet)([/.]|$)|\.pem|\.key|\.aws|\.ssh|\.npmrc|\.env|id_rsa)`},
 	{Name: "cloud-metadata", AlwaysOn: true, Pattern: `^CONNECT 169\.254\.169\.254:`},
 	{Name: "new-outbound-connect", Pattern: `^CONNECT `},
 	{Name: "new-exec", Pattern: `^EXEC `},
@@ -276,27 +276,18 @@ func (eng *Engine) ReactDenied(ctx context.Context, ev model.Attributed) (*model
 	if !ev.Denied || ev.Behavior == "" || ev.Package == "" {
 		return nil, nil
 	}
-	alerts, err := eng.store.ListAlerts(ctx, "")
+	a, err := eng.store.FindUnblockedAlertByBehavior(ctx, ev.Service, ev.Package, ev.Behavior)
 	if err != nil {
 		return nil, err
 	}
-	for i := range alerts {
-		a := &alerts[i]
-		for _, b := range a.NewBehaviors {
-			if b != ev.Behavior {
-				continue
-			}
-			if a.Blocked {
-				return nil, nil
-			}
-			a.Blocked = true
-			if err := eng.store.SetAlertBlocked(ctx, a.ID, true); err != nil {
-				return nil, err
-			}
-			return a, nil
-		}
+	if a == nil {
+		return nil, nil
 	}
-	return nil, nil
+	a.Blocked = true
+	if err := eng.store.SetAlertBlocked(ctx, a.ID, true); err != nil {
+		return nil, err
+	}
+	return a, nil
 }
 
 func behaviorKeys(behaviors map[string]model.BehaviorStat) []string {

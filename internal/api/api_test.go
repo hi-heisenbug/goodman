@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -63,6 +66,58 @@ func TestListAlertsEnrichesBaselineBehaviors(t *testing.T) {
 		"READ /app/node_modules/good-pkg/**",
 	}) {
 		t.Fatalf("baseline_behaviors = %v", got)
+	}
+}
+
+func TestListAlertsSupportsPagination(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "alerts-page.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	for i := 1; i <= 3; i++ {
+		if _, err := st.UpsertAlert(ctx, &model.Alert{
+			ID: fmt.Sprintf("alert-%d", i), Service: "web", Package: "pkg", NewVersion: "1.0.1",
+			Severity: model.SeverityWarn, NewBehaviors: []string{"READ /tmp/a"},
+			DetectedAt: uint64(i), Status: model.AlertOpen,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/alerts?status=open&limit=1&offset=1", nil)
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var alerts []model.Alert
+	if err := json.Unmarshal(rec.Body.Bytes(), &alerts); err != nil {
+		t.Fatal(err)
+	}
+	if len(alerts) != 1 || alerts[0].ID != "alert-2" {
+		t.Fatalf("page = %+v, want alert-2", alerts)
+	}
+}
+
+func TestInternalErrorsDoNotLeakDatabaseDetails(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "closed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	router := NewServer(st, nil, nil).Router(nil)
+	if err := st.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/alerts", nil))
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d body=%q", rec.Code, rec.Body.String())
+	}
+	if rec.Body.String() != "internal server error\n" {
+		t.Fatalf("body leaked implementation detail: %q", rec.Body.String())
 	}
 }
 
@@ -186,6 +241,13 @@ func TestReportPersistAndGet(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	// Seed a report older than a week so the next persisted snapshot has a
+	// genuine week-over-week comparison point (hourly refreshes no longer shift
+	// the delta baseline).
+	if err := st.SaveReport(ctx, "web", `{"service":"web","declared_count":2,"executed_count":1,"vuln_rows":[],"rows":[]}`,
+		false, uint64(time.Now().Add(-8*24*time.Hour).UnixNano())); err != nil {
+		t.Fatal(err)
+	}
 	rec = httptest.NewRecorder()
 	router.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/v1/report?service=web&persist=1", strings.NewReader(lockfile)))
 	if rec.Code != http.StatusOK {
@@ -220,6 +282,106 @@ func TestReportPersistAndGet(t *testing.T) {
 	if env.Delta == nil || env.Delta.Executed != 1 {
 		t.Fatalf("expected executed delta +1, got %+v body=%s", env.Delta, rec.Body.String())
 	}
+
+	// The dashboard requests the default scope. When only a service-scoped
+	// snapshot exists, the API falls back to the first stored service.
+	rec = httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/report", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET default scope fallback = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var fallback struct {
+		Report struct {
+			Service string `json:"service"`
+		} `json:"report"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &fallback); err != nil {
+		t.Fatal(err)
+	}
+	if fallback.Report.Service != "web" {
+		t.Fatalf("fallback service = %q, want web", fallback.Report.Service)
+	}
+}
+
+func TestStreamIsExcludedFromRequestTimeout(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "stream.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	s := NewServer(st, nil, nil)
+	w := newThreadSafeFlusher()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		s.router(nil, 20*time.Millisecond).ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/stream", nil).WithContext(ctx))
+		close(done)
+	}()
+	waitForBody(t, w, ": connected\n\n")
+
+	time.Sleep(50 * time.Millisecond)
+	s.broadcast("alert", map[string]string{"id": "still-live"})
+	waitForBody(t, w, "event: alert\n")
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("stream handler did not stop after request cancellation")
+	}
+}
+
+func TestHTTPServerSetsReadHeaderTimeout(t *testing.T) {
+	srv := newHTTPServer(":0", http.NotFoundHandler())
+	if srv.ReadHeaderTimeout <= 0 {
+		t.Fatal("ReadHeaderTimeout must protect the collector from slowloris requests")
+	}
+}
+
+type threadSafeFlusher struct {
+	mu     sync.Mutex
+	header http.Header
+	body   bytes.Buffer
+	status int
+}
+
+func newThreadSafeFlusher() *threadSafeFlusher {
+	return &threadSafeFlusher{header: make(http.Header)}
+}
+
+func (w *threadSafeFlusher) Header() http.Header { return w.header }
+
+func (w *threadSafeFlusher) WriteHeader(status int) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.status = status
+}
+
+func (w *threadSafeFlusher) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.Write(p)
+}
+
+func (w *threadSafeFlusher) Flush() {}
+
+func (w *threadSafeFlusher) String() string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.body.String()
+}
+
+func waitForBody(t *testing.T, w *threadSafeFlusher, want string) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if strings.Contains(w.String(), want) {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("response body never contained %q; got %q", want, w.String())
 }
 
 func TestExportFingerprintsOnlyBaselines(t *testing.T) {
@@ -232,14 +394,14 @@ func TestExportFingerprintsOnlyBaselines(t *testing.T) {
 
 	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
 		Service: "web", Package: "baseline-pkg", Version: "1.0.0",
-		Behaviors: map[string]model.BehaviorStat{"READ /a": {Count: 1}},
+		Behaviors:  map[string]model.BehaviorStat{"READ /a": {Count: 1}},
 		IsBaseline: true, Origin: model.OriginLocal,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
 		Service: "web", Package: "learning-pkg", Version: "1.0.0",
-		Behaviors: map[string]model.BehaviorStat{"READ /b": {Count: 1}},
+		Behaviors:  map[string]model.BehaviorStat{"READ /b": {Count: 1}},
 		IsBaseline: false,
 	}); err != nil {
 		t.Fatal(err)
@@ -280,7 +442,7 @@ func TestImportFingerprintsValidatesSchemaAndCounts(t *testing.T) {
 	defer st.Close()
 	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
 		Service: "web", Package: "local-pkg", Version: "1.0.0",
-		Behaviors: map[string]model.BehaviorStat{"READ /local": {Count: 1}},
+		Behaviors:  map[string]model.BehaviorStat{"READ /local": {Count: 1}},
 		IsBaseline: true, Origin: model.OriginLocal,
 	}); err != nil {
 		t.Fatal(err)

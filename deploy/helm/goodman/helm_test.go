@@ -196,6 +196,22 @@ func TestHelmEnforceDefaultOff(t *testing.T) {
 	}
 }
 
+func TestHelmRejectsEnforcementWithHACollectors(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	out, err := exec.Command("helm", "template", "goodman", ".",
+		"--set", "collector.replicas=2",
+		"--set", "postgres.dsn=postgres://goodman:secret@db:5432/goodman",
+		"--set", "enforce.enabled=true").CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected HA enforcement to be rejected:\n%s", out)
+	}
+	if !strings.Contains(string(out), "HA enforcement state is not yet supported") {
+		t.Fatalf("unexpected error:\n%s", out)
+	}
+}
+
 func TestHelmHAReplicasWithPostgres(t *testing.T) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		t.Skip("helm not installed")

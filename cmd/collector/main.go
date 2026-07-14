@@ -50,6 +50,7 @@ func main() {
 
 		reachInterval = flag.Duration("reachability-interval", envDurOr("GOODMAN_REACHABILITY_INTERVAL", 0), "recompute stored reachability reports on this cadence (0 = disabled)")
 		reachOSV      = flag.Bool("reachability-osv", os.Getenv("GOODMAN_REACHABILITY_OSV") == "1" || os.Getenv("GOODMAN_REACHABILITY_OSV") == "true", "enrich scheduled reachability recomputes with OSV.dev (needs egress)")
+		osvEndpoint   = flag.String("osv-endpoint", os.Getenv("GOODMAN_OSV_ENDPOINT"), "OSV querybatch endpoint (empty = public OSV.dev)")
 
 		digestInterval = flag.Duration("digest-interval", envDurOr("GOODMAN_DIGEST_INTERVAL", 0), "emit a weekly digest to the webhook on this cadence (0 = disabled; requires -webhook-url)")
 		digestBudget   = flag.Int("digest-alert-budget", envIntOr("GOODMAN_DIGEST_ALERT_BUDGET", digest.DefaultAlertBudget), "soft open-alert budget quoted in the digest")
@@ -88,6 +89,9 @@ func main() {
 	fpEng := fingerprint.NewEngine(st, fingerprint.LearningWindow{MinObs: *learnObs, MinAge: *learnAge})
 	diffEng := diff.NewEngine(st, rules)
 	srv := api.NewServer(st, fpEng, diffEng)
+	if *osvEndpoint != "" {
+		srv.OSVClient.Endpoint = *osvEndpoint
+	}
 	enforceMgr := enforce.NewManager(st, *enforceEnabled)
 	enforceMgr.SetRules(rules)
 	srv.SetEnforceManager(enforceMgr)
@@ -124,7 +128,11 @@ func main() {
 	}
 
 	if *reachInterval > 0 {
-		go reachabilityLoop(ctx, st, *reachInterval, *reachOSV)
+		var scheduledOSV *report.OSVClient
+		if *reachOSV {
+			scheduledOSV = srv.OSVClient
+		}
+		go reachabilityLoop(ctx, st, *reachInterval, scheduledOSV)
 		log.Printf("reachability refresh enabled: every %s (osv=%t; leader-elected when HA)", *reachInterval, *reachOSV)
 	}
 
@@ -196,7 +204,7 @@ func pruneLoop(ctx context.Context, st *store.Store, retention time.Duration) {
 // reachabilityLoop recomputes stored reachability snapshots against the latest
 // fingerprints, once at startup and then every interval, so the dashboard
 // shows current numbers without a manual re-upload.
-func reachabilityLoop(ctx context.Context, st *store.Store, interval time.Duration, osv bool) {
+func reachabilityLoop(ctx context.Context, st *store.Store, interval time.Duration, osvClient *report.OSVClient) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
@@ -217,10 +225,6 @@ func reachabilityLoop(ctx context.Context, st *store.Store, interval time.Durati
 				refresh := make([]report.Lockfile, len(lockfiles))
 				for i, lf := range lockfiles {
 					refresh[i] = report.Lockfile{Service: lf.Service, Content: lf.Content}
-				}
-				var osvClient *report.OSVClient
-				if osv {
-					osvClient = report.NewOSVClient()
 				}
 				n, err := report.RefreshAll(leaderCtx, st, refresh, osvClient, uint64(time.Now().UnixNano()))
 				if err != nil && ctx.Err() == nil {
@@ -300,6 +304,7 @@ func envIntOr(k string, def int) int {
 		if n, err := strconv.Atoi(v); err == nil {
 			return n
 		}
+		log.Printf("configuration: %s=%q is not an integer; using %d", k, v, def)
 	}
 	return def
 }
@@ -309,6 +314,7 @@ func envDurOr(k string, def time.Duration) time.Duration {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}
+		log.Printf("configuration: %s=%q is not a Go duration; using %s", k, v, def)
 	}
 	return def
 }
@@ -318,5 +324,10 @@ func envBoolOr(k string, def bool) bool {
 	if v == "" {
 		return def
 	}
-	return v == "1" || v == "true" || v == "TRUE"
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Printf("configuration: %s=%q is not a boolean; using %t", k, v, def)
+		return def
+	}
+	return parsed
 }

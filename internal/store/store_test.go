@@ -156,6 +156,36 @@ func TestUpsertAlertMergesAndEscalates(t *testing.T) {
 	}
 }
 
+func TestUpsertAlertReopensResolvedAlertOnRedrift(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	a := &model.Alert{
+		ID: "redrift", Service: "web", Package: "pkg", NewVersion: "1.0.1",
+		Severity: model.SeverityWarn, NewBehaviors: []string{"READ /tmp/a"},
+		DetectedAt: 100, Status: model.AlertOpen,
+	}
+	if _, err := s.UpsertAlert(ctx, a); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetAlertStatus(ctx, a.ID, model.AlertResolved); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.UpsertAlert(ctx, &model.Alert{
+		ID: a.ID, Service: "web", Package: "pkg", NewVersion: "1.0.1",
+		Severity: model.SeverityCritical, NewBehaviors: []string{"EXEC /bin/sh"},
+		DetectedAt: 200, Status: model.AlertOpen,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetAlert(ctx, a.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != model.AlertOpen {
+		t.Fatalf("status = %q, want reopened", got.Status)
+	}
+}
+
 func TestSetAlertStatusAndList(t *testing.T) {
 	ctx := context.Background()
 	s := openTestStore(t)
@@ -241,6 +271,44 @@ func TestMigrationsAreTrackedAcrossReopen(t *testing.T) {
 			t.Fatalf("open #%d: %v", i+1, err)
 		}
 		s.Close()
+	}
+}
+
+func TestOpenSQLiteDSNWithExistingQueryParameters(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "query.db")
+	s, err := Open(path + "?_pragma=foreign_keys(1)")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if err := s.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGetFingerprintsReturnsRequestedRows(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+	for _, fp := range []model.Fingerprint{
+		{Service: "web", Package: "a", Version: "1.0.0", Behaviors: map[string]model.BehaviorStat{"READ /a": {Count: 1}}},
+		{Service: "web", Package: "b", Version: "2.0.0", Behaviors: map[string]model.BehaviorStat{"READ /b": {Count: 1}}},
+		{Service: "worker", Package: "c", Version: "3.0.0", Behaviors: map[string]model.BehaviorStat{"READ /c": {Count: 1}}},
+	} {
+		if err := s.UpsertFingerprint(ctx, &fp); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := s.GetFingerprints(ctx, []FingerprintKey{
+		{Service: "web", Package: "b", Version: "2.0.0"},
+		{Service: "worker", Package: "c", Version: "3.0.0"},
+		{Service: "missing", Package: "missing", Version: "0"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("fingerprints = %+v, want two requested rows", got)
 	}
 }
 
@@ -330,31 +398,44 @@ func TestLockfileAndReportPersistence(t *testing.T) {
 		}
 	}
 
-	if err := s.SaveReport(ctx, "web", `{"declared_count":5,"executed_count":1}`, true, 300); err != nil {
+	base := uint64(time.Now().Add(-8 * 24 * time.Hour).UnixNano())
+	if err := s.SaveReport(ctx, "web", `{"declared_count":5,"executed_count":1}`, true, base); err != nil {
 		t.Fatal(err)
 	}
 	got, found, err := s.GetReport(ctx, "web")
 	if err != nil || !found {
 		t.Fatalf("GetReport = (found %v, err %v)", found, err)
 	}
-	if got.Report != `{"declared_count":5,"executed_count":1}` || !got.OSV || got.ComputedAt != 300 {
+	if got.Report != `{"declared_count":5,"executed_count":1}` || !got.OSV || got.ComputedAt != base {
 		t.Fatalf("stored report mismatch: %+v", got)
 	}
 	if got.PreviousReport != "" || got.PreviousComputedAt != 0 {
 		t.Fatalf("first save must leave previous empty: %+v", got)
 	}
 
-	if err := s.SaveReport(ctx, "web", `{"declared_count":5,"executed_count":3}`, true, 400); err != nil {
+	if err := s.SaveReport(ctx, "web", `{"declared_count":5,"executed_count":2}`, true, base+uint64(time.Hour.Nanoseconds())); err != nil {
+		t.Fatal(err)
+	}
+	got, found, err = s.GetReport(ctx, "web")
+	if err != nil || !found {
+		t.Fatalf("hourly GetReport: found=%v err=%v", found, err)
+	}
+	if got.PreviousReport != "" || got.PreviousComputedAt != 0 {
+		t.Fatalf("hourly refresh must not create a week-over-week baseline: %+v", got)
+	}
+
+	current := base + uint64((8 * 24 * time.Hour).Nanoseconds())
+	if err := s.SaveReport(ctx, "web", `{"declared_count":5,"executed_count":3}`, true, current); err != nil {
 		t.Fatal(err)
 	}
 	got, found, err = s.GetReport(ctx, "web")
 	if err != nil || !found {
 		t.Fatalf("second GetReport: found=%v err=%v", found, err)
 	}
-	if got.Report != `{"declared_count":5,"executed_count":3}` || got.ComputedAt != 400 {
+	if got.Report != `{"declared_count":5,"executed_count":3}` || got.ComputedAt != current {
 		t.Fatalf("current not updated: %+v", got)
 	}
-	if got.PreviousReport != `{"declared_count":5,"executed_count":1}` || got.PreviousComputedAt != 300 {
+	if got.PreviousReport != `{"declared_count":5,"executed_count":2}` || got.PreviousComputedAt != base+uint64(time.Hour.Nanoseconds()) {
 		t.Fatalf("previous not preserved: %+v", got)
 	}
 }
@@ -399,7 +480,7 @@ func TestImportFingerprintConflictMatrix(t *testing.T) {
 	// Local baseline row must not be clobbered.
 	if err := s.UpsertFingerprint(ctx, &model.Fingerprint{
 		Service: "web", Package: "pkg-b", Version: "2.0.0",
-		Behaviors: map[string]model.BehaviorStat{"READ /local": {Count: 1}},
+		Behaviors:  map[string]model.BehaviorStat{"READ /local": {Count: 1}},
 		IsBaseline: true, Origin: model.OriginLocal,
 	}); err != nil {
 		t.Fatal(err)

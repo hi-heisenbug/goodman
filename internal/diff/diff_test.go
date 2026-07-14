@@ -2,6 +2,7 @@ package diff
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -287,6 +288,26 @@ func TestRuleExcludes(t *testing.T) {
 	}
 }
 
+func TestSecretRuleDoesNotMatchPackageNameSubstring(t *testing.T) {
+	rules, err := LoadRules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range rules {
+		if rules[i].Name != "secret-read" {
+			continue
+		}
+		if rules[i].Matches("READ /app/node_modules/jsonwebtoken/**") {
+			t.Fatal("secret-read must not match the word token inside a package name")
+		}
+		if !rules[i].Matches("READ /var/run/secrets/kubernetes.io/serviceaccount/token") {
+			t.Fatal("secret-read must still match real secret/token path components")
+		}
+		return
+	}
+	t.Fatal("secret-read rule missing")
+}
+
 // TestDriftAlertCarriesRulesAndEvidence verifies trigger-1 alerts include the
 // matched rule names and per-behavior evidence.
 func TestDriftAlertCarriesRulesAndEvidence(t *testing.T) {
@@ -430,6 +451,39 @@ func TestBlockActionWouldBlockAndDeniedUpgrade(t *testing.T) {
 	})
 	if err != nil || upgraded == nil || !upgraded.Blocked {
 		t.Fatalf("ReactDenied = %+v err=%v", upgraded, err)
+	}
+}
+
+func TestReactDeniedFindsAlertOlderThanGlobalListCap(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "old-denied.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	for i := 0; i < 501; i++ {
+		if _, err := s.UpsertAlert(ctx, &model.Alert{
+			ID: fmt.Sprintf("noise-%03d", i), Service: "noise", Package: "noise", NewVersion: "1",
+			Severity: model.SeverityWarn, NewBehaviors: []string{"READ /tmp/noise"},
+			DetectedAt: uint64(1000 + i), Status: model.AlertOpen,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.UpsertAlert(ctx, &model.Alert{
+		ID: "old-target", Service: "web", Package: "evil", NewVersion: "1",
+		Severity: model.SeverityCritical, NewBehaviors: []string{"READ /etc/shadow"},
+		DetectedAt: 1, Status: model.AlertOpen,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	eng := NewEngine(s, nil)
+	got, err := eng.ReactDenied(ctx, model.Attributed{
+		Service: "web", Package: "evil", Behavior: "READ /etc/shadow", Denied: true,
+	})
+	if err != nil || got == nil || got.ID != "old-target" || !got.Blocked {
+		t.Fatalf("ReactDenied = %+v err=%v", got, err)
 	}
 }
 

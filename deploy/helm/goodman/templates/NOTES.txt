@@ -42,13 +42,13 @@ attributed - one env var, no code change:
 
   env:
     - name: NODE_OPTIONS
-      value: "--perf-basic-prof --interpreted-frames-native-stack"
+      value: "--perf-basic-prof-only-functions --interpreted-frames-native-stack"
 
 Patch a whole namespace:
-  kubectl -n <app-namespace> set env deployment --all NODE_OPTIONS="--perf-basic-prof --interpreted-frames-native-stack"
+  kubectl -n <app-namespace> set env deployment --all NODE_OPTIONS="--perf-basic-prof-only-functions --interpreted-frames-native-stack"
 
 Or patch selected deployments:
-  kubectl -n <app-namespace> set env deployment -l app=<app-label> NODE_OPTIONS="--perf-basic-prof --interpreted-frames-native-stack"
+  kubectl -n <app-namespace> set env deployment -l app=<app-label> NODE_OPTIONS="--perf-basic-prof-only-functions --interpreted-frames-native-stack"
 
 (Tip: set webhook.enabled=true to inject this automatically per namespace.)
 {{- end }}
