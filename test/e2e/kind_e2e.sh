@@ -32,6 +32,6 @@ helm upgrade --install goodman deploy/helm/goodman -n "$NS" \
 kubectl -n "$NS" rollout status deploy/goodman-collector --timeout=120s
 kubectl -n "$NS" rollout status ds/goodman-sensor --timeout=120s
 
-echo "NOTE: deploy your Node workload with NODE_OPTIONS=--perf-basic-prof and"
+echo "NOTE: deploy your Node workload with NODE_OPTIONS=--perf-basic-prof-only-functions and"
 echo "swap good-pkg 1.0.0 -> 1.0.1 to trigger the alert. Port-forward the UI:"
 echo "  kubectl -n $NS port-forward svc/goodman-collector 8844:8844"

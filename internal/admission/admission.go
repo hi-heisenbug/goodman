@@ -20,7 +20,7 @@ const (
 	NodeOptionsEnv       = "NODE_OPTIONS"
 	PythonPerfSupportEnv = "PYTHONPERFSUPPORT"
 	PythonPerfSupportVal = "1"
-	PerfBasicProf        = "--perf-basic-prof"
+	PerfBasicProf        = "--perf-basic-prof-only-functions"
 	InterpretedNativ     = "--interpreted-frames-native-stack"
 )
 

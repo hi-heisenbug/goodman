@@ -6,6 +6,8 @@ import (
 	"unsafe"
 
 	"github.com/cilium/ebpf"
+
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 // TestEmbeddedObjectSpec parses the embedded eBPF object (no privileges
@@ -21,7 +23,10 @@ func TestEmbeddedObjectSpec(t *testing.T) {
 		t.Fatalf("parse embedded object: %v", err)
 	}
 
-	for _, prog := range []string{"trace_open", "trace_openat", "trace_openat2", "trace_connect", "trace_execve"} {
+	for _, prog := range []string{
+		"trace_open", "trace_openat", "trace_openat2", "trace_connect", "trace_execve",
+		"trace_process_fork", "trace_process_exit",
+	} {
 		p, ok := spec.Programs[prog]
 		if !ok {
 			t.Errorf("missing program %q", prog)
@@ -63,6 +68,7 @@ func TestEmbeddedObjectSpec(t *testing.T) {
 		"deny_connect":      ebpf.Hash,
 		"deny_exec":         ebpf.Hash,
 		"deny_event_drops":  ebpf.PerCPUArray,
+		"deny_path_scratch": ebpf.PerCPUArray,
 	}
 	for name, typ := range wantMaps {
 		m, ok := spec.Maps[name]
@@ -83,5 +89,11 @@ func TestEmbeddedObjectSpec(t *testing.T) {
 	}
 	if spec.Maps["enforced_cgroups"].KeySize != uint32(unsafe.Sizeof(uint64(0))) {
 		t.Errorf("enforced_cgroups key size = %d", spec.Maps["enforced_cgroups"].KeySize)
+	}
+}
+
+func TestDecodeRawEventRejectsShortRecord(t *testing.T) {
+	if _, err := decodeRawEvent(make([]byte, model.RawEventSize-1)); err == nil {
+		t.Fatal("short ring-buffer record must be rejected")
 	}
 }

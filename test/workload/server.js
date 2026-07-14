@@ -2,7 +2,7 @@
 // invokes it on every request, so the package's syscalls originate from inside
 // its own JIT stack frames and Goodman can attribute them.
 //
-// Start with:  node --perf-basic-prof --interpreted-frames-native-stack server.js
+// Start with:  node --perf-basic-prof-only-functions --interpreted-frames-native-stack server.js
 "use strict";
 const http = require("http");
 const good = require("good-pkg");

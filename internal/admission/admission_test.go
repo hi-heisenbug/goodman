@@ -80,7 +80,7 @@ func TestMutateAppendsToExistingNodeOptions(t *testing.T) {
 
 func TestMutateIdempotent(t *testing.T) {
 	pod := json.RawMessage(`{"spec":{"containers":[{"name":"app","env":[
-		{"name":"NODE_OPTIONS","value":"--perf-basic-prof --interpreted-frames-native-stack"},
+		{"name":"NODE_OPTIONS","value":"--perf-basic-prof-only-functions --interpreted-frames-native-stack"},
 		{"name":"PYTHONPERFSUPPORT","value":"1"}]}]}}`)
 	patch, err := Mutate(pod)
 	if err != nil {
@@ -93,7 +93,7 @@ func TestMutateIdempotent(t *testing.T) {
 
 func TestMutatePythonPerfSupportZeroUntouched(t *testing.T) {
 	pod := json.RawMessage(`{"spec":{"containers":[{"name":"app","env":[
-		{"name":"NODE_OPTIONS","value":"--perf-basic-prof --interpreted-frames-native-stack"},
+		{"name":"NODE_OPTIONS","value":"--perf-basic-prof-only-functions --interpreted-frames-native-stack"},
 		{"name":"PYTHONPERFSUPPORT","value":"0"}]}]}}`)
 	patch, err := Mutate(pod)
 	if err != nil {

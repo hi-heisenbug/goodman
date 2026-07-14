@@ -92,6 +92,7 @@ func sourcePathOf(sym string) (string, bool) {
 }
 
 const packageContextTTL = 250 * time.Millisecond
+const maxThreadContexts = 4096
 
 // Frame is one resolved stack frame (for goodmanctl attribute --pid output).
 type Frame struct {
@@ -198,7 +199,7 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		}
 	}
 	if refreshContext && ev.TID != 0 && pkg != "" && pkg != "<app>" && pkg != "<unknown>" {
-		st.threadContext[ev.TID] = packageContext{pkg: pkg, version: version, timestamp: ev.Timestamp}
+		rememberPackageContext(st, ev.TID, packageContext{pkg: pkg, version: version, timestamp: ev.Timestamp})
 	}
 
 	return model.Attributed{
@@ -209,6 +210,21 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		Behavior:  CanonicalizeWith(model.EventType(ev.Type), ev.ArgString(), r.ConnectCIDRBits),
 		Timestamp: ev.Timestamp + bootToUnixNs,
 	}
+}
+
+func rememberPackageContext(st *pidState, tid uint32, next packageContext) {
+	if len(st.threadContext) >= maxThreadContexts {
+		ttl := uint64(packageContextTTL)
+		for existingTID, existing := range st.threadContext {
+			if next.timestamp >= existing.timestamp && next.timestamp-existing.timestamp > ttl {
+				delete(st.threadContext, existingTID)
+			}
+		}
+		if len(st.threadContext) >= maxThreadContexts {
+			return
+		}
+	}
+	st.threadContext[tid] = next
 }
 
 func packageFromOpenedPath(pidRoot string, ev *model.RawEvent) (pkg, version string, ok bool) {

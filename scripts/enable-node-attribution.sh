@@ -6,7 +6,7 @@ NAMESPACE="${GOODMAN_WORKLOAD_NAMESPACE:-default}"
 SELECTOR=""
 PATCH_ALL=0
 DRY_RUN=0
-NODE_OPTIONS_VALUE="${GOODMAN_NODE_OPTIONS:---perf-basic-prof --interpreted-frames-native-stack}"
+NODE_OPTIONS_VALUE="${GOODMAN_NODE_OPTIONS:---perf-basic-prof-only-functions --interpreted-frames-native-stack}"
 RESOURCES=()
 
 usage() {

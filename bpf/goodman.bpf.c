@@ -58,6 +58,16 @@ struct deny_path {
     char path[PATH_MAX_LEN];
 };
 
+/* bpf_d_path may leave bytes after its terminating NUL untouched. Render into
+ * per-CPU scratch space, then copy the string into a zero-initialized key so
+ * exact map lookups match userspace's zero-padded deny keys. */
+struct {
+    __uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
+    __type(key, __u32);
+    __type(value, struct deny_path);
+    __uint(max_entries, 1);
+} deny_path_scratch SEC(".maps");
+
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct deny_path);
@@ -120,7 +130,7 @@ static __always_inline int in_enforced_cgroup(void)
     return bpf_map_lookup_elem(&enforced_cgroups, &cg) != NULL;
 }
 
-static __always_inline int emit_deny(void *ctx, __u32 tgid, __u8 type, const char *arg, int arg_len)
+static __always_inline int emit_deny(__u32 tgid, __u8 type, const char *arg, int arg_len)
 {
     struct event *e = bpf_ringbuf_reserve(&events, sizeof(*e), 0);
     if (!e) {
@@ -140,15 +150,14 @@ static __always_inline int emit_deny(void *ctx, __u32 tgid, __u8 type, const cha
         bpf_probe_read_kernel(e->arg, n, arg);
         e->arg[n] = 0;
     }
-    long stk = bpf_get_stack(ctx, e->stack, sizeof(e->stack), BPF_F_USER_STACK);
-    e->stack_len = stk > 0 ? (__u32)(stk / sizeof(__u64)) : 0;
+    e->stack_len = 0;
     bpf_ringbuf_submit(e, 0);
     return 0;
 }
 
-static __always_inline int deny_return(void *ctx, __u32 tgid, __u8 type, const char *arg, int arg_len)
+static __always_inline int deny_return(__u32 tgid, __u8 type, const char *arg, int arg_len)
 {
-    emit_deny(ctx, tgid, type, arg, arg_len);
+    emit_deny(tgid, type, arg, arg_len);
     return -EPERM;
 }
 
@@ -183,6 +192,39 @@ static __always_inline int watched(__u32 *tgid)
 {
     *tgid = bpf_get_current_pid_tgid() >> 32;
     return bpf_map_lookup_elem(&watched_pids, tgid) != NULL;
+}
+
+/* A watched Node/Python process commonly forks a short-lived helper and then
+ * execs curl, sh, or another exfiltration tool before userspace can rescan
+ * /proc. Propagate the watched bit synchronously at fork time. */
+SEC("tracepoint/sched/sched_process_fork")
+int trace_process_fork(struct trace_event_raw_sched_process_fork *ctx)
+{
+    __u32 parent_tgid = bpf_get_current_pid_tgid() >> 32;
+    if (!bpf_map_lookup_elem(&watched_pids, &parent_tgid))
+        return 0;
+
+    __u32 child_tgid = (__u32)ctx->child_pid;
+    __u8 one = 1;
+    bpf_map_update_elem(&watched_pids, &child_tgid, &one, BPF_ANY);
+    return 0;
+}
+
+SEC("tracepoint/sched/sched_process_exit")
+int trace_process_exit(struct trace_event_raw_sched_process_exit *ctx)
+{
+    __u64 pid_tgid = bpf_get_current_pid_tgid();
+    __u32 tgid = pid_tgid >> 32;
+    __u32 tid = (__u32)pid_tgid;
+
+    /* sched_process_fork also fires for CLONE_THREAD and exposes child_pid
+     * (the tid), so remove those propagated thread keys when the thread exits.
+     * Keep the process-wide tgid until the final thread leaves. */
+    if (tid != tgid)
+        bpf_map_delete_elem(&watched_pids, &tid);
+    if (ctx->group_dead)
+        bpf_map_delete_elem(&watched_pids, &tgid);
+    return 0;
 }
 
 static __always_inline int submit_file_open(struct trace_event_raw_sys_enter *ctx, __u64 filename_arg)
@@ -339,13 +381,21 @@ int enforce_file_open(struct file *file)
         return 0;
 
     __u32 tgid = bpf_get_current_pid_tgid() >> 32;
+    __u32 zero = 0;
+    struct deny_path *scratch = bpf_map_lookup_elem(&deny_path_scratch, &zero);
+    if (!scratch)
+        return 0;
+    long n = bpf_d_path((struct path *)&file->f_path, scratch->path, sizeof(scratch->path));
+    if (n <= 0)
+        return 0;
+
     struct deny_path key = {};
-    long n = bpf_d_path(&file->f_path, key.path, sizeof(key.path));
+    n = bpf_probe_read_kernel_str(key.path, sizeof(key.path), scratch->path);
     if (n <= 0)
         return 0;
 
     if (bpf_map_lookup_elem(&deny_open, &key))
-        return deny_return((void *)file, tgid, EVENT_DENY_FILE_OPEN, key.path, n > PATH_MAX_LEN ? PATH_MAX_LEN : (int)n);
+        return deny_return(tgid, EVENT_DENY_FILE_OPEN, key.path, n > PATH_MAX_LEN ? PATH_MAX_LEN : (int)n);
     return 0;
 }
 
@@ -404,11 +454,11 @@ int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int ad
     arg_buf[pos & ARG_MASK] = 0;
 
     if (bpf_map_lookup_elem(&deny_connect, &key))
-        return deny_return((void *)sock, tgid, EVENT_DENY_CONNECT, arg_buf, pos);
+        return deny_return(tgid, EVENT_DENY_CONNECT, arg_buf, pos);
 
     key.port = 0;
     if (bpf_map_lookup_elem(&deny_connect, &key))
-        return deny_return((void *)sock, tgid, EVENT_DENY_CONNECT, arg_buf, pos);
+        return deny_return(tgid, EVENT_DENY_CONNECT, arg_buf, pos);
     return 0;
 }
 
@@ -429,6 +479,6 @@ int enforce_bprm_check(struct linux_binprm *bprm)
         return 0;
 
     if (bpf_map_lookup_elem(&deny_exec, &key))
-        return deny_return((void *)bprm, tgid, EVENT_DENY_EXEC, key.path, n > PATH_MAX_LEN ? PATH_MAX_LEN : (int)n);
+        return deny_return(tgid, EVENT_DENY_EXEC, key.path, n > PATH_MAX_LEN ? PATH_MAX_LEN : (int)n);
     return 0;
 }

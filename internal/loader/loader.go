@@ -13,6 +13,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 	"unsafe"
 
@@ -44,16 +45,18 @@ type Options struct {
 }
 
 type Loader struct {
-	coll     *ebpf.Collection
-	links    []link.Link
-	reader   *ringbuf.Reader
-	procRoot string
+	coll        *ebpf.Collection
+	enforceColl *ebpf.Collection
+	links       []link.Link
+	reader      *ringbuf.Reader
+	procRoot    string
 
 	watched map[uint32]bool
 
 	enforceRequested bool
 	enforceActive    bool
 	enforceReason    string
+	discarded        atomic.Uint64
 }
 
 // New loads the embedded BPF object and attaches tracepoints.
@@ -70,7 +73,7 @@ func NewWithOptions(opt Options) (*Loader, error) {
 	if err := rlimit.RemoveMemlock(); err != nil {
 		return nil, fmt.Errorf("remove memlock rlimit: %w", err)
 	}
-	spec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfObject))
+	baseSpec, err := ebpf.LoadCollectionSpecFromReader(bytes.NewReader(bpfObject))
 	if err != nil {
 		return nil, fmt.Errorf("parse BPF object: %w", err)
 	}
@@ -81,13 +84,9 @@ func NewWithOptions(opt Options) (*Loader, error) {
 		enforceRequested: opt.Enforce,
 	}
 
-	if !opt.Enforce {
-		delete(spec.Programs, "enforce_file_open")
-		delete(spec.Programs, "enforce_socket_connect")
-		delete(spec.Programs, "enforce_bprm_check")
-	}
-
-	coll, err := ebpf.NewCollection(spec)
+	detectionSpec := baseSpec.Copy()
+	deleteEnforcementPrograms(detectionSpec)
+	coll, err := ebpf.NewCollection(detectionSpec)
 	if err != nil {
 		var verr *ebpf.VerifierError
 		if errors.As(err, &verr) {
@@ -97,23 +96,35 @@ func NewWithOptions(opt Options) (*Loader, error) {
 	}
 	l.coll = coll
 
-	for prog, tp := range map[string]string{
-		"trace_open":    "sys_enter_open",
-		"trace_openat":  "sys_enter_openat",
-		"trace_openat2": "sys_enter_openat2",
-		"trace_connect": "sys_enter_connect",
-		"trace_execve":  "sys_enter_execve",
-	} {
-		lnk, err := link.Tracepoint("syscalls", tp, coll.Programs[prog], nil)
+	tracepoints := []struct {
+		program  string
+		category string
+		name     string
+		optional bool
+	}{
+		{program: "trace_open", category: "syscalls", name: "sys_enter_open", optional: true},
+		{program: "trace_openat", category: "syscalls", name: "sys_enter_openat"},
+		{program: "trace_openat2", category: "syscalls", name: "sys_enter_openat2"},
+		{program: "trace_connect", category: "syscalls", name: "sys_enter_connect"},
+		{program: "trace_execve", category: "syscalls", name: "sys_enter_execve"},
+		{program: "trace_process_fork", category: "sched", name: "sched_process_fork"},
+		{program: "trace_process_exit", category: "sched", name: "sched_process_exit"},
+	}
+	for _, tp := range tracepoints {
+		lnk, err := link.Tracepoint(tp.category, tp.name, coll.Programs[tp.program], nil)
 		if err != nil {
+			if tp.optional && errors.Is(err, os.ErrNotExist) {
+				log.Printf("loader: optional tracepoint %s/%s unavailable", tp.category, tp.name)
+				continue
+			}
 			l.Close()
-			return nil, fmt.Errorf("attach %s: %w", tp, err)
+			return nil, fmt.Errorf("attach %s/%s: %w", tp.category, tp.name, err)
 		}
 		l.links = append(l.links, lnk)
 	}
 
 	if opt.Enforce {
-		l.tryAttachLSM(coll)
+		l.tryAttachLSM(baseSpec)
 	}
 
 	rd, err := ringbuf.NewReader(coll.Maps["events"])
@@ -125,33 +136,66 @@ func NewWithOptions(opt Options) (*Loader, error) {
 	return l, nil
 }
 
-func (l *Loader) tryAttachLSM(coll *ebpf.Collection) {
+func deleteEnforcementPrograms(spec *ebpf.CollectionSpec) {
+	delete(spec.Programs, "enforce_file_open")
+	delete(spec.Programs, "enforce_socket_connect")
+	delete(spec.Programs, "enforce_bprm_check")
+}
+
+func keepEnforcementPrograms(spec *ebpf.CollectionSpec) {
+	for name := range spec.Programs {
+		switch name {
+		case "enforce_file_open", "enforce_socket_connect", "enforce_bprm_check":
+		default:
+			delete(spec.Programs, name)
+		}
+	}
+}
+
+func (l *Loader) tryAttachLSM(baseSpec *ebpf.CollectionSpec) {
 	reason := lsmSupportReason()
 	if reason != "" {
 		l.enforceReason = reason
 		log.Printf("loader: LSM enforcement unavailable (%s); detection-only", reason)
 		return
 	}
+
+	enforcementSpec := baseSpec.Copy()
+	keepEnforcementPrograms(enforcementSpec)
+	coll, err := ebpf.NewCollectionWithOptions(enforcementSpec, ebpf.CollectionOptions{
+		MapReplacements: l.coll.Maps,
+	})
+	if err != nil {
+		l.enforceReason = fmt.Sprintf("load LSM programs: %v", err)
+		log.Printf("loader: LSM enforcement unavailable (%s); detection-only", l.enforceReason)
+		return
+	}
+	l.enforceColl = coll
+	var lsmLinks []link.Link
 	for _, name := range []string{"enforce_file_open", "enforce_socket_connect", "enforce_bprm_check"} {
 		prog := coll.Programs[name]
 		if prog == nil {
 			l.enforceReason = "LSM program missing from collection"
+			coll.Close()
+			l.enforceColl = nil
 			return
 		}
 		lnk, err := link.AttachLSM(link.LSMOptions{Program: prog})
 		if err != nil {
 			l.enforceReason = fmt.Sprintf("attach %s: %v", name, err)
-			for _, existing := range l.links {
+			for _, existing := range lsmLinks {
 				if existing != nil {
 					_ = existing.Close()
 				}
 			}
-			l.links = nil
+			coll.Close()
+			l.enforceColl = nil
 			log.Printf("loader: LSM attach failed (%s); detection-only", l.enforceReason)
 			return
 		}
-		l.links = append(l.links, lnk)
+		lsmLinks = append(lsmLinks, lnk)
 	}
+	l.links = append(l.links, lsmLinks...)
 	l.enforceActive = true
 	l.enforceReason = "active"
 	log.Printf("loader: LSM enforcement programs attached")
@@ -197,6 +241,9 @@ func (l *Loader) Close() {
 	if l.coll != nil {
 		l.coll.Close()
 	}
+	if l.enforceColl != nil {
+		l.enforceColl.Close()
+	}
 }
 
 // Watch adds a pid to the in-kernel filter.
@@ -224,28 +271,33 @@ func (l *Loader) Watched() []uint32 {
 }
 
 // Drops returns the kernel-side dropped-event count (ring buffer full).
-func (l *Loader) Drops() uint64 {
+func (l *Loader) Drops() (uint64, error) {
 	return perCPUMapSum(l.coll.Maps["drops"])
 }
 
-func (l *Loader) DenyEventDrops() uint64 {
+func (l *Loader) DenyEventDrops() (uint64, error) {
 	if l.coll.Maps["deny_event_drops"] == nil {
-		return 0
+		return 0, nil
 	}
 	return perCPUMapSum(l.coll.Maps["deny_event_drops"])
 }
 
-func perCPUMapSum(m *ebpf.Map) uint64 {
+func perCPUMapSum(m *ebpf.Map) (uint64, error) {
 	var perCPU []uint64
 	if err := m.Lookup(uint32(0), &perCPU); err != nil {
-		return 0
+		return 0, err
 	}
 	var total uint64
 	for _, v := range perCPU {
 		total += v
 	}
-	return total
+	return total, nil
 }
+
+// Discards returns user-space ring-buffer records rejected because they were
+// undersized or could not be decoded. Kernel ring-buffer-full drops are
+// reported separately by Drops.
+func (l *Loader) Discards() uint64 { return l.discarded.Load() }
 
 // SetEnforceDeadline writes the enforcement kill-switch deadline (CLOCK_MONOTONIC ns).
 // Zero disables enforcement immediately.
@@ -475,15 +527,24 @@ func (l *Loader) Read() (*model.RawEvent, error) {
 		if err != nil {
 			return nil, err
 		}
-		if len(rec.RawSample) < model.RawEventSize {
+		ev, err := decodeRawEvent(rec.RawSample)
+		if err != nil {
+			l.discarded.Add(1)
 			continue
 		}
-		var ev model.RawEvent
-		if err := binary.Read(bytes.NewReader(rec.RawSample[:model.RawEventSize]), binary.LittleEndian, &ev); err != nil {
-			continue
-		}
-		return &ev, nil
+		return ev, nil
 	}
+}
+
+func decodeRawEvent(sample []byte) (*model.RawEvent, error) {
+	if len(sample) < model.RawEventSize {
+		return nil, fmt.Errorf("short ring-buffer record: %d < %d", len(sample), model.RawEventSize)
+	}
+	var ev model.RawEvent
+	if err := binary.Read(bytes.NewReader(sample[:model.RawEventSize]), binary.LittleEndian, &ev); err != nil {
+		return nil, fmt.Errorf("decode ring-buffer record: %w", err)
+	}
+	return &ev, nil
 }
 
 // BootToUnixNs returns the offset that converts bpf_ktime_get_ns()

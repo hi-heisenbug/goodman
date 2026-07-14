@@ -1,7 +1,7 @@
 package attribute
 
 // Tier 1 JIT resolution: when Node runs with
-// --perf-basic-prof --interpreted-frames-native-stack, V8 appends lines to
+// --perf-basic-prof-only-functions --interpreted-frames-native-stack, V8 appends lines to
 // /tmp/perf-<pid>.map:
 //
 //   3ca9f8c04a20 1e0 LazyCompile:*handleRequest /app/node_modules/pkg/dist/router.js:412:19

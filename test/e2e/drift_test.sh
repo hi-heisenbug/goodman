@@ -9,7 +9,7 @@
 #      wait for baseline promotion (dev-shortened learning window)
 #   3. swap to good-pkg@1.0.1, restart the workload, drive traffic
 #   4. assert a CRITICAL alert appears naming good-pkg 1.0.0 -> 1.0.1 with the
-#      new secret read + local-sink connect
+#      new secret read + local-sink connect + forked helper exec
 #   5. exit non-zero if no alert or a misattributed alert
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -35,6 +35,8 @@ BASE="http://127.0.0.1:$PORT"
 DB="$(mktemp -u /tmp/goodman-e2e-XXXX.db)"
 WORK="$ROOT/test/workload"
 FAKE_SECRETS="/tmp/goodman-fake-secrets"
+RULES="/tmp/goodman-e2e-rules.json"
+CGROUP="/sys/fs/cgroup/goodman-e2e-$$"
 SINK_PORT="${GOODMAN_E2E_SINK_PORT:-$(free_port)}"
 WORKLOAD_PORT="${GOODMAN_E2E_WORKLOAD_PORT:-$(free_port)}"
 LEARN_OBS="${LEARN_OBS:-20}"
@@ -49,9 +51,11 @@ cleanup() {
     rm -f "$WORK"/isolate-*-v8.log
     for p in "${workload_pids[@]:-}"; do rm -f "/tmp/perf-$p.map"; done
     rm -rf "$FAKE_SECRETS"
+    rm -f "$RULES"
   else
     echo "e2e logs preserved under /tmp/goodman-e2e-*.log" >&2
   fi
+  rmdir "$CGROUP" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -79,6 +83,14 @@ echo "== 0. prep: fake secrets + local sink =="
 echo "   collector=$PORT workload=$WORKLOAD_PORT sink=$SINK_PORT"
 mkdir -p "$FAKE_SECRETS"
 echo "AKIA_FAKE_DO_NOT_USE=deadbeef" > "$FAKE_SECRETS/credentials"
+mkdir "$CGROUP"
+cat > "$RULES" <<'JSON'
+[
+  {"name":"secret-read","pattern":"^READ .*(/(secrets?|credentials?)([/.]|$)|\\.npmrc|\\.aws|\\.ssh)","always_on":true,"action":"block"},
+  {"name":"new-outbound-connect","pattern":"^CONNECT ","action":"alert"},
+  {"name":"new-exec","pattern":"^EXEC ","action":"alert"}
+]
+JSON
 
 # Local exfil sink so the workload's outbound POST connects to something.
 cat > /tmp/goodman-e2e-sink.py <<'PY'
@@ -99,14 +111,17 @@ go build -o bin/collector ./cmd/collector
 go build -o bin/sensor ./cmd/sensor
 
 GOODMAN_DSN="$DB" GOODMAN_LEARN_OBS="$LEARN_OBS" GOODMAN_LEARN_MIN_AGE=1ns GOODMAN_LISTEN=":$PORT" \
+  GOODMAN_RULES="$RULES" GOODMAN_ENFORCE_ENABLED=true \
   ./bin/collector >/tmp/goodman-e2e-collector.log 2>&1 &
 pids+=("$!")
 for i in $(seq 1 50); do curl -sf "$BASE/v1/healthz" >/dev/null 2>&1 && break; sleep 0.1; done
 
 ./bin/sensor -collector "$BASE" -proc-root /proc -batch-interval 500ms -metrics-addr "" -watch-interval 200ms \
+  -enforce-enabled -enforce-cgroup "$CGROUP" \
   >/tmp/goodman-e2e-sensor.log 2>&1 &
 pids+=("$!")
 sleep 1
+curl -sf -X POST "$BASE/v1/enforce/on" >/dev/null || fail "could not arm runtime enforcement"
 
 install_pkg() { # $1 = version dir
   mkdir -p "$WORK/node_modules"
@@ -116,9 +131,10 @@ install_pkg() { # $1 = version dir
 
 start_workload() {
   ( cd "$WORK" && export GOODMAN_SINK_PORT="$SINK_PORT" GOODMAN_FAKE_CRED="$FAKE_SECRETS/credentials" PORT="$WORKLOAD_PORT" && \
-      exec node --perf-basic-prof --interpreted-frames-native-stack server.js \
+      exec node --perf-basic-prof-only-functions --interpreted-frames-native-stack server.js \
       >/tmp/goodman-e2e-workload.log 2>&1 ) &
   WORKLOAD_PID=$!; pids+=("$WORKLOAD_PID"); workload_pids+=("$WORKLOAD_PID")
+  echo "$WORKLOAD_PID" > "$CGROUP/cgroup.procs"
   for i in $(seq 1 50); do
     kill -0 "$WORKLOAD_PID" 2>/dev/null || { echo "workload exited early"; cat /tmp/goodman-e2e-workload.log; return 1; }
     curl -sf "http://127.0.0.1:$WORKLOAD_PORT/healthz" >/dev/null 2>&1 && return 0
@@ -187,9 +203,11 @@ assert a["old_version"] == "1.0.0", a["old_version"]
 nb = " ".join(a["new_behaviors"])
 assert "credential" in nb.lower() or "secret" in nb.lower(), f"missing secret read: {a['new_behaviors']}"
 assert "127.0.0.1:9999" in nb or "CONNECT" in nb, f"missing sink connect: {a['new_behaviors']}"
+assert "EXEC true" in nb, f"missing forked child exec (sched_process_fork propagation): {a['new_behaviors']}"
+assert a.get("blocked"), f"file_open deny did not upgrade alert to blocked: {a}"
 # never misattribute to a different package
 assert not any(x["package"] not in ("good-pkg","<app>","<unknown>") for x in alerts), alerts
-print("OK: CRITICAL drift alert for good-pkg 1.0.0 -> 1.0.1 with secret read + sink connect")
+print("OK: CRITICAL drift alert for good-pkg 1.0.0 -> 1.0.1 with secret read + sink connect + child exec")
 PY
 
 passed=1

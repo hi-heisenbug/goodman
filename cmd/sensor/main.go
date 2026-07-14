@@ -48,6 +48,9 @@ var (
 	mKernelDrops = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "goodman_sensor_ringbuf_drops_total",
 		Help: "Events dropped in-kernel because the ring buffer was full."})
+	mReadDiscards = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "goodman_sensor_ringbuf_discards_total",
+		Help: "Ring-buffer records discarded in userspace because they were malformed or undersized."})
 	mWatched = promauto.NewGauge(prometheus.GaugeOpts{
 		Name: "goodman_sensor_watched_pids", Help: "Currently watched pids."})
 	mBatches = promauto.NewCounterVec(prometheus.CounterOpts{
@@ -74,21 +77,21 @@ func (m *multiString) Set(v string) error {
 
 func main() {
 	var (
-		collectorURL  = flag.String("collector", envOr("GOODMAN_COLLECTOR_URL", "http://127.0.0.1:8844"), "collector base URL")
-		procRoot      = flag.String("proc-root", envOr("GOODMAN_PROC_ROOT", "/proc"), "proc mount of the host ('/host/proc' in k8s)")
-		stdout        = flag.Bool("stdout", false, "print attributed events to stdout instead of sending to the collector")
-		rawStdout     = flag.Bool("raw", false, "with -stdout: also print raw events incl. stack addresses")
-		batchEvery    = flag.Duration("batch-interval", envDurOr("GOODMAN_BATCH_INTERVAL", 1500*time.Millisecond), "collector flush interval")
-		metricsAddr   = flag.String("metrics-addr", envOr("GOODMAN_METRICS_ADDR", ":9478"), "Prometheus metrics listen address ('' to disable)")
-		extraComms    = flag.String("comms", os.Getenv("GOODMAN_EXTRA_COMMS"), "extra comm names to watch, comma-separated")
-		watchInterval = flag.Duration("watch-interval", 3*time.Second, "how often to rescan /proc for runtime processes")
-		ingestToken   = flag.String("ingest-token", os.Getenv("GOODMAN_INGEST_TOKEN"), "bearer token sent with event batches")
-		tlsCA         = flag.String("tls-ca", os.Getenv("GOODMAN_TLS_CA"), "PEM CA bundle to trust for an https collector (empty = system roots)")
-		connectCIDR   = flag.Int("connect-cidr", envIntOr("GOODMAN_CONNECT_CIDR", 0), "aggregate public destination IPs to this IPv4 prefix in CONNECT behaviors (8-32; 0 = exact IPs)")
-		spoolEvents   = flag.Int("spool-events", envIntOr("GOODMAN_SPOOL_EVENTS", 50_000), "max attributed events to retain when the collector is unreachable")
+		collectorURL   = flag.String("collector", envOr("GOODMAN_COLLECTOR_URL", "http://127.0.0.1:8844"), "collector base URL")
+		procRoot       = flag.String("proc-root", envOr("GOODMAN_PROC_ROOT", "/proc"), "proc mount of the host ('/host/proc' in k8s)")
+		stdout         = flag.Bool("stdout", false, "print attributed events to stdout instead of sending to the collector")
+		rawStdout      = flag.Bool("raw", false, "with -stdout: also print raw events incl. stack addresses")
+		batchEvery     = flag.Duration("batch-interval", envDurOr("GOODMAN_BATCH_INTERVAL", 1500*time.Millisecond), "collector flush interval")
+		metricsAddr    = flag.String("metrics-addr", envOr("GOODMAN_METRICS_ADDR", ":9478"), "Prometheus metrics listen address ('' to disable)")
+		extraComms     = flag.String("comms", os.Getenv("GOODMAN_EXTRA_COMMS"), "extra comm names to watch, comma-separated")
+		watchInterval  = flag.Duration("watch-interval", 3*time.Second, "how often to rescan /proc for runtime processes")
+		ingestToken    = flag.String("ingest-token", os.Getenv("GOODMAN_INGEST_TOKEN"), "bearer token sent with event batches")
+		tlsCA          = flag.String("tls-ca", os.Getenv("GOODMAN_TLS_CA"), "PEM CA bundle to trust for an https collector (empty = system roots)")
+		connectCIDR    = flag.Int("connect-cidr", envIntOr("GOODMAN_CONNECT_CIDR", 0), "aggregate public destination IPs to this IPv4 prefix in CONNECT behaviors (8-32; 0 = exact IPs)")
+		spoolEvents    = flag.Int("spool-events", envIntOr("GOODMAN_SPOOL_EVENTS", 50_000), "max attributed events to retain when the collector is unreachable")
 		enforceEnabled = flag.Bool("enforce-enabled", envBoolOr("GOODMAN_ENFORCE_ENABLED", false), "load LSM enforcement programs (default false)")
-		cgroupRoot    = flag.String("cgroup-root", envOr("GOODMAN_CGROUP_ROOT", "/sys/fs/cgroup"), "host cgroup2 mount for enforcement scope")
-		enforceCgroup multiString
+		cgroupRoot     = flag.String("cgroup-root", envOr("GOODMAN_CGROUP_ROOT", "/sys/fs/cgroup"), "host cgroup2 mount for enforcement scope")
+		enforceCgroup  multiString
 	)
 	flag.Var(&enforceCgroup, "enforce-cgroup", "cgroup2 path subject to enforcement (repeatable; e2e/lab)")
 	flag.Parse()
@@ -102,7 +105,7 @@ func main() {
 		log.Fatalf("load eBPF: %v", err)
 	}
 	defer l.Close()
-	log.Printf("eBPF programs attached (open/openat/openat2, connect, execve); proc root %s; enforce=%t active=%t",
+	log.Printf("eBPF programs attached (open/openat/openat2, connect, execve, fork/exit); proc root %s; enforce=%t active=%t",
 		*procRoot, *enforceEnabled, l.EnforcementActive())
 
 	if *metricsAddr != "" {
@@ -129,7 +132,12 @@ func main() {
 			log.Printf("refresh watched pids: %v", err)
 		}
 		mWatched.Set(float64(len(l.Watched())))
-		mKernelDrops.Set(float64(l.Drops()))
+		if drops, err := l.Drops(); err != nil {
+			log.Printf("read kernel drop counter: %v", err)
+		} else {
+			mKernelDrops.Set(float64(drops))
+		}
+		mReadDiscards.Set(float64(l.Discards()))
 	}
 	refresh()
 	go func() {
@@ -276,9 +284,9 @@ func enforcePollLoop(ctx context.Context, client *http.Client, l *loader.Loader,
 			return
 		}
 		var state struct {
-			Enabled  bool                `json:"enabled"`
-			Rev      int                 `json:"rev"`
-			Verdicts enforce.VerdictSet  `json:"verdicts"`
+			Enabled  bool               `json:"enabled"`
+			Rev      int                `json:"rev"`
+			Verdicts enforce.VerdictSet `json:"verdicts"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 			return

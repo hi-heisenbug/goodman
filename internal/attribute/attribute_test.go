@@ -328,3 +328,18 @@ func TestAttributePythonEndToEnd(t *testing.T) {
 		t.Fatalf("app-only stack = %q, want <app>", got.Package)
 	}
 }
+
+func TestThreadContextIsBoundedAndPrunesExpiredEntries(t *testing.T) {
+	st := &pidState{threadContext: map[uint32]packageContext{}}
+	for i := 0; i < maxThreadContexts; i++ {
+		st.threadContext[uint32(i)] = packageContext{pkg: "old", timestamp: 1}
+	}
+	now := uint64(packageContextTTL) + 2
+	rememberPackageContext(st, 99_999, packageContext{pkg: "fresh", timestamp: now})
+	if len(st.threadContext) != 1 {
+		t.Fatalf("thread contexts = %d, want expired entries pruned", len(st.threadContext))
+	}
+	if st.threadContext[99_999].pkg != "fresh" {
+		t.Fatalf("fresh context missing: %+v", st.threadContext)
+	}
+}
