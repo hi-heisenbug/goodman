@@ -39,9 +39,10 @@ func (t EventType) String() string {
 }
 
 const (
-	TaskCommLen   = 16
-	MaxStackDepth = 32
-	PathMaxLen    = 256
+	TaskCommLen         = 16
+	MaxStackDepth       = 32
+	PathMaxLen          = 256
+	ATFDCWD       int32 = -100
 )
 
 // RawEvent mirrors struct event in bpf/goodman.h byte-for-byte
@@ -49,18 +50,20 @@ const (
 type RawEvent struct {
 	PID       uint32
 	TID       uint32
+	DirFD     int32
 	Type      uint8
 	Comm      [TaskCommLen]byte
 	Arg       [PathMaxLen]byte
 	Pad       [3]byte
 	StackLen  uint32
+	StackPad  [4]byte
 	Stack     [MaxStackDepth]uint64
 	Timestamp uint64
 }
 
 // RawEventSize is the wire size of struct event. Kept as a constant so the
 // ring-buffer reader can sanity-check record lengths against the C side.
-const RawEventSize = 4 + 4 + 1 + TaskCommLen + PathMaxLen + 3 + 4 + 8*MaxStackDepth + 8
+const RawEventSize = 4 + 4 + 4 + 1 + TaskCommLen + PathMaxLen + 3 + 4 + 4 + 8*MaxStackDepth + 8
 
 func cstr(b []byte) string {
 	if i := bytes.IndexByte(b, 0); i >= 0 {

@@ -172,11 +172,14 @@ enum event_type {
 struct event {
     __u32 pid;                       // process id (tgid)
     __u32 tid;                       // thread id
+    __s32 dirfd;                     // openat base fd; AT_FDCWD otherwise
     __u8  type;                      // enum event_type
     char  comm[TASK_COMM_LEN];       // process name (e.g. "node")
     char  arg[PATH_MAX_LEN];         // file path, or "ip:port", or exec path
-    __u64 stack[MAX_STACK_DEPTH];    // user-space instruction pointers (frame-pointer walk)
+    __u8  _pad[3];
     __u32 stack_len;                 // number of valid entries in stack[]
+    __u8  _stack_pad[4];
+    __u64 stack[MAX_STACK_DEPTH];    // user-space instruction pointers (frame-pointer walk)
     __u64 timestamp_ns;
 };
 
@@ -198,11 +201,14 @@ const (
 type RawEvent struct {
     PID       uint32
     TID       uint32
+    DirFD     int32
     Type      uint8
     Comm      [16]byte
     Arg       [256]byte
-    Stack     [32]uint64
+    Pad       [3]byte
     StackLen  uint32
+    StackPad  [4]byte
+    Stack     [32]uint64
     Timestamp uint64
 }
 

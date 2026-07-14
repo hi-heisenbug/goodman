@@ -7,6 +7,7 @@ import (
 
 	"github.com/cilium/ebpf"
 
+	"github.com/hi-heisenbug/goodman/internal/enforce"
 	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
@@ -81,14 +82,30 @@ func TestEmbeddedObjectSpec(t *testing.T) {
 		}
 	}
 
-	if spec.Maps["deny_open"].KeySize != 256 {
-		t.Errorf("deny_open key size = %d, want 256", spec.Maps["deny_open"].KeySize)
+	if spec.Maps["deny_open"].KeySize != 264 {
+		t.Errorf("deny_open key size = %d, want 264", spec.Maps["deny_open"].KeySize)
 	}
-	if spec.Maps["deny_connect"].KeySize != 20 {
-		t.Errorf("deny_connect key size = %d, want 20", spec.Maps["deny_connect"].KeySize)
+	if spec.Maps["deny_connect"].KeySize != 32 {
+		t.Errorf("deny_connect key size = %d, want 32", spec.Maps["deny_connect"].KeySize)
 	}
 	if spec.Maps["enforced_cgroups"].KeySize != uint32(unsafe.Sizeof(uint64(0))) {
 		t.Errorf("enforced_cgroups key size = %d", spec.Maps["enforced_cgroups"].KeySize)
+	}
+}
+
+func TestExpandScopedVerdictsKeepsServicesIsolated(t *testing.T) {
+	got := expandScopedVerdicts(map[uint64]string{
+		11: "checkout-abc",
+		22: "worker-def",
+	}, enforce.ServiceVerdicts{
+		"checkout-abc": {Open: []string{"/etc/shadow"}},
+		"worker-def":   {Exec: []string{"/bin/sh"}},
+	})
+	if len(got.Open) != 1 || got.Open[0].CgroupID != 11 || got.Open[0].Path != "/etc/shadow" {
+		t.Fatalf("open verdicts = %+v", got.Open)
+	}
+	if len(got.Exec) != 1 || got.Exec[0].CgroupID != 22 || got.Exec[0].Path != "/bin/sh" {
+		t.Fatalf("exec verdicts = %+v", got.Exec)
 	}
 }
 

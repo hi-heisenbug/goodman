@@ -17,17 +17,19 @@ func TestRawEventLayout(t *testing.T) {
 	offsets := map[string]uintptr{
 		"PID":       unsafe.Offsetof(e.PID),
 		"TID":       unsafe.Offsetof(e.TID),
+		"DirFD":     unsafe.Offsetof(e.DirFD),
 		"Type":      unsafe.Offsetof(e.Type),
 		"Comm":      unsafe.Offsetof(e.Comm),
 		"Arg":       unsafe.Offsetof(e.Arg),
 		"Pad":       unsafe.Offsetof(e.Pad),
 		"StackLen":  unsafe.Offsetof(e.StackLen),
+		"StackPad":  unsafe.Offsetof(e.StackPad),
 		"Stack":     unsafe.Offsetof(e.Stack),
 		"Timestamp": unsafe.Offsetof(e.Timestamp),
 	}
 	want := map[string]uintptr{
-		"PID": 0, "TID": 4, "Type": 8, "Comm": 9, "Arg": 25,
-		"Pad": 281, "StackLen": 284, "Stack": 288, "Timestamp": 544,
+		"PID": 0, "TID": 4, "DirFD": 8, "Type": 12, "Comm": 13, "Arg": 29,
+		"Pad": 285, "StackLen": 288, "StackPad": 292, "Stack": 296, "Timestamp": 552,
 	}
 	for f, w := range want {
 		if offsets[f] != w {
@@ -38,7 +40,7 @@ func TestRawEventLayout(t *testing.T) {
 
 // TestRawEventRoundTrip round-trips a RawEvent through encoding/binary.
 func TestRawEventRoundTrip(t *testing.T) {
-	in := RawEvent{PID: 1234, TID: 5678, Type: uint8(EventNetConnect), StackLen: 3, Timestamp: 99}
+	in := RawEvent{PID: 1234, TID: 5678, DirFD: ATFDCWD, Type: uint8(EventNetConnect), StackLen: 3, Timestamp: 99}
 	copy(in.Comm[:], "node")
 	copy(in.Arg[:], "1.2.3.4:443")
 	in.Stack[0], in.Stack[1], in.Stack[2] = 0xdead, 0xbeef, 0xcafe

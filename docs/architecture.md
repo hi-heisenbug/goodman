@@ -69,7 +69,8 @@ Runs on every node (a privileged DaemonSet in Kubernetes, or as root locally).
   `python3`, versioned `python3.12`/`python3.13`, `gunicorn`, `celery`,
   `uwsgi`, `uvicorn`) plus configured extras (`RefreshWatched` / `-comms`).
 - Reads `RawEvent`s from the ring buffer, resolves each to an `Attributed` event
-  (`internal/attribute`), and batches them to the collector over gzip'd HTTP.
+  (`internal/attribute`), including `openat*` dirfd and container-mount path
+  resolution, and batches them to the collector over gzip'd HTTP.
   Failed POSTs go into a bounded RAM spool (`-spool-events`) and retry.
 - When `-enforce-enabled`, optionally attaches LSM programs, heartbeats the
   enforce deadline, and reconciles cgroup scope + deny maps from the collector.
@@ -145,7 +146,8 @@ both engines.
 The types that flow through the system live in `internal/model`:
 
 - **`RawEvent`** — the exact bytes the kernel writes (mirrors `struct event` in
-  `bpf/goodman.h`).
+  `bpf/goodman.h`), including the `openat*` dirfd needed for safe relative-path
+  resolution.
 - **`Attributed`** — a `RawEvent` after resolution: `(service, package, version,
   behavior, timestamp)`.
 - **`Fingerprint`** — the behavior set for one `(service, package, version)`, plus

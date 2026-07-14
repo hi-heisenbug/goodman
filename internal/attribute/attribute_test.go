@@ -61,7 +61,7 @@ func TestCanonicalize(t *testing.T) {
 		{model.EventFileOpen, "/usr/lib/python3/dist-packages/yaml/loader.py", "READ /usr/lib/python3/dist-packages/yaml/**"},
 		{model.EventFileOpen, "/etc/hosts", "READ /etc/hosts"},
 		{model.EventNetConnect, "140.82.113.6:443", "CONNECT 140.82.113.6:443"},
-		{model.EventProcExec, "/usr/bin/curl", "EXEC curl"},
+		{model.EventProcExec, "/usr/bin/curl", "EXEC /usr/bin/curl"},
 	}
 	for _, c := range cases {
 		if got := Canonicalize(c.t, c.arg); got != c.want {

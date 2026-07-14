@@ -308,8 +308,28 @@ func (l *Loader) SetEnforceDeadline(ns uint64) error {
 	return l.coll.Maps["enforce_deadline"].Put(uint32(0), ns)
 }
 
-// ReconcileEnforcedCgroups syncs the enforced cgroup scope map.
-func (l *Loader) ReconcileEnforcedCgroups(ids map[uint64]bool) error {
+// ReconcileEnforcement atomically-from-the-policy-perspective replaces the
+// service-scoped deny maps. Cgroups are disarmed before any key changes and
+// re-armed only after all maps reconcile successfully, so partial updates fail
+// open instead of applying another service's verdicts.
+func (l *Loader) ReconcileEnforcement(scopes map[uint64]string, services enforce.ServiceVerdicts) error {
+	if err := l.reconcileEnforcedCgroups(nil); err != nil {
+		return err
+	}
+	verdicts := expandScopedVerdicts(scopes, services)
+	if err := l.reconcileDenyOpen(verdicts.Open); err != nil {
+		return err
+	}
+	if err := l.reconcileDenyConnect(verdicts.Connect); err != nil {
+		return err
+	}
+	if err := l.reconcileDenyExec(verdicts.Exec); err != nil {
+		return err
+	}
+	return l.reconcileEnforcedCgroups(scopes)
+}
+
+func (l *Loader) reconcileEnforcedCgroups(scopes map[uint64]string) error {
 	m := l.coll.Maps["enforced_cgroups"]
 	if m == nil {
 		return nil
@@ -322,40 +342,65 @@ func (l *Loader) ReconcileEnforcedCgroups(ids map[uint64]bool) error {
 		existing = append(existing, k)
 	}
 	one := uint8(1)
-	for id := range ids {
+	for id := range scopes {
 		if err := m.Put(id, one); err != nil {
 			return err
 		}
 	}
 	for _, id := range existing {
-		if !ids[id] {
+		if _, ok := scopes[id]; !ok {
 			_ = m.Delete(id)
 		}
 	}
 	return nil
 }
 
-// ReconcileDenyMaps syncs literal deny verdict maps from user space.
-func (l *Loader) ReconcileDenyMaps(vs enforce.VerdictSet) error {
-	if err := l.reconcileDenyOpen(vs.Open); err != nil {
-		return err
-	}
-	if err := l.reconcileDenyConnect(vs.Connect); err != nil {
-		return err
-	}
-	return l.reconcileDenyExec(vs.Exec)
+type scopedPathVerdict struct {
+	CgroupID uint64
+	Path     string
 }
 
-func (l *Loader) reconcileDenyOpen(paths []string) error {
+type scopedConnectVerdict struct {
+	CgroupID uint64
+	Verdict  enforce.ConnectVerdict
+}
+
+type scopedVerdicts struct {
+	Open    []scopedPathVerdict
+	Connect []scopedConnectVerdict
+	Exec    []scopedPathVerdict
+}
+
+func expandScopedVerdicts(scopes map[uint64]string, services enforce.ServiceVerdicts) scopedVerdicts {
+	var out scopedVerdicts
+	for cgroupID, service := range scopes {
+		verdicts, ok := services[service]
+		if !ok {
+			continue
+		}
+		for _, path := range verdicts.Open {
+			out.Open = append(out.Open, scopedPathVerdict{CgroupID: cgroupID, Path: path})
+		}
+		for _, verdict := range verdicts.Connect {
+			out.Connect = append(out.Connect, scopedConnectVerdict{CgroupID: cgroupID, Verdict: verdict})
+		}
+		for _, path := range verdicts.Exec {
+			out.Exec = append(out.Exec, scopedPathVerdict{CgroupID: cgroupID, Path: path})
+		}
+	}
+	return out
+}
+
+func (l *Loader) reconcileDenyOpen(verdicts []scopedPathVerdict) error {
 	m := l.coll.Maps["deny_open"]
 	if m == nil {
 		return nil
 	}
 	want := map[string]bool{}
 	one := uint8(1)
-	for _, p := range paths {
-		key := makeDenyPathKey(p)
-		want[string(key[:])] = true
+	for _, verdict := range verdicts {
+		key := makeDenyPathKey(verdict.CgroupID, verdict.Path)
+		want[denyPathKeyString(key)] = true
 		if err := m.Put(key, one); err != nil {
 			return err
 		}
@@ -363,16 +408,16 @@ func (l *Loader) reconcileDenyOpen(paths []string) error {
 	return deleteMissingDenyPath(m, want)
 }
 
-func (l *Loader) reconcileDenyExec(paths []string) error {
+func (l *Loader) reconcileDenyExec(verdicts []scopedPathVerdict) error {
 	m := l.coll.Maps["deny_exec"]
 	if m == nil {
 		return nil
 	}
 	want := map[string]bool{}
 	one := uint8(1)
-	for _, p := range paths {
-		key := makeDenyPathKey(p)
-		want[string(key[:])] = true
+	for _, verdict := range verdicts {
+		key := makeDenyPathKey(verdict.CgroupID, verdict.Path)
+		want[denyPathKeyString(key)] = true
 		if err := m.Put(key, one); err != nil {
 			return err
 		}
@@ -380,12 +425,19 @@ func (l *Loader) reconcileDenyExec(paths []string) error {
 	return deleteMissingDenyPath(m, want)
 }
 
-type denyPathKey [model.PathMaxLen]byte
+type denyPathKey struct {
+	CgroupID uint64
+	Path     [model.PathMaxLen]byte
+}
 
-func makeDenyPathKey(path string) denyPathKey {
-	var k denyPathKey
-	copy(k[:], path)
+func makeDenyPathKey(cgroupID uint64, path string) denyPathKey {
+	k := denyPathKey{CgroupID: cgroupID}
+	copy(k.Path[:], path)
 	return k
+}
+
+func denyPathKeyString(k denyPathKey) string {
+	return fmt.Sprintf("%d:%s", k.CgroupID, string(k.Path[:]))
 }
 
 func deleteMissingDenyPath(m *ebpf.Map, want map[string]bool) error {
@@ -397,7 +449,7 @@ func deleteMissingDenyPath(m *ebpf.Map, want map[string]bool) error {
 		existing = append(existing, k)
 	}
 	for _, k := range existing {
-		if !want[string(k[:])] {
+		if !want[denyPathKeyString(k)] {
 			_ = m.Delete(k)
 		}
 	}
@@ -405,13 +457,14 @@ func deleteMissingDenyPath(m *ebpf.Map, want map[string]bool) error {
 }
 
 type denyAddrKey struct {
-	Family uint8
-	Pad    uint8
-	Port   uint16
-	Addr   [16]byte
+	CgroupID uint64
+	Family   uint8
+	Pad      uint8
+	Port     uint16
+	Addr     [16]byte
 }
 
-func (l *Loader) reconcileDenyConnect(entries []enforce.ConnectVerdict) error {
+func (l *Loader) reconcileDenyConnect(entries []scopedConnectVerdict) error {
 	m := l.coll.Maps["deny_connect"]
 	if m == nil {
 		return nil
@@ -419,7 +472,7 @@ func (l *Loader) reconcileDenyConnect(entries []enforce.ConnectVerdict) error {
 	want := map[string]bool{}
 	one := uint8(1)
 	for _, e := range entries {
-		key, err := denyAddrKeyFromVerdict(e)
+		key, err := denyAddrKeyFromVerdict(e.CgroupID, e.Verdict)
 		if err != nil {
 			continue
 		}
@@ -443,12 +496,12 @@ func (l *Loader) reconcileDenyConnect(entries []enforce.ConnectVerdict) error {
 	return nil
 }
 
-func denyAddrKeyFromVerdict(v enforce.ConnectVerdict) (denyAddrKey, error) {
+func denyAddrKeyFromVerdict(cgroupID uint64, v enforce.ConnectVerdict) (denyAddrKey, error) {
 	ip := net.ParseIP(v.Addr)
 	if ip == nil {
 		return denyAddrKey{}, fmt.Errorf("bad ip")
 	}
-	var k denyAddrKey
+	k := denyAddrKey{CgroupID: cgroupID}
 	k.Port = v.Port
 	if v4 := ip.To4(); v4 != nil {
 		k.Family = 2 // AF_INET
@@ -461,7 +514,7 @@ func denyAddrKeyFromVerdict(v enforce.ConnectVerdict) (denyAddrKey, error) {
 }
 
 func denyAddrKeyString(k denyAddrKey) string {
-	return fmt.Sprintf("%d:%d:%x", k.Family, k.Port, k.Addr)
+	return fmt.Sprintf("%d:%d:%d:%x", k.CgroupID, k.Family, k.Port, k.Addr)
 }
 
 // RefreshWatched scans procRoot for runtime processes and syncs the kernel pid
@@ -574,7 +627,10 @@ func MonotonicNowNs() uint64 {
 
 func init() {
 	// Ensure deny key sizes match BPF expectations.
-	if unsafe.Sizeof(denyPathKey{}) != model.PathMaxLen {
+	if unsafe.Sizeof(denyPathKey{}) != 8+model.PathMaxLen {
 		panic("denyPathKey size mismatch")
+	}
+	if unsafe.Sizeof(denyAddrKey{}) != 32 {
+		panic("denyAddrKey size mismatch")
 	}
 }

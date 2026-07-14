@@ -22,7 +22,8 @@ arm at runtime:
   goodmanctl enforce on
 
 See docs/enforcement.md. Everything fails open; enforce off or sensor loss
-disarms within seconds.
+disarms within seconds. Verdicts are isolated by pod service and expanded only
+into that pod's cgroup keys on each node.
 
 {{- end }}
 

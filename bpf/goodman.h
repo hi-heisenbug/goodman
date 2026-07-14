@@ -20,11 +20,13 @@ enum event_type {
 struct event {
     __u32 pid;                       /* process id (tgid) */
     __u32 tid;                       /* thread id */
+    __s32 dirfd;                     /* openat base fd; AT_FDCWD for open/exec */
     __u8  type;                      /* enum event_type */
     char  comm[TASK_COMM_LEN];       /* process name (e.g. "node") */
     char  arg[PATH_MAX_LEN];         /* file path, "ip:port", or exec path */
-    __u8  _pad[3];                   /* align stack[] to 8 bytes (4+4+1+16+256+3 = 284 -> pad to 288) */
+    __u8  _pad[3];                   /* align stack_len to 4 bytes */
     __u32 stack_len;                 /* number of valid entries in stack[] */
+    __u8  _stack_pad[4];             /* align stack[] to 8 bytes */
     __u64 stack[MAX_STACK_DEPTH];    /* user-space instruction pointers */
     __u64 timestamp_ns;
 };

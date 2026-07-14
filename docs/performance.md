@@ -22,8 +22,8 @@ SQLite backend:
 
 | Metric | Value |
 |---|---|
-| Throughput | ~11,446 events/sec (single collector) |
-| Per-event cost | ~87.4 µs/event |
+| Throughput | ~10,726 events/sec (single collector) |
+| Per-event cost | ~93.2 µs/event |
 | Allocations | ~1.7 KiB and ~32 allocs/event (amortized from a 200-event batch) |
 
 This is a write-heavy shape: every batch re-touches 50 distinct fingerprints,
@@ -44,7 +44,7 @@ aggregation):
 
 | Metric | Value |
 |---|---|
-| Canonicalization | ~435 ns/event, 66 B/event, 2 allocs |
+| Canonicalization | ~537 ns/event, 68 B/event, 2 allocs |
 
 The dominant sensor cost in production is not this but **stack resolution**
 (walking `/proc/<pid>/maps` and the V8 perf map). That path needs a real kernel

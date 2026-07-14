@@ -37,6 +37,7 @@ WORK="$ROOT/test/workload"
 FAKE_SECRETS="/tmp/goodman-fake-secrets"
 RULES="/tmp/goodman-e2e-rules.json"
 CGROUP="/sys/fs/cgroup/goodman-e2e-$$"
+CONTROL_CGROUP="/sys/fs/cgroup/goodman-e2e-control-$$"
 SINK_PORT="${GOODMAN_E2E_SINK_PORT:-$(free_port)}"
 WORKLOAD_PORT="${GOODMAN_E2E_WORKLOAD_PORT:-$(free_port)}"
 LEARN_OBS="${LEARN_OBS:-20}"
@@ -51,11 +52,13 @@ cleanup() {
     rm -f "$WORK"/isolate-*-v8.log
     for p in "${workload_pids[@]:-}"; do rm -f "/tmp/perf-$p.map"; done
     rm -rf "$FAKE_SECRETS"
+    rm -f "$WORK/secret-link"
     rm -f "$RULES"
   else
     echo "e2e logs preserved under /tmp/goodman-e2e-*.log" >&2
   fi
   rmdir "$CGROUP" 2>/dev/null || true
+  rmdir "$CONTROL_CGROUP" 2>/dev/null || true
 }
 trap cleanup EXIT
 
@@ -84,6 +87,8 @@ echo "   collector=$PORT workload=$WORKLOAD_PORT sink=$SINK_PORT"
 mkdir -p "$FAKE_SECRETS"
 echo "AKIA_FAKE_DO_NOT_USE=deadbeef" > "$FAKE_SECRETS/credentials"
 mkdir "$CGROUP"
+mkdir "$CONTROL_CGROUP"
+ln -sfn "$FAKE_SECRETS" "$WORK/secret-link"
 cat > "$RULES" <<'JSON'
 [
   {"name":"secret-read","pattern":"^READ .*(/(secrets?|credentials?)([/.]|$)|\\.npmrc|\\.aws|\\.ssh)","always_on":true,"action":"block"},
@@ -117,7 +122,7 @@ pids+=("$!")
 for i in $(seq 1 50); do curl -sf "$BASE/v1/healthz" >/dev/null 2>&1 && break; sleep 0.1; done
 
 ./bin/sensor -collector "$BASE" -proc-root /proc -batch-interval 500ms -metrics-addr "" -watch-interval 200ms \
-  -enforce-enabled -enforce-cgroup "$CGROUP" \
+  -enforce-enabled -enforce-cgroup "workload=$CGROUP" -enforce-cgroup "control=$CONTROL_CGROUP" \
   >/tmp/goodman-e2e-sensor.log 2>&1 &
 pids+=("$!")
 sleep 1
@@ -130,7 +135,7 @@ install_pkg() { # $1 = version dir
 }
 
 start_workload() {
-  ( cd "$WORK" && export GOODMAN_SINK_PORT="$SINK_PORT" GOODMAN_FAKE_CRED="$FAKE_SECRETS/credentials" PORT="$WORKLOAD_PORT" && \
+  ( cd "$WORK" && export GOODMAN_SINK_PORT="$SINK_PORT" GOODMAN_FAKE_CRED="secret-link/credentials" PORT="$WORKLOAD_PORT" && \
       exec node --perf-basic-prof-only-functions --interpreted-frames-native-stack server.js \
       >/tmp/goodman-e2e-workload.log 2>&1 ) &
   WORKLOAD_PID=$!; pids+=("$WORKLOAD_PID"); workload_pids+=("$WORKLOAD_PID")
@@ -203,12 +208,18 @@ assert a["old_version"] == "1.0.0", a["old_version"]
 nb = " ".join(a["new_behaviors"])
 assert "credential" in nb.lower() or "secret" in nb.lower(), f"missing secret read: {a['new_behaviors']}"
 assert "127.0.0.1:9999" in nb or "CONNECT" in nb, f"missing sink connect: {a['new_behaviors']}"
-assert "EXEC true" in nb, f"missing forked child exec (sched_process_fork propagation): {a['new_behaviors']}"
+assert any(b.startswith("EXEC /") and b.endswith("/true") for b in a["new_behaviors"]), f"missing canonical forked child exec: {a['new_behaviors']}"
 assert a.get("blocked"), f"file_open deny did not upgrade alert to blocked: {a}"
 # never misattribute to a different package
 assert not any(x["package"] not in ("good-pkg","<app>","<unknown>") for x in alerts), alerts
 print("OK: CRITICAL drift alert for good-pkg 1.0.0 -> 1.0.1 with secret read + sink connect + child exec")
 PY
+
+# The same literal is allowed in another explicitly enforced service cgroup.
+# This proves deny keys are scoped by cgroup, not applied node-wide.
+bash -c 'echo "$BASHPID" > "$1/cgroup.procs"; cat "$2" >/dev/null' _ "$CONTROL_CGROUP" "$FAKE_SECRETS/credentials" \
+  || fail "control service inherited workload file verdict"
+echo "OK: control service remains isolated from workload verdicts"
 
 passed=1
 echo "== DRIFT E2E PASSED =="

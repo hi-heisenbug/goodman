@@ -120,6 +120,8 @@ goodmanctl enforce on
 Keep `collector.replicas=1` while enforcement is enabled. The chart fails
 rendering for HA + enforcement because replica-local verdict state is not yet
 safe to serve interchangeably. HA detection remains supported with Postgres.
+Within a node, verdicts remain isolated by pod service and cgroup even when an
+enforce-labeled namespace contains multiple workloads.
 
 Requires kernel ≥ 5.10, `CONFIG_BPF_LSM`, `bpf` in `lsm=`, and cgroup v2. See
 [`docs/enforcement.md`](enforcement.md) and [`docs/pilot-runbook.md`](pilot-runbook.md).

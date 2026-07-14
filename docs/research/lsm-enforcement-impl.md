@@ -9,6 +9,13 @@
 >
 > Plan only — no `bpf/` code changes ship with this document.
 
+> **Implementation update (2026-07-14):** the original Phase 6 design below
+> was subsequently hardened. `struct event` now carries `dirfd` for
+> mount-namespace-aware relative-path resolution; deny maps use composite
+> `{cgroup_id, literal}` keys; verdict JSON is keyed by service; and exec/file
+> LSM hooks both use `bpf_d_path`. Where the historical plan conflicts with
+> [`../enforcement.md`](../enforcement.md), the shipped documentation wins.
+
 This plan is grounded in the code as it exists today: `bpf/goodman.bpf.c`
 (three tracepoint families, ring buffer, `watched_pids`), `bpf/goodman.h`
 (`struct event`, the wire-layout lockstep rule), `internal/loader/loader.go`
@@ -21,7 +28,7 @@ will extend), and `scripts/preflight.sh` (existing warn-level LSM checks).
 
 ---
 
-## 1. Does `struct event` change? **No.**
+## 1. Original decision: `struct event` unchanged
 
 Enforcement is implemented with **new maps and new programs only**. The wire
 struct crossing the kernel/user boundary is untouched:

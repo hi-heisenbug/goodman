@@ -49,9 +49,10 @@ func cgroupDirID(path string) (uint64, error) {
 	return st.Ino, nil
 }
 
-// ScanEnforcedCgroups lists enforce-labeled namespaces and resolves pod cgroup
-// ids on this node. Errors on individual pods are skipped (fail-open).
-func ScanEnforcedCgroups(cgroupRoot, nodeName string) (map[uint64]bool, error) {
+// ScanEnforcedCgroups lists enforce-labeled namespaces and resolves each local
+// pod cgroup id to the pod name Goodman uses as its service identity. Errors on
+// individual pods are skipped (fail-open).
+func ScanEnforcedCgroups(cgroupRoot, nodeName string) (map[uint64]string, error) {
 	client, err := inClusterClient()
 	if err != nil {
 		return nil, err
@@ -64,20 +65,35 @@ func ScanEnforcedCgroups(cgroupRoot, nodeName string) (map[uint64]bool, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := map[uint64]bool{}
+	return buildEnforcedCgroupScopes(nsEnforce, pods, func(_ string, uid string) ([]uint64, error) {
+		return CgroupIDsForPodUID(cgroupRoot, uid)
+	}), nil
+}
+
+func buildEnforcedCgroupScopes(
+	nsEnforce map[string]bool,
+	pods []podRowWithUID,
+	resolve func(service, uid string) ([]uint64, error),
+) map[uint64]string {
+	out := map[uint64]string{}
 	for _, p := range pods {
 		if !nsEnforce[p.Namespace] {
 			continue
 		}
-		ids, err := CgroupIDsForPodUID(cgroupRoot, p.UID)
+		service := p.serviceName()
+		ids, err := resolve(service, p.UID)
 		if err != nil {
 			continue
 		}
 		for _, id := range ids {
-			out[id] = true
+			if existing := out[id]; existing != "" && existing != service {
+				delete(out, id)
+				continue
+			}
+			out[id] = service
 		}
 	}
-	return out, nil
+	return out
 }
 
 func listNamespaceEnforceLabels(client *http.Client) (map[string]bool, error) {
@@ -119,7 +135,16 @@ func listNamespaceEnforceLabels(client *http.Client) (map[string]bool, error) {
 
 type podRowWithUID struct {
 	Namespace string
+	Name      string
+	Hostname  string
 	UID       string
+}
+
+func (p podRowWithUID) serviceName() string {
+	if p.Hostname != "" {
+		return p.Hostname
+	}
+	return p.Name
 }
 
 func listNodePodsWithUID(client *http.Client, nodeName string) ([]podRowWithUID, error) {
@@ -146,8 +171,12 @@ func listNodePodsWithUID(client *http.Client, nodeName string) ([]podRowWithUID,
 		Items []struct {
 			Metadata struct {
 				Namespace string `json:"namespace"`
+				Name      string `json:"name"`
 				UID       string `json:"uid"`
 			} `json:"metadata"`
+			Spec struct {
+				Hostname string `json:"hostname"`
+			} `json:"spec"`
 		} `json:"items"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
@@ -155,7 +184,48 @@ func listNodePodsWithUID(client *http.Client, nodeName string) ([]podRowWithUID,
 	}
 	out := make([]podRowWithUID, 0, len(list.Items))
 	for _, p := range list.Items {
-		out = append(out, podRowWithUID{Namespace: p.Metadata.Namespace, UID: p.Metadata.UID})
+		out = append(out, podRowWithUID{
+			Namespace: p.Metadata.Namespace,
+			Name:      p.Metadata.Name,
+			Hostname:  p.Spec.Hostname,
+			UID:       p.Metadata.UID,
+		})
+	}
+	return out, nil
+}
+
+// ResolveExplicitCgroupScopes resolves SERVICE=PATH entries used by local/e2e
+// runs. Requiring the service name prevents a local scope from accidentally
+// receiving another service's verdicts.
+func ResolveExplicitCgroupScopes(entries []string) (map[uint64]string, error) {
+	out := map[uint64]string{}
+	for _, entry := range entries {
+		service, path, ok := strings.Cut(entry, "=")
+		service = strings.TrimSpace(service)
+		path = strings.TrimSpace(path)
+		if !ok || service == "" || path == "" {
+			return nil, fmt.Errorf("enforce cgroup %q must be SERVICE=PATH", entry)
+		}
+		err := filepath.WalkDir(path, func(current string, d os.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if !d.IsDir() {
+				return nil
+			}
+			id, err := cgroupDirID(current)
+			if err != nil {
+				return err
+			}
+			if existing := out[id]; existing != "" && existing != service {
+				return fmt.Errorf("cgroup %d assigned to both %q and %q", id, existing, service)
+			}
+			out[id] = service
+			return nil
+		})
+		if err != nil {
+			return nil, fmt.Errorf("resolve enforce cgroup %q: %w", entry, err)
+		}
 	}
 	return out, nil
 }

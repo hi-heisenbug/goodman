@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Enforcement verdicts are isolated per service and local cgroup through
+  composite BPF keys; sibling services on the same node no longer share deny
+  literals.
+- File/exec detection now resolves `openat*` dirfds, cwd-relative paths,
+  symlinks, and container mount namespaces to the same kernel path identity
+  used by LSM enforcement. Unresolved paths remain alertable but fail open.
+
 ### Added
 
 - True HA collector (deferred Phase 5): `GOODMAN_HA_REPLICAS` / `-ha-replicas`
@@ -67,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Per-rule `exclude` patterns for noise tuning without deleting a rule.
 - Performance benchmarks (`make bench`) for the collector ingest pipeline and
   sensor canonicalization, and `docs/performance.md` documenting measured
-  throughput (~11.4k events/sec on SQLite), sensor overhead methodology, and the
+  throughput (~10.7k events/sec on SQLite), sensor overhead methodology, and the
   attribution-quality KPI.
 - Sensor CONNECT noise control: `-connect-cidr` / `GOODMAN_CONNECT_CIDR`
   aggregates public destination IPs to an IPv4 prefix (e.g. /16), collapsing

@@ -176,7 +176,16 @@ Raw syscall arguments are noisy — unique temp files, ephemeral ports. The same
 | `open* /app/node_modules/express/lib/view.js` | `READ /app/node_modules/express/**` |
 | `open* /etc/hosts` | `READ /etc/hosts` (shallow paths kept verbatim) |
 | `connect 140.82.113.6:443` | `CONNECT 140.82.113.6:443` |
-| `execve /usr/bin/curl` | `EXEC curl` |
+| `execve /usr/bin/curl` | `EXEC /usr/bin/curl` |
+
+Before canonicalization, file and exec paths are resolved against the target
+process, not the sensor host: absolute paths walk through
+`/proc/<pid>/root`; relative `openat*` paths use `/proc/<pid>/fd/<dirfd>` (or
+`/proc/<pid>/cwd` for `AT_FDCWD`); symlinks are followed component-by-component
+inside that root. This matches the kernel-resolved paths used by LSM
+enforcement, including container mount namespaces. If a dirfd disappears or a
+path cannot be resolved confidently, the behavior is tagged `<unresolved>`:
+it can still alert, but enforcement refuses to compile it.
 
 **Sensitive paths are never collapsed** — collapsing would hide exactly the reads
 Goodman must alert on. Any path containing `secret`, `token`, `credential`,

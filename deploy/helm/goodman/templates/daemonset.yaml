@@ -16,6 +16,9 @@ spec:
       annotations:
         prometheus.io/scrape: "true"
         prometheus.io/port: {{ .Values.sensor.metricsPort | quote }}
+{{- if .Values.enforce.enabled }}
+        goodman.io/enforcement-scope: "service-cgroup"
+{{- end }}
     spec:
       serviceAccountName: {{ .Release.Name }}-sensor
       hostPID: true

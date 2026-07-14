@@ -85,7 +85,7 @@ the dashboard. The same webhook also receives the weekly digest when
 | `-spool-events` | `GOODMAN_SPOOL_EVENTS` | `50000` | Max attributed events retained in RAM when the collector is unreachable. Oldest are evicted first; see `goodman_sensor_spool_*` metrics. |
 | `-enforce-enabled` | `GOODMAN_ENFORCE_ENABLED` | `false` | Load LSM enforcement programs and poll `/v1/enforce/state` (master gate at deploy; default off). |
 | `-cgroup-root` | `GOODMAN_CGROUP_ROOT` | `/sys/fs/cgroup` | Host cgroup v2 mount for enforcement scope (DaemonSet mounts when `enforce.enabled`). |
-| `-enforce-cgroup` | — | *(none)* | Repeatable explicit cgroup2 paths for lab/e2e scope (not a product surface). |
+| `-enforce-cgroup` | — | *(none)* | Repeatable `SERVICE=/cgroup2/path` scopes for lab/e2e. The service must match Goodman's event service; bare paths are rejected fail-open. |
 | `-watch-interval` | — | `3s` | How often to rescan `/proc` for runtime processes. |
 | `-stdout` | — | `false` | Print attributed events to stdout instead of sending to the collector (debugging). |
 | `-raw` | — | `false` | With `-stdout`: also print raw events including stack depth. |

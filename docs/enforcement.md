@@ -26,25 +26,34 @@ allowing sensors to flap between divergent replica state.
 A `block` rule alone never denies anything — it compiles verdicts and sets
 `would_block` on alerts exactly like `warn`, plus kernel denies once armed.
 
-### Current scope limitations
+### Service and cgroup isolation
 
-- Verdict maps are node-wide. Every cgroup explicitly placed in
-  `enforced_cgroups` receives the same compiled path/address/exec verdict set;
-  verdicts are not yet keyed by service or cgroup. Keep the enforced scope
-  narrow and do not assume one service's verdicts are isolated from another
-  enforced service on the same node.
-- File detection records the syscall path argument while `file_open`
-  enforcement checks the kernel-resolved `d_path`. Relative and placeholder
-  paths are rejected as uncompilable, but a symlink alias can still make an
-  observed absolute path differ from the resolved enforcement path. That case
-  fails open and is not a block guarantee.
+The collector keeps behaviors and compiled verdicts keyed by service. Each
+sensor maps local pod cgroup IDs to the pod service identity and expands
+verdicts into composite `{cgroup_id, path|address}` BPF keys. Two enforced
+services on the same node can therefore use the same literal independently;
+one service's verdict never matches the other's cgroup.
+
+During a verdict/scope change the sensor removes all entries from
+`enforced_cgroups`, reconciles the composite deny maps, then re-arms the current
+scopes only after every map succeeds. A partial update therefore fails open.
+
+### Path identity
+
+Detection carries the `openat*` dirfd in `RawEvent` and resolves relative paths,
+cwd paths, symlinks, and container mount namespaces through `/proc/<pid>/root`.
+Exec detection follows the same process-root resolver. Kernel enforcement uses
+`bpf_d_path` for both `file_open` and `bprm_check_security`, so observed and
+enforced paths use the same absolute, symlink-resolved identity. If user space
+cannot resolve a dirfd/path confidently, it records an `<unresolved>` behavior
+that may alert but never compiles into a deny key.
 
 ## Fail-open matrix (summary)
 
 | Condition | Kernel |
 |---|---|
 | Master gate off, runtime off, deadline lapsed, cgroup not scoped | **allow** |
-| Verdict not compilable (CIDR connect, relative path, placeholder) | **allow** (surfaced in `goodmanctl enforce status`) |
+| Verdict not compilable (CIDR connect, collapsed/placeholder/unresolved path) | **allow** (surfaced in `goodmanctl enforce status`) |
 | LSM unavailable (`CONFIG_BPF_LSM`, `bpf` not in `lsm=`, attach error) | **allow** (sensor logs degrade; detection continues) |
 | Ring buffer full on deny | **deny stands** (telemetry may drop; `deny_event_drops` counter) |
 
@@ -65,12 +74,12 @@ User space compiles concrete literals only — the kernel never regex-matches:
 
 | Behavior | Verdict map | Notes |
 |---|---|---|
-| `READ /etc/shadow` | `deny_open` | absolute path ≤ 255 bytes |
-| `CONNECT 169.254.169.254:80` | `deny_connect` | literal IP; port `0` = any port |
-| `EXEC /bin/sh` | `deny_exec` | absolute path as in `bprm->filename` |
+| `READ /etc/shadow` | `deny_open` | `{cgroup_id, absolute resolved path}` |
+| `CONNECT 169.254.169.254:80` | `deny_connect` | `{cgroup_id, literal IP, port}`; port `0` = any port |
+| `EXEC /usr/bin/sh` | `deny_exec` | `{cgroup_id, absolute resolved path}` |
 
 Skipped (fail-open): CIDR-aggregated connects (`-connect-cidr`), collapsed
-paths (`**`), relative exec paths.
+paths (`**`), placeholders, and `<unresolved>` paths.
 
 ## Kill switch / heartbeat
 
@@ -103,8 +112,10 @@ kubectl label namespace my-app goodman.io/enforce=enabled
 
 ## Lab / e2e (non-k8s)
 
-Sensors accept repeatable `-enforce-cgroup /sys/fs/cgroup/...` paths for
-`make e2e` — not a supported production surface.
+Sensors accept repeatable
+`-enforce-cgroup SERVICE=/sys/fs/cgroup/...` scopes for `make e2e` — not a
+supported production surface. Bare paths are rejected because they cannot be
+associated safely with service-scoped verdicts.
 
 ## Human verification
 

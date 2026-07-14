@@ -38,3 +38,44 @@ func TestResolveCgroupPaths(t *testing.T) {
 		t.Fatalf("want parent+child ids, got %v", m)
 	}
 }
+
+func TestBuildEnforcedCgroupScopesMapsPodNameToEveryCgroup(t *testing.T) {
+	scopes := buildEnforcedCgroupScopes(
+		map[string]bool{"prod": true, "dev": false},
+		[]podRowWithUID{
+			{Namespace: "prod", Name: "checkout-abc", Hostname: "checkout-host", UID: "uid-a"},
+			{Namespace: "dev", Name: "worker-def", UID: "uid-b"},
+		},
+		func(_ string, uid string) ([]uint64, error) {
+			if uid == "uid-a" {
+				return []uint64{11, 12}, nil
+			}
+			return []uint64{22}, nil
+		},
+	)
+	if len(scopes) != 2 || scopes[11] != "checkout-host" || scopes[12] != "checkout-host" {
+		t.Fatalf("scopes = %+v", scopes)
+	}
+	if _, ok := scopes[22]; ok {
+		t.Fatalf("unenforced namespace leaked into scopes: %+v", scopes)
+	}
+}
+
+func TestResolveExplicitCgroupScopesRequiresService(t *testing.T) {
+	root := t.TempDir()
+	if _, err := ResolveExplicitCgroupScopes([]string{root}); err == nil {
+		t.Fatal("bare cgroup path must be rejected without a service name")
+	}
+	scopes, err := ResolveExplicitCgroupScopes([]string{"workload=" + root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(scopes) == 0 {
+		t.Fatal("explicit service scope resolved no cgroups")
+	}
+	for _, service := range scopes {
+		if service != "workload" {
+			t.Fatalf("service = %q, want workload", service)
+		}
+	}
+}

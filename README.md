@@ -180,7 +180,8 @@ kernel. Enforcement changes need an LSM-capable kernel (`CONFIG_BPF_LSM`,
 
 Highest-severity invariant: `bpf/goodman.h` `struct event` and
 `internal/model/types.go` `RawEvent` stay byte-for-byte identical
-(`internal/model/types_test.go`).
+(`internal/model/types_test.go`). That contract includes `DirFD`, which lets
+the sensor resolve relative file paths inside the target mount namespace.
 
 ## Status
 

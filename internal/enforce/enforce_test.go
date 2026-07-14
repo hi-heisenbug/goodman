@@ -68,14 +68,36 @@ func TestManagerTracksOnlyBoundedBlockRuleBehaviors(t *testing.T) {
 	}
 	m := NewManager(nil, true)
 	m.SetRules(rules)
-	m.RecordBehavior("READ /tmp/benign")
-	if len(m.behaviors) != 0 {
+	m.RecordBehavior("web", "READ /tmp/benign")
+	if m.behaviorCount != 0 {
 		t.Fatalf("non-block behavior was retained: %v", m.behaviors)
 	}
 	for i := 0; i < maxTrackedBehaviors+100; i++ {
-		m.RecordBehavior(fmt.Sprintf("CONNECT 10.0.%d.%d:443", i/256, i%256))
+		m.RecordBehavior("web", fmt.Sprintf("CONNECT 10.0.%d.%d:443", i/256, i%256))
 	}
-	if len(m.behaviors) != maxTrackedBehaviors {
-		t.Fatalf("tracked behaviors = %d, want cap %d", len(m.behaviors), maxTrackedBehaviors)
+	if m.behaviorCount != maxTrackedBehaviors {
+		t.Fatalf("tracked behaviors = %d, want cap %d", m.behaviorCount, maxTrackedBehaviors)
+	}
+}
+
+func TestManagerIsolatesVerdictsByService(t *testing.T) {
+	rules, err := diff.CompileRules([]diff.Rule{
+		{Name: "reads", Pattern: `^READ `, Action: diff.ActionBlock},
+		{Name: "exec", Pattern: `^EXEC `, Action: diff.ActionBlock},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := NewManager(nil, true)
+	m.SetRules(rules)
+	m.RecordBehavior("checkout-abc", "READ /etc/shadow")
+	m.RecordBehavior("worker-def", "EXEC /bin/sh")
+
+	_, _, verdicts := m.StateForSensor()
+	if got := verdicts["checkout-abc"]; len(got.Open) != 1 || got.Open[0] != "/etc/shadow" || len(got.Exec) != 0 {
+		t.Fatalf("checkout verdicts = %+v", got)
+	}
+	if got := verdicts["worker-def"]; len(got.Exec) != 1 || got.Exec[0] != "/bin/sh" || len(got.Open) != 0 {
+		t.Fatalf("worker verdicts = %+v", got)
 	}
 }

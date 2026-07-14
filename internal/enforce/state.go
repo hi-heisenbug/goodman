@@ -14,15 +14,16 @@ const maxTrackedBehaviors = 1024
 
 // Manager holds runtime enforcement state and compiled verdicts.
 type Manager struct {
-	mu           sync.RWMutex
-	masterGate   bool
-	enabled      bool
-	rev          int
-	verdicts     VerdictSet
-	behaviors    map[string]bool
-	rules        []diff.Rule
-	sensorHB     map[string]time.Time
-	sensorActive map[string]bool
+	mu            sync.RWMutex
+	masterGate    bool
+	enabled       bool
+	rev           int
+	verdicts      ServiceVerdicts
+	behaviors     map[string]map[string]bool
+	behaviorCount int
+	rules         []diff.Rule
+	sensorHB      map[string]time.Time
+	sensorActive  map[string]bool
 
 	store *store.Store
 }
@@ -30,7 +31,8 @@ type Manager struct {
 func NewManager(st *store.Store, masterGate bool) *Manager {
 	m := &Manager{
 		masterGate:   masterGate,
-		behaviors:    map[string]bool{},
+		verdicts:     ServiceVerdicts{},
+		behaviors:    map[string]map[string]bool{},
 		sensorHB:     map[string]time.Time{},
 		sensorActive: map[string]bool{},
 		store:        st,
@@ -55,17 +57,23 @@ func (m *Manager) SetRules(rules []diff.Rule) {
 
 func (m *Manager) MasterGate() bool { return m.masterGate }
 
-func (m *Manager) RecordBehavior(behavior string) {
-	if behavior == "" {
+func (m *Manager) RecordBehavior(service, behavior string) {
+	if service == "" || behavior == "" {
 		return
 	}
 	m.mu.Lock()
-	if m.behaviors[behavior] || len(m.behaviors) >= maxTrackedBehaviors || !m.matchesBlockRuleLocked(behavior) {
+	serviceBehaviors := m.behaviors[service]
+	if serviceBehaviors[behavior] || m.behaviorCount >= maxTrackedBehaviors || !m.matchesBlockRuleLocked(behavior) {
 		m.mu.Unlock()
 		return
 	}
-	m.behaviors[behavior] = true
-	m.verdicts = mergeVerdictSets(m.verdicts, CompileVerdicts(m.rules, []string{behavior}))
+	if serviceBehaviors == nil {
+		serviceBehaviors = map[string]bool{}
+		m.behaviors[service] = serviceBehaviors
+	}
+	serviceBehaviors[behavior] = true
+	m.behaviorCount++
+	m.verdicts[service] = mergeVerdictSets(m.verdicts[service], CompileVerdicts(m.rules, []string{behavior}))
 	m.rev++
 	rev := m.rev
 	m.mu.Unlock()
@@ -127,14 +135,17 @@ func (m *Manager) matchesBlockRuleLocked(behavior string) bool {
 
 func (m *Manager) recomputeLocked() int {
 	if !m.masterGate {
-		m.verdicts = VerdictSet{}
+		m.verdicts = ServiceVerdicts{}
 		return m.rev
 	}
-	beh := make([]string, 0, len(m.behaviors))
-	for b := range m.behaviors {
-		beh = append(beh, b)
+	m.verdicts = make(ServiceVerdicts, len(m.behaviors))
+	for service, serviceBehaviors := range m.behaviors {
+		behaviors := make([]string, 0, len(serviceBehaviors))
+		for behavior := range serviceBehaviors {
+			behaviors = append(behaviors, behavior)
+		}
+		m.verdicts[service] = CompileVerdicts(m.rules, behaviors)
 	}
-	m.verdicts = CompileVerdicts(m.rules, beh)
 	m.rev++
 	return m.rev
 }
@@ -177,13 +188,13 @@ func (m *Manager) Rev() int {
 	return m.rev
 }
 
-func (m *Manager) StateForSensor() (enabled bool, rev int, vs VerdictSet) {
+func (m *Manager) StateForSensor() (enabled bool, rev int, vs ServiceVerdicts) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.enabled, m.rev, m.verdicts
+	return m.enabled, m.rev, cloneServiceVerdicts(m.verdicts)
 }
 
-func (m *Manager) Status() (enabled, master bool, rev int, vs VerdictSet, sensors map[string]SensorStatus) {
+func (m *Manager) Status() (enabled, master bool, rev int, vs ServiceVerdicts, sensors map[string]SensorStatus) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	sensors = make(map[string]SensorStatus, len(m.sensorHB))
@@ -193,7 +204,20 @@ func (m *Manager) Status() (enabled, master bool, rev int, vs VerdictSet, sensor
 			Active:        m.sensorActive[name],
 		}
 	}
-	return m.enabled, m.masterGate, m.rev, m.verdicts, sensors
+	return m.enabled, m.masterGate, m.rev, cloneServiceVerdicts(m.verdicts), sensors
+}
+
+func cloneServiceVerdicts(in ServiceVerdicts) ServiceVerdicts {
+	out := make(ServiceVerdicts, len(in))
+	for service, verdicts := range in {
+		out[service] = VerdictSet{
+			Open:    append([]string(nil), verdicts.Open...),
+			Connect: append([]ConnectVerdict(nil), verdicts.Connect...),
+			Exec:    append([]string(nil), verdicts.Exec...),
+			Skipped: append([]SkippedVerdict(nil), verdicts.Skipped...),
+		}
+	}
+	return out
 }
 
 type SensorStatus struct {

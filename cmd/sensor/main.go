@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -93,7 +94,7 @@ func main() {
 		cgroupRoot     = flag.String("cgroup-root", envOr("GOODMAN_CGROUP_ROOT", "/sys/fs/cgroup"), "host cgroup2 mount for enforcement scope")
 		enforceCgroup  multiString
 	)
-	flag.Var(&enforceCgroup, "enforce-cgroup", "cgroup2 path subject to enforcement (repeatable; e2e/lab)")
+	flag.Var(&enforceCgroup, "enforce-cgroup", "SERVICE=cgroup2-path subject to enforcement (repeatable; e2e/lab)")
 	flag.Parse()
 	log.SetPrefix("sensor: ")
 
@@ -220,8 +221,9 @@ func main() {
 	}
 	go reportCoverageLoop(ctx, client, *collectorURL, *ingestToken, sensorName)
 	if *enforceEnabled {
-		go enforceScopeLoop(ctx, l, *cgroupRoot, sensorName, []string(enforceCgroup))
-		go enforcePollLoop(ctx, client, l, *collectorURL, *ingestToken, sensorName)
+		reconciler := newEnforcementReconciler(l)
+		go enforceScopeLoop(ctx, reconciler, *cgroupRoot, sensorName, []string(enforceCgroup))
+		go enforcePollLoop(ctx, client, l, reconciler, *collectorURL, *ingestToken, sensorName)
 	}
 	sendBatches(ctx, client, *collectorURL, *ingestToken, sensorName, out, *batchEvery, *spoolEvents, &dropped)
 }
@@ -235,17 +237,98 @@ func isDenyEvent(t uint8) bool {
 	}
 }
 
-func enforceScopeLoop(ctx context.Context, l *loader.Loader, cgroupRoot, nodeName string, explicit []string) {
+type enforcementLoader interface {
+	ReconcileEnforcement(map[uint64]string, enforce.ServiceVerdicts) error
+}
+
+type enforcementReconciler struct {
+	mu       sync.Mutex
+	loader   enforcementLoader
+	scopes   map[uint64]string
+	verdicts enforce.ServiceVerdicts
+	rev      int
+	haveRev  bool
+	dirty    bool
+}
+
+func newEnforcementReconciler(l enforcementLoader) *enforcementReconciler {
+	return &enforcementReconciler{
+		loader:   l,
+		scopes:   map[uint64]string{},
+		verdicts: enforce.ServiceVerdicts{},
+		dirty:    true,
+	}
+}
+
+func (r *enforcementReconciler) setScopes(scopes map[uint64]string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !sameScopes(r.scopes, scopes) {
+		r.scopes = cloneScopes(scopes)
+		r.dirty = true
+	}
+	return r.applyLocked()
+}
+
+func (r *enforcementReconciler) setVerdicts(rev int, verdicts enforce.ServiceVerdicts) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.haveRev || r.rev != rev {
+		r.rev = rev
+		r.haveRev = true
+		r.verdicts = verdicts
+		r.dirty = true
+	}
+	return r.applyLocked()
+}
+
+func (r *enforcementReconciler) applyLocked() error {
+	if !r.dirty {
+		return nil
+	}
+	if err := r.loader.ReconcileEnforcement(r.scopes, r.verdicts); err != nil {
+		return err
+	}
+	r.dirty = false
+	return nil
+}
+
+func sameScopes(a, b map[uint64]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for id, service := range a {
+		if b[id] != service {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneScopes(in map[uint64]string) map[uint64]string {
+	out := make(map[uint64]string, len(in))
+	for id, service := range in {
+		out[id] = service
+	}
+	return out
+}
+
+func enforceScopeLoop(ctx context.Context, reconciler *enforcementReconciler, cgroupRoot, nodeName string, explicit []string) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	reconcile := func() {
-		ids := map[uint64]bool{}
+		scopes := map[uint64]string{}
+		var err error
 		if len(explicit) > 0 {
-			ids = coverage.ResolveCgroupPaths(explicit)
-		} else if scanned, err := coverage.ScanEnforcedCgroups(cgroupRoot, nodeName); err == nil {
-			ids = scanned
+			scopes, err = coverage.ResolveExplicitCgroupScopes(explicit)
+		} else {
+			scopes, err = coverage.ScanEnforcedCgroups(cgroupRoot, nodeName)
 		}
-		if err := l.ReconcileEnforcedCgroups(ids); err != nil {
+		if err != nil {
+			log.Printf("enforce scope: %v", err)
+			return
+		}
+		if err := reconciler.setScopes(scopes); err != nil {
 			log.Printf("enforce scope: %v", err)
 		}
 	}
@@ -260,11 +343,10 @@ func enforceScopeLoop(ctx context.Context, l *loader.Loader, cgroupRoot, nodeNam
 	}
 }
 
-func enforcePollLoop(ctx context.Context, client *http.Client, l *loader.Loader, baseURL, token, sensor string) {
+func enforcePollLoop(ctx context.Context, client *http.Client, l *loader.Loader, reconciler *enforcementReconciler, baseURL, token, sensor string) {
 	const ttl = 10 * time.Second
 	t := time.NewTicker(500 * time.Millisecond)
 	defer t.Stop()
-	var lastRev int
 	poll := func() {
 		u := baseURL + "/v1/enforce/state?sensor=" + urlQueryEscape(sensor) +
 			"&enforcement_active=" + strconv.FormatBool(l.EnforcementActive())
@@ -284,9 +366,9 @@ func enforcePollLoop(ctx context.Context, client *http.Client, l *loader.Loader,
 			return
 		}
 		var state struct {
-			Enabled  bool               `json:"enabled"`
-			Rev      int                `json:"rev"`
-			Verdicts enforce.VerdictSet `json:"verdicts"`
+			Enabled  bool                    `json:"enabled"`
+			Rev      int                     `json:"rev"`
+			Verdicts enforce.ServiceVerdicts `json:"verdicts"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&state); err != nil {
 			return
@@ -297,11 +379,8 @@ func enforcePollLoop(ctx context.Context, client *http.Client, l *loader.Loader,
 		} else {
 			_ = l.SetEnforceDeadline(0)
 		}
-		if state.Rev != lastRev {
-			lastRev = state.Rev
-			if err := l.ReconcileDenyMaps(state.Verdicts); err != nil {
-				log.Printf("enforce verdicts: %v", err)
-			}
+		if err := reconciler.setVerdicts(state.Rev, state.Verdicts); err != nil {
+			log.Printf("enforce verdicts: %v", err)
 		}
 	}
 	poll()

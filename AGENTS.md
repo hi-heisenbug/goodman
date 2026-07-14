@@ -129,8 +129,11 @@ identical layout: same field order, sizes, and alignment.
 - `internal/model/types_test.go` asserts the exact size and every field offset.
   If it fails, the structs have drifted — fix the layout, do not edit the test
   to match.
-- The padding is explicit (`_pad[3]` / `Pad [3]byte`) so the compiler inserts
-  none implicitly. Keep it that way.
+- The padding is explicit (`_pad[3]` + `_stack_pad[4]` in C, `Pad` +
+  `StackPad` in Go) so the compiler inserts none implicitly. Keep it that way.
+- `dirfd` / `DirFD` carries the `openat*` base descriptor (`AT_FDCWD` for
+  `open` and `execve`) so user space can resolve relative paths inside the
+  target process's mount namespace.
 
 This is the highest-severity invariant in the codebase. A silent layout drift
 produces garbage attribution with no crash.
@@ -257,10 +260,10 @@ prefix tries. New `EventType` deny values (`EVENT_DENY_*`) mirror in
 existing `type` field, not layout changes (`types_test.go` stays unedited).
 Denied events skip fingerprint learning; ring-buffer reader stays non-blocking.
 Live proof requires human `sudo make e2e` on an LSM kernel — see
-`docs/enforcement.md`. Verdict maps are currently node-wide across all
-explicitly enforced cgroups, and symlink aliases can make detection paths differ
-from the kernel-resolved enforcement path; both limitations fail open and are
-documented there.
+`docs/enforcement.md`. Collector verdicts stay keyed by service; sensors expand
+them into composite `{cgroup_id, literal}` keys only for matching local pod
+cgroups. Detection resolves relative paths, dirfds, and symlinks through the
+target `/proc/<pid>/root`; unresolved paths alert but never compile to blocks.
 
 **Add a high-risk rule** — edit `deploy/rules.example.json` (or `DefaultRules`
 in `internal/diff/diff.go`). Patterns are case-insensitive regexes matched

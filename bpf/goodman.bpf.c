@@ -16,6 +16,7 @@ char LICENSE[] SEC("license") = "GPL";
 /* AF constants (not exported via BTF). */
 #define AF_INET  2
 #define AF_INET6 10
+#define AT_FDCWD -100
 
 struct {
     __uint(type, BPF_MAP_TYPE_RINGBUF);
@@ -58,6 +59,11 @@ struct deny_path {
     char path[PATH_MAX_LEN];
 };
 
+struct deny_path_key {
+    __u64 cgroup_id;
+    char path[PATH_MAX_LEN];
+};
+
 /* bpf_d_path may leave bytes after its terminating NUL untouched. Render into
  * per-CPU scratch space, then copy the string into a zero-initialized key so
  * exact map lookups match userspace's zero-padded deny keys. */
@@ -70,12 +76,13 @@ struct {
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, struct deny_path);
+    __type(key, struct deny_path_key);
     __type(value, __u8);
-    __uint(max_entries, 1024);
+    __uint(max_entries, 16384);
 } deny_open SEC(".maps");
 
 struct deny_addr {
+    __u64 cgroup_id;
     __u8  family;
     __u8  _pad;
     __u16 port;
@@ -86,14 +93,14 @@ struct {
     __uint(type, BPF_MAP_TYPE_HASH);
     __type(key, struct deny_addr);
     __type(value, __u8);
-    __uint(max_entries, 1024);
+    __uint(max_entries, 16384);
 } deny_connect SEC(".maps");
 
 struct {
     __uint(type, BPF_MAP_TYPE_HASH);
-    __type(key, struct deny_path);
+    __type(key, struct deny_path_key);
     __type(value, __u8);
-    __uint(max_entries, 1024);
+    __uint(max_entries, 16384);
 } deny_exec SEC(".maps");
 
 struct {
@@ -124,10 +131,10 @@ static __always_inline int enforce_active(void)
     return bpf_ktime_get_ns() < *deadline;
 }
 
-static __always_inline int in_enforced_cgroup(void)
+static __always_inline int enforced_cgroup(__u64 *cgroup_id)
 {
-    __u64 cg = bpf_get_current_cgroup_id();
-    return bpf_map_lookup_elem(&enforced_cgroups, &cg) != NULL;
+    *cgroup_id = bpf_get_current_cgroup_id();
+    return bpf_map_lookup_elem(&enforced_cgroups, cgroup_id) != NULL;
 }
 
 static __always_inline int emit_deny(__u32 tgid, __u8 type, const char *arg, int arg_len)
@@ -139,10 +146,14 @@ static __always_inline int emit_deny(__u32 tgid, __u8 type, const char *arg, int
     }
     e->pid = tgid;
     e->tid = (__u32)bpf_get_current_pid_tgid();
+    e->dirfd = AT_FDCWD;
     e->type = type;
     e->timestamp_ns = bpf_ktime_get_ns();
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     __builtin_memset(e->arg, 0, sizeof(e->arg));
+    __builtin_memset(e->_pad, 0, sizeof(e->_pad));
+    __builtin_memset(e->_stack_pad, 0, sizeof(e->_stack_pad));
+    __builtin_memset(e->stack, 0, sizeof(e->stack));
     if (arg && arg_len > 0) {
         int n = arg_len;
         if (n >= PATH_MAX_LEN)
@@ -178,10 +189,13 @@ static __always_inline struct event *reserve_event(void *ctx, __u32 tgid, __u8 t
     }
     e->pid = tgid;
     e->tid = (__u32)bpf_get_current_pid_tgid();
+    e->dirfd = AT_FDCWD;
     e->type = type;
     e->timestamp_ns = bpf_ktime_get_ns();
     bpf_get_current_comm(&e->comm, sizeof(e->comm));
     e->arg[0] = 0;
+    __builtin_memset(e->_pad, 0, sizeof(e->_pad));
+    __builtin_memset(e->_stack_pad, 0, sizeof(e->_stack_pad));
     /* THE KEY LINE: capture the user-space stack via frame pointers. */
     long n = bpf_get_stack(ctx, e->stack, sizeof(e->stack), BPF_F_USER_STACK);
     e->stack_len = n > 0 ? (__u32)(n / sizeof(__u64)) : 0;
@@ -227,7 +241,7 @@ int trace_process_exit(struct trace_event_raw_sched_process_exit *ctx)
     return 0;
 }
 
-static __always_inline int submit_file_open(struct trace_event_raw_sys_enter *ctx, __u64 filename_arg)
+static __always_inline int submit_file_open(struct trace_event_raw_sys_enter *ctx, __s32 dirfd, __u64 filename_arg)
 {
     __u32 tgid;
     if (!watched(&tgid))
@@ -236,6 +250,7 @@ static __always_inline int submit_file_open(struct trace_event_raw_sys_enter *ct
     struct event *e = reserve_event(ctx, tgid, EVENT_FILE_OPEN);
     if (!e)
         return 0;
+    e->dirfd = dirfd;
     const char *path = (const char *)filename_arg;
     bpf_probe_read_user_str(&e->arg, sizeof(e->arg), path);
     bpf_ringbuf_submit(e, 0);
@@ -245,19 +260,19 @@ static __always_inline int submit_file_open(struct trace_event_raw_sys_enter *ct
 SEC("tracepoint/syscalls/sys_enter_open")
 int trace_open(struct trace_event_raw_sys_enter *ctx)
 {
-    return submit_file_open(ctx, ctx->args[0]); /* open: filename */
+    return submit_file_open(ctx, AT_FDCWD, ctx->args[0]); /* open: filename */
 }
 
 SEC("tracepoint/syscalls/sys_enter_openat")
 int trace_openat(struct trace_event_raw_sys_enter *ctx)
 {
-    return submit_file_open(ctx, ctx->args[1]); /* openat: filename */
+    return submit_file_open(ctx, (__s32)ctx->args[0], ctx->args[1]); /* openat: dirfd, filename */
 }
 
 SEC("tracepoint/syscalls/sys_enter_openat2")
 int trace_openat2(struct trace_event_raw_sys_enter *ctx)
 {
-    return submit_file_open(ctx, ctx->args[1]); /* openat2: filename */
+    return submit_file_open(ctx, (__s32)ctx->args[0], ctx->args[1]); /* openat2: dirfd, filename */
 }
 
 /* Render "a.b.c.d:port" or "[v6-hex]:port" into e->arg without snprintf
@@ -377,7 +392,8 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx)
 SEC("lsm/file_open")
 int enforce_file_open(struct file *file)
 {
-    if (!enforce_active() || !in_enforced_cgroup())
+    __u64 cgroup_id = 0;
+    if (!enforce_active() || !enforced_cgroup(&cgroup_id))
         return 0;
 
     __u32 tgid = bpf_get_current_pid_tgid() >> 32;
@@ -389,7 +405,7 @@ int enforce_file_open(struct file *file)
     if (n <= 0)
         return 0;
 
-    struct deny_path key = {};
+    struct deny_path_key key = {.cgroup_id = cgroup_id};
     n = bpf_probe_read_kernel_str(key.path, sizeof(key.path), scratch->path);
     if (n <= 0)
         return 0;
@@ -402,7 +418,8 @@ int enforce_file_open(struct file *file)
 SEC("lsm/socket_connect")
 int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen)
 {
-    if (!enforce_active() || !in_enforced_cgroup())
+    __u64 cgroup_id = 0;
+    if (!enforce_active() || !enforced_cgroup(&cgroup_id))
         return 0;
 
     __u32 tgid = bpf_get_current_pid_tgid() >> 32;
@@ -411,7 +428,7 @@ int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int ad
     if (family != AF_INET && family != AF_INET6)
         return 0;
 
-    struct deny_addr key = {};
+    struct deny_addr key = {.cgroup_id = cgroup_id};
     key.family = (__u8)family;
     char arg_buf[PATH_MAX_LEN] = {};
     int pos = 0;
@@ -465,16 +482,24 @@ int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int ad
 SEC("lsm/bprm_check_security")
 int enforce_bprm_check(struct linux_binprm *bprm)
 {
-    if (!enforce_active() || !in_enforced_cgroup())
+    __u64 cgroup_id = 0;
+    if (!enforce_active() || !enforced_cgroup(&cgroup_id))
         return 0;
 
     __u32 tgid = bpf_get_current_pid_tgid() >> 32;
-    struct deny_path key = {};
-    const char *filename = NULL;
-    bpf_core_read(&filename, sizeof(filename), &bprm->filename);
-    if (!filename)
+    __u32 zero = 0;
+    struct deny_path *scratch = bpf_map_lookup_elem(&deny_path_scratch, &zero);
+    if (!scratch)
         return 0;
-    long n = bpf_probe_read_kernel_str(key.path, sizeof(key.path), filename);
+    struct deny_path_key key = {.cgroup_id = cgroup_id};
+    struct file *file = NULL;
+    bpf_core_read(&file, sizeof(file), &bprm->file);
+    if (!file)
+        return 0;
+    long n = bpf_d_path((struct path *)&file->f_path, scratch->path, sizeof(scratch->path));
+    if (n <= 0)
+        return 0;
+    n = bpf_probe_read_kernel_str(key.path, sizeof(key.path), scratch->path);
     if (n <= 0)
         return 0;
 

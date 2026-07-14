@@ -75,7 +75,7 @@ python3 - "$STATE" <<'PY' || fail "enforce state assertions"
 import json, sys
 s = json.loads(sys.argv[1])
 assert s.get("enabled") is False
-open_paths = s.get("verdicts", {}).get("open", [])
+open_paths = s.get("verdicts", {}).get("web", {}).get("open", [])
 assert "/etc/shadow" in open_paths, open_paths
 print("OK: verdict compiled while runtime switch off")
 PY

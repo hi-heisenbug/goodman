@@ -57,7 +57,8 @@ by maintainers.
 ## Invariants you must not break
 
 - **Wire-struct layout.** `bpf/goodman.h` `struct event` ≡ `internal/model`
-  `RawEvent`, byte for byte. `types_test.go` enforces it. Change both together.
+  `RawEvent`, byte for byte. `types_test.go` enforces it. Change both together;
+  `DirFD` and both explicit padding fields are part of the contract.
 - **Never misattribute.** Resolvers return `ok`/sentinels; prefer `<unknown>` over
   a wrong package.
 - **Don't block the ring-buffer reader.** Hot-path IO goes through the buffered

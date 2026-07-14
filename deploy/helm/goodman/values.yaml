@@ -124,9 +124,11 @@ rbac:
 
 # Kernel enforcement (eBPF LSM block mode). Requires kernel >= 5.10 with
 # CONFIG_BPF_LSM=y and "bpf" in the active lsm= list, and cgroup v2.
-# Denies apply only inside namespaces labeled goodman.io/enforce=enabled,
-# only for behaviors matching rules with action: "block", and only while the
-# sensor heartbeat is live. Everything fails open. Enforcement currently
-# requires collector.replicas=1; the chart rejects HA + enforcement together.
+# Denies apply only inside namespaces labeled goodman.io/enforce=enabled. Each
+# pod cgroup receives only verdicts learned for that pod's Goodman service name;
+# sibling services on the same node remain isolated. Only behaviors matching
+# rules with action: "block" are compiled, and only while the sensor heartbeat
+# is live. Everything fails open. Enforcement currently requires
+# collector.replicas=1; the chart rejects HA + enforcement together.
 enforce:
   enabled: false

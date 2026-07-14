@@ -8,7 +8,9 @@
 >
 > **Gate reminder:** the build half ships for a named Python customer (or a
 > clear pipeline stall on "we're mostly Python"). The plan below is written so
-> an agent can execute it in ~1 week when the trigger fires.
+> an agent can execute it in ~1 week when the trigger fires. Python attribution
+> itself did not require a wire change; a later enforcement hardening added
+> `RawEvent.DirFD` for shared file/exec path resolution.
 
 ## What already exists (do not rebuild)
 

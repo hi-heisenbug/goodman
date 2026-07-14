@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/hi-heisenbug/goodman/internal/diff"
+	"github.com/hi-heisenbug/goodman/internal/enforce"
 	"github.com/hi-heisenbug/goodman/internal/fingerprint"
 	"github.com/hi-heisenbug/goodman/internal/model"
 	"github.com/hi-heisenbug/goodman/internal/store"
@@ -336,6 +337,39 @@ func TestHTTPServerSetsReadHeaderTimeout(t *testing.T) {
 	srv := newHTTPServer(":0", http.NotFoundHandler())
 	if srv.ReadHeaderTimeout <= 0 {
 		t.Fatal("ReadHeaderTimeout must protect the collector from slowloris requests")
+	}
+}
+
+func TestEnforceStateReturnsServiceScopedVerdicts(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "enforce-state.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	rules, err := diff.CompileRules([]diff.Rule{{Name: "reads", Pattern: `^READ `, Action: diff.ActionBlock}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager := enforce.NewManager(st, true)
+	manager.SetRules(rules)
+	manager.RecordBehavior("checkout-abc", "READ /etc/shadow")
+	manager.RecordBehavior("worker-def", "READ /var/run/worker.key")
+	server := NewServer(st, nil, nil)
+	server.SetEnforceManager(manager)
+
+	rec := httptest.NewRecorder()
+	server.Router(nil).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/v1/enforce/state", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var state struct {
+		Verdicts enforce.ServiceVerdicts `json:"verdicts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &state); err != nil {
+		t.Fatal(err)
+	}
+	if len(state.Verdicts) != 2 || state.Verdicts["checkout-abc"].Open[0] != "/etc/shadow" {
+		t.Fatalf("verdicts = %+v", state.Verdicts)
 	}
 }
 

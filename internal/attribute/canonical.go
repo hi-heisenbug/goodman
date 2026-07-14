@@ -15,7 +15,7 @@ import (
 //	FILE_OPEN  -> "READ /app/src/routes/**"      (dir-collapsed)
 //	           -> "READ /var/run/secrets/k8s.io/token"  (sensitive: verbatim)
 //	NET_CONNECT-> "CONNECT 1.2.3.4:443"
-//	PROC_EXEC  -> "EXEC curl"
+//	PROC_EXEC  -> "EXEC /usr/bin/curl"
 func Canonicalize(t model.EventType, arg string) string {
 	return CanonicalizeWith(t, arg, 0)
 }
@@ -34,6 +34,9 @@ func CanonicalizeWith(t model.EventType, arg string, connectCIDRBits int) string
 	case model.EventProcExec:
 		if arg == "" {
 			return "EXEC <unknown>"
+		}
+		if filepath.IsAbs(arg) {
+			return "EXEC " + filepath.Clean(arg)
 		}
 		return "EXEC " + filepath.Base(arg)
 	case model.EventDenyFileOpen:

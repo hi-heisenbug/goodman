@@ -31,6 +31,11 @@ type VerdictSet struct {
 	Skipped []SkippedVerdict `json:"skipped,omitempty"`
 }
 
+// ServiceVerdicts keeps compiled literals isolated by Goodman's service name.
+// Sensors expand each service's literals only into cgroup keys belonging to
+// that service on the local node.
+type ServiceVerdicts map[string]VerdictSet
+
 // CompileVerdicts returns literal deny entries for behaviors matching block
 // rules. Excludes on rules suppress compilation at compile time.
 func CompileVerdicts(rules []diff.Rule, behaviors []string) VerdictSet {

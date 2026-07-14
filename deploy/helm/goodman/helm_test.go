@@ -189,6 +189,7 @@ func TestHelmEnforceDefaultOff(t *testing.T) {
 		`value: "true"`,
 		"name: cgroup",
 		"/sys/fs/cgroup",
+		`goodman.io/enforcement-scope: "service-cgroup"`,
 	} {
 		if !strings.Contains(rendered, want) {
 			t.Fatalf("enforce.enabled=true missing %q\n%s", want, rendered)

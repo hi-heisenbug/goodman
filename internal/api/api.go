@@ -219,7 +219,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	var alerts []model.Alert
 	for _, up := range updates {
 		for _, b := range up.FreshBehaviors {
-			s.recordBlockBehavior(b)
+			s.recordBlockBehavior(up.Fingerprint.Service, b)
 		}
 		a, err := s.diffEng.React(ctx, up)
 		if err != nil {
@@ -229,7 +229,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		if a != nil {
 			alerts = append(alerts, *a)
 			for _, b := range a.NewBehaviors {
-				s.recordBlockBehavior(b)
+				s.recordBlockBehavior(a.Service, b)
 			}
 			alertsEmitted.WithLabelValues(a.Severity).Inc()
 			if s.Notifier != nil {
@@ -238,7 +238,7 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, ev := range denied {
-		s.recordBlockBehavior(ev.Behavior)
+		s.recordBlockBehavior(ev.Service, ev.Behavior)
 		a, err := s.diffEng.ReactDenied(ctx, ev)
 		if err != nil {
 			log.Printf("api: denied: %v", err)
@@ -259,9 +259,9 @@ func (s *Server) handleIngest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ingested": len(batch.Events), "alerts": len(alerts)})
 }
 
-func (s *Server) recordBlockBehavior(behavior string) {
-	if s.enforce != nil && behavior != "" {
-		s.enforce.RecordBehavior(behavior)
+func (s *Server) recordBlockBehavior(service, behavior string) {
+	if s.enforce != nil && service != "" && behavior != "" {
+		s.enforce.RecordBehavior(service, behavior)
 	}
 }
 
@@ -272,7 +272,7 @@ func (s *Server) handleEnforceState(w http.ResponseWriter, r *http.Request) {
 		if sensor != "" {
 			// no-op when enforcement not configured
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "rev": 0, "verdicts": enforce.VerdictSet{}})
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false, "rev": 0, "verdicts": enforce.ServiceVerdicts{}})
 		return
 	}
 	if sensor != "" {
@@ -283,8 +283,18 @@ func (s *Server) handleEnforceState(w http.ResponseWriter, r *http.Request) {
 		"enabled":  enabled,
 		"rev":      rev,
 		"verdicts": vs,
-		"skipped":  vs.Skipped,
+		"skipped":  skippedVerdicts(vs),
 	})
+}
+
+func skippedVerdicts(verdicts enforce.ServiceVerdicts) map[string][]enforce.SkippedVerdict {
+	out := make(map[string][]enforce.SkippedVerdict)
+	for service, serviceVerdicts := range verdicts {
+		if len(serviceVerdicts.Skipped) > 0 {
+			out[service] = serviceVerdicts.Skipped
+		}
+	}
+	return out
 }
 
 func (s *Server) handleEnforceStatus(w http.ResponseWriter, r *http.Request) {
@@ -298,7 +308,7 @@ func (s *Server) handleEnforceStatus(w http.ResponseWriter, r *http.Request) {
 		"enabled":     enabled,
 		"rev":         rev,
 		"verdicts":    vs,
-		"skipped":     vs.Skipped,
+		"skipped":     skippedVerdicts(vs),
 		"sensors":     sensors,
 	})
 }

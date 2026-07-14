@@ -133,6 +133,18 @@ func (r *Resolver) ResolveStack(pid int, stack []uint64) []Frame {
 func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attributed {
 	pid := int(ev.PID)
 	st := r.state(pid)
+	eventType := model.EventType(ev.Type)
+	rawArg := ev.ArgString()
+	packagePath := rawArg
+	behaviorArg := rawArg
+	if eventType == model.EventFileOpen || eventType == model.EventProcExec {
+		if resolved, ok := resolveProcessPath(r.procRoot, pid, ev.DirFD, rawArg); ok {
+			packagePath = resolved
+			behaviorArg = resolved
+		} else {
+			behaviorArg = unresolvedPath(resolved)
+		}
+	}
 
 	pkg, version := "", ""
 	appSource := ""
@@ -181,7 +193,7 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		}
 	}
 	if pkg == "" {
-		if p, v, ok := packageFromOpenedPath(st.pidRoot, ev); ok {
+		if p, v, ok := packageFromOpenedPath(st.pidRoot, eventType, packagePath); ok {
 			pkg, version = p, v
 			refreshContext = true
 		} else if appSource != "" {
@@ -206,8 +218,8 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		Service:   st.service,
 		Package:   pkg,
 		Version:   version,
-		Type:      model.EventType(ev.Type),
-		Behavior:  CanonicalizeWith(model.EventType(ev.Type), ev.ArgString(), r.ConnectCIDRBits),
+		Type:      eventType,
+		Behavior:  CanonicalizeWith(eventType, behaviorArg, r.ConnectCIDRBits),
 		Timestamp: ev.Timestamp + bootToUnixNs,
 	}
 }
@@ -227,11 +239,10 @@ func rememberPackageContext(st *pidState, tid uint32, next packageContext) {
 	st.threadContext[tid] = next
 }
 
-func packageFromOpenedPath(pidRoot string, ev *model.RawEvent) (pkg, version string, ok bool) {
-	if model.EventType(ev.Type) != model.EventFileOpen {
+func packageFromOpenedPath(pidRoot string, eventType model.EventType, path string) (pkg, version string, ok bool) {
+	if eventType != model.EventFileOpen {
 		return "", "", false
 	}
-	path := ev.ArgString()
 	if strings.Contains(path, "/node_modules/") {
 		if p, v, ok := PathToPackage(pidRoot, path); ok {
 			return p, v, true

@@ -289,9 +289,16 @@ heartbeat. Optional query params: `sensor`, `enforcement_active=true|false`.
 
 ```json
 {"enabled": true, "rev": 3,
- "verdicts": {"open": ["/etc/shadow"], "connect": [{"addr":"169.254.169.254","port":0}], "exec": []},
- "skipped": []}
+ "verdicts": {
+   "checkout-7f9d": {"open": ["/etc/shadow"], "connect": [{"addr":"169.254.169.254","port":0}], "exec": []},
+   "worker-55c8": {"open": [], "connect": [], "exec": ["/usr/bin/sh"]}
+ },
+ "skipped": {}}
 ```
+
+Verdicts are keyed by Goodman service. Each sensor maps local pod cgroups to
+the same service identity and expands only that service's literals into
+composite cgroup-scoped BPF keys.
 
 When `enabled` is false, sensors zero the kernel deadline immediately on the
 next poll.
