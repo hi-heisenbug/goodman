@@ -271,6 +271,21 @@ button {
   background: var(--good);
 }
 
+.monitor-pill.connecting i,
+.monitor-pill.static i {
+  background: var(--warning);
+}
+
+.monitor-pill.disconnected {
+  color: var(--critical);
+  border-color: color-mix(in srgb, var(--critical) 28%, transparent);
+  background: var(--critical-bg);
+}
+
+.monitor-pill.disconnected i {
+  background: var(--critical);
+}
+
 .monitor-pill span {
   font-size: 13px;
   font-weight: 650;

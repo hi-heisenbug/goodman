@@ -4,6 +4,7 @@ import { ackAlert, buildReport, fetchAlerts, fetchCoverage, fetchFingerprints, f
 
 type Tab = "alerts" | "fingerprints" | "reachability" | "coverage";
 type Tone = "critical" | "warning" | "good" | "accent" | "neutral";
+type StreamState = "connecting" | "live" | "disconnected" | "static";
 type IconName =
   | "activity"
   | "alert"
@@ -206,7 +207,10 @@ function AlertCard({ alert, onChange }: { alert: Alert; onChange: () => void }) 
   const [copied, setCopied] = useState(false);
   const baseline = alert.baseline_behaviors || [];
   const criticalBehavior = alert.new_behaviors.find((behavior) => SENSITIVE.test(behavior));
-  const rollback = `kubectl set image deployment/${alert.service} ${alert.package}=${alert.package}@${alert.old_version || "previous"}`;
+  const rollback = [
+    "# Replace NAMESPACE, CONTAINER, REGISTRY, and IMAGE before running:",
+    `kubectl -n NAMESPACE set image deployment/${alert.service} CONTAINER=REGISTRY/IMAGE:${alert.old_version || "PREVIOUS_TAG"}`,
+  ].join("\n");
 
   const act = async (fn: (id: string) => Promise<void>) => {
     setBusy(true);
@@ -298,7 +302,7 @@ function AlertCard({ alert, onChange }: { alert: Alert; onChange: () => void }) 
       <div className="action-bar">
         <button className="primary-action" title={rollback} onClick={copyRollback}>
           <Icon name={copied ? "check" : "clipboard"} />
-          {copied ? "Copied" : "Rollback"}
+          {copied ? "Copied" : "Copy rollback template"}
         </button>
         <a className="secondary-action" href={`https://www.npmjs.com/package/${alert.package}/v/${alert.new_version}`} target="_blank" rel="noreferrer">
           <Icon name="link" />
@@ -326,37 +330,12 @@ function SeverityIcon({ sev }: { sev: Severity }) {
   return <Icon name="activity" />;
 }
 
-function AlertsView() {
-  const [alerts, setAlerts] = useState<Alert[]>([]);
+function AlertsView({ alerts, err, onRefresh }: { alerts: Alert[]; err: string; onRefresh: () => void }) {
   const getInitialStatus = (): AlertStatus | "all" => {
     const value = new URLSearchParams(window.location.search).get("status");
     return value === "acknowledged" || value === "resolved" || value === "all" ? value : "open";
   };
   const [status, setStatus] = useState<AlertStatus | "all">(getInitialStatus);
-  const [err, setErr] = useState("");
-
-  const load = useCallback(() => {
-    fetchAlerts()
-      .then((items) => {
-        setAlerts(items);
-        setErr("");
-      })
-      .catch((e) => setErr(String(e)));
-  }, []);
-
-  useEffect(() => {
-    load();
-    if (window.location.search.includes("static")) {
-      return;
-    }
-    const unsub = subscribe({ onAlerts: () => load(), onEvents: () => load() });
-    const timer = setInterval(load, 5000);
-    return () => {
-      unsub();
-      clearInterval(timer);
-    };
-  }, [load]);
-
   const visible = useMemo(() => {
     if (status === "all") return alerts;
     return alerts.filter((alert) => alert.status === status);
@@ -452,7 +431,7 @@ function AlertsView() {
         {visible.length === 0 ? (
           <EmptyState icon="shield" title="No matching alerts" body="Dependencies are behaving within the selected review state." />
         ) : (
-          visible.map((alert) => <AlertCard key={alert.id} alert={alert} onChange={load} />)
+          visible.map((alert) => <AlertCard key={alert.id} alert={alert} onChange={onRefresh} />)
         )}
       </div>
     </section>
@@ -503,38 +482,13 @@ function FingerprintCard({ fp }: { fp: Fingerprint }) {
   );
 }
 
-function FingerprintsView() {
-  const [fingerprints, setFingerprints] = useState<Fingerprint[]>([]);
+function FingerprintsView({ fingerprints, err }: { fingerprints: Fingerprint[]; err: string }) {
   const [query, setQuery] = useState("");
   const getInitialMode = (): "all" | "baseline" | "learning" => {
     const value = new URLSearchParams(window.location.search).get("state");
     return value === "baseline" || value === "learning" ? value : "all";
   };
   const [mode, setMode] = useState<"all" | "baseline" | "learning">(getInitialMode);
-  const [err, setErr] = useState("");
-
-  const load = useCallback(() => {
-    fetchFingerprints()
-      .then((items) => {
-        setFingerprints(items);
-        setErr("");
-      })
-      .catch((e) => setErr(String(e)));
-  }, []);
-
-  useEffect(() => {
-    load();
-    if (window.location.search.includes("static")) {
-      return;
-    }
-    const unsub = subscribe({ onEvents: () => load() });
-    const timer = setInterval(load, 8000);
-    return () => {
-      unsub();
-      clearInterval(timer);
-    };
-  }, [load]);
-
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return fingerprints
@@ -661,9 +615,7 @@ function ReachabilityView() {
         setComputedAt(stored.computed_at);
         setOsv(stored.osv);
       })
-      .catch(() => {
-        /* no stored snapshot: leave the empty state */
-      })
+      .catch((e) => active && setErr(String(e)))
       .finally(() => active && setLoadingStored(false));
     return () => {
       active = false;
@@ -739,6 +691,10 @@ function ReachabilityView() {
         <p className="reach-freshness">Snapshot computed {relTime(computedAt)}. The collector refreshes it as new runtime behavior arrives.</p>
       )}
 
+      {!report && loadingStored && (
+        <EmptyState icon="activity" title="Loading reachability" body="Reading the latest stored lockfile report…" />
+      )}
+
       {!report && !busy && !loadingStored && (
         <EmptyState
           icon="cube"
@@ -808,6 +764,42 @@ function ReachabilityView() {
             </div>
           )}
 
+          {rows.length > 0 && (
+            <>
+              <div className="toolbar">
+                <div>
+                  <h2>Declared packages</h2>
+                  <p>Every dependency in the lockfile, annotated with whether Goodman observed it executing.</p>
+                </div>
+              </div>
+              <div className="reach-table-wrap">
+                <table className="reach-table">
+                  <thead>
+                    <tr>
+                      <th>Package</th>
+                      <th>Declared</th>
+                      <th>Runtime</th>
+                      <th>Behaviors</th>
+                      <th>Type</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 200).map((row) => (
+                      <tr key={`${row.name}@${row.declared_version}`} className={row.executed ? "reachable" : ""}>
+                        <td className="mono">{row.name}</td>
+                        <td className="mono">{row.declared_version}</td>
+                        <td>{row.executed ? <span className="reach-yes">executed</span> : <span className="reach-no">idle</span>}</td>
+                        <td>{row.executed ? row.behaviors ?? 0 : "-"}</td>
+                        <td>{row.dev ? "development" : "production"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {rows.length > 200 && <p className="reach-freshness">Showing the first 200 of {rows.length.toLocaleString()} declared packages.</p>}
+            </>
+          )}
+
           {neverExecuted.length > 0 && (
             <>
               <div className="toolbar">
@@ -837,12 +829,22 @@ function CoverageView() {
   const [data, setData] = useState<CoverageSnapshot | null>(null);
   const [err, setErr] = useState("");
   const [loading, setLoading] = useState(true);
+  const loadSequence = useRef(0);
 
   const load = useCallback(() => {
+    const sequence = ++loadSequence.current;
     fetchCoverage()
-      .then(setData)
-      .catch((e) => setErr(String(e)))
-      .finally(() => setLoading(false));
+      .then((next) => {
+        if (sequence !== loadSequence.current) return;
+        setData(next);
+        setErr("");
+      })
+      .catch((e) => {
+        if (sequence === loadSequence.current) setErr(String(e));
+      })
+      .finally(() => {
+        if (sequence === loadSequence.current) setLoading(false);
+      });
   }, []);
 
   useEffect(() => {
@@ -1079,10 +1081,27 @@ export function App() {
     return "alerts";
   };
   const [tab, setTab] = useState<Tab>(getHashTab);
-  const [openCount, setOpenCount] = useState(0);
-  const [knownPackages, setKnownPackages] = useState(0);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [fingerprints, setFingerprints] = useState<Fingerprint[]>([]);
+  const [dataError, setDataError] = useState("");
   const [lastRefresh, setLastRefresh] = useState<Date>(() => new Date());
   const [authRequired, setAuthRequired] = useState(false);
+  const [streamState, setStreamState] = useState<StreamState>("connecting");
+  const refreshSequence = useRef(0);
+
+  const refresh = useCallback(() => {
+    const sequence = ++refreshSequence.current;
+    Promise.allSettled([fetchAlerts(), fetchFingerprints()]).then(([alertsResult, fingerprintsResult]) => {
+      if (sequence !== refreshSequence.current) return;
+      const errors: string[] = [];
+      if (alertsResult.status === "fulfilled") setAlerts(alertsResult.value);
+      else errors.push(String(alertsResult.reason));
+      if (fingerprintsResult.status === "fulfilled") setFingerprints(fingerprintsResult.value);
+      else errors.push(String(fingerprintsResult.reason));
+      setDataError(errors.join(" · "));
+      setLastRefresh(new Date());
+    });
+  }, []);
 
   useEffect(() => {
     onUnauthorized(() => setAuthRequired(true));
@@ -1097,24 +1116,34 @@ export function App() {
   }, []);
 
   useEffect(() => {
-    const refresh = () => {
-      Promise.allSettled([fetchAlerts("open"), fetchFingerprints()]).then(([alertsResult, fingerprintsResult]) => {
-        if (alertsResult.status === "fulfilled") setOpenCount(alertsResult.value.length);
-        if (fingerprintsResult.status === "fulfilled") setKnownPackages(fingerprintsResult.value.length);
-        setLastRefresh(new Date());
-      });
-    };
     refresh();
     if (window.location.search.includes("static")) {
+      setStreamState("static");
       return;
     }
-    const unsub = subscribe({ onAlerts: refresh, onEvents: refresh });
+    setStreamState("connecting");
+    const unsub = subscribe({
+      onOpen: () => setStreamState("live"),
+      onError: () => setStreamState("disconnected"),
+      onAlerts: refresh,
+      onEvents: refresh,
+    });
     const timer = setInterval(refresh, 5000);
     return () => {
       unsub();
       clearInterval(timer);
     };
-  }, []);
+  }, [refresh]);
+
+  const openCount = alerts.filter((alert) => alert.status === "open").length;
+  const knownPackages = fingerprints.length;
+  const navigate = (next: Tab) => {
+    if (window.location.hash !== `#${next}`) {
+      window.location.hash = next;
+      return;
+    }
+    setTab(next);
+  };
 
   if (authRequired) {
     return <TokenGate />;
@@ -1134,20 +1163,20 @@ export function App() {
         </div>
 
         <nav className="nav-list" aria-label="Dashboard sections">
-          <button className={tab === "alerts" ? "active" : ""} onClick={() => setTab("alerts")}>
+          <button className={tab === "alerts" ? "active" : ""} onClick={() => navigate("alerts")}>
             <Icon name="alert" />
             <span>Alerts</span>
             {openCount > 0 && <b>{openCount}</b>}
           </button>
-          <button className={tab === "fingerprints" ? "active" : ""} onClick={() => setTab("fingerprints")}>
+          <button className={tab === "fingerprints" ? "active" : ""} onClick={() => navigate("fingerprints")}>
             <Icon name="fingerprint" />
             <span>Fingerprints</span>
           </button>
-          <button className={tab === "reachability" ? "active" : ""} onClick={() => setTab("reachability")}>
+          <button className={tab === "reachability" ? "active" : ""} onClick={() => navigate("reachability")}>
             <Icon name="cube" />
             <span>Reachability</span>
           </button>
-          <button className={tab === "coverage" ? "active" : ""} onClick={() => setTab("coverage")}>
+          <button className={tab === "coverage" ? "active" : ""} onClick={() => navigate("coverage")}>
             <Icon name="shield" />
             <span>Coverage</span>
           </button>
@@ -1180,17 +1209,25 @@ export function App() {
                     : "Runtime reachability report"}
             </h2>
           </div>
-          <div className="monitor-pill">
+          <div className={`monitor-pill ${streamState}`}>
             <i />
-            <span>Monitoring</span>
+            <span>
+              {streamState === "live"
+                ? "Live"
+                : streamState === "disconnected"
+                  ? "Disconnected"
+                  : streamState === "static"
+                    ? "Static capture"
+                    : "Connecting"}
+            </span>
             <small>{lastRefresh.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</small>
           </div>
         </header>
 
         {tab === "alerts" ? (
-          <AlertsView />
+          <AlertsView alerts={alerts} err={dataError} onRefresh={refresh} />
         ) : tab === "fingerprints" ? (
-          <FingerprintsView />
+          <FingerprintsView fingerprints={fingerprints} err={dataError} />
         ) : tab === "coverage" ? (
           <CoverageView />
         ) : (

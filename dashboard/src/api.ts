@@ -20,6 +20,16 @@ export function setToken(token: string): void {
   } catch {
     /* storage unavailable: token lives for this page only */
   }
+  setStreamTokenCookie(token);
+}
+
+function setStreamTokenCookie(token: string): void {
+  const secure = location.protocol === "https:" ? "; Secure" : "";
+  if (!token) {
+    document.cookie = `goodman_stream_token=; Path=/v1/stream; SameSite=Strict; Max-Age=0${secure}`;
+    return;
+  }
+  document.cookie = `goodman_stream_token=${encodeURIComponent(token)}; Path=/v1/stream; SameSite=Strict${secure}`;
 }
 
 let unauthorizedHandler: (() => void) | undefined;
@@ -42,6 +52,7 @@ async function request(input: string | URL, init?: RequestInit): Promise<Respons
 export async function fetchAlerts(status?: string): Promise<Alert[]> {
   const u = new URL("/v1/alerts", location.origin);
   if (status) u.searchParams.set("status", status);
+  u.searchParams.set("limit", "500");
   const r = await request(u);
   if (!r.ok) throw new Error(`alerts: ${r.status}`);
   return r.json();
@@ -100,9 +111,9 @@ export async function resolveAlert(id: string): Promise<void> {
   if (!r.ok) throw new Error(`resolve: ${r.status}`);
 }
 
-// subscribe opens the SSE stream and invokes handlers on each event frame.
-// EventSource cannot set headers, so the token rides in a query parameter
-// (the collector accepts ?token= on /v1/stream only).
+// subscribe opens the single app-level SSE stream and invokes handlers on each
+// event frame. EventSource cannot set headers, so the token is mirrored into a
+// SameSite, path-scoped cookie instead of a proxy-visible query parameter.
 export function subscribe(handlers: {
   onOpen?: () => void;
   onError?: () => void;
@@ -111,7 +122,7 @@ export function subscribe(handlers: {
 }): () => void {
   const u = new URL("/v1/stream", location.origin);
   const token = getToken();
-  if (token) u.searchParams.set("token", token);
+  setStreamTokenCookie(token);
   const es = new EventSource(u);
   if (handlers.onOpen) es.addEventListener("open", handlers.onOpen);
   if (handlers.onError) es.addEventListener("error", handlers.onError);
