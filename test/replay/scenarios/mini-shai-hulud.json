@@ -1,0 +1,41 @@
+{
+  "name": "mini-shai-hulud",
+  "incident": "Mini-Shai-Hulud npm worm behavior profile (April-May 2026)",
+  "reference": "https://github.com/hi-heisenbug/goodman/blob/main/IMPROVEMENT-PLAN.md",
+  "summary": "A compromised package preinstall path reads developer and cloud credentials, probes instance metadata, connects to command infrastructure, and forks a short-lived shell helper. The EXEC behavior represents the child_process path that Goodman's sched_process_fork hook must keep visible until execve.",
+  "service": "developer-tools",
+  "package": "mini-shai-hulud-loader",
+  "baseline": {
+    "version": "1.0.0",
+    "behaviors": [
+      "READ /app/node_modules/mini-shai-hulud-loader/**"
+    ]
+  },
+  "malicious": {
+    "version": "1.0.1",
+    "behaviors": [
+      "READ /app/node_modules/mini-shai-hulud-loader/**",
+      "READ /home/app/.npmrc",
+      "CONNECT 169.254.169.254:80",
+      "CONNECT 203.0.113.42:443",
+      "EXEC /bin/sh"
+    ]
+  },
+  "expect": {
+    "severity": "CRITICAL",
+    "old_version": "1.0.0",
+    "new_version": "1.0.1",
+    "new_behaviors": [
+      "READ /home/app/.npmrc",
+      "CONNECT 169.254.169.254:80",
+      "CONNECT 203.0.113.42:443",
+      "EXEC /bin/sh"
+    ],
+    "matched_rules": [
+      "cloud-metadata",
+      "new-exec",
+      "new-outbound-connect",
+      "secret-read"
+    ]
+  }
+}

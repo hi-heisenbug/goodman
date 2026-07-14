@@ -24,12 +24,16 @@ func TestGenerateLockfileCounts(t *testing.T) {
 	if len(pkgs) != DeclaredCount {
 		t.Fatalf("declared=%d, want %d", len(pkgs), DeclaredCount)
 	}
-	if pkgs[0].Name != "demo-dep-0001" || pkgs[0].Version != "1.0.0" {
-		t.Fatalf("first package = %+v", pkgs[0])
+	got := map[string]string{}
+	for _, pkg := range pkgs {
+		got[pkg.Name] = pkg.Version
 	}
-	last := pkgs[len(pkgs)-1]
-	if last.Name != "demo-dep-1400" {
-		t.Fatalf("last package = %+v", last)
+	for name, version := range map[string]string{
+		"lodash": "4.17.20", "jsonwebtoken": "8.5.1", "axios": "0.21.1", "demo-dep-1400": "1.0.0",
+	} {
+		if got[name] != version {
+			t.Fatalf("package %s = %q, want %q", name, got[name], version)
+		}
 	}
 }
 
@@ -83,6 +87,33 @@ func TestEventStreamMatchesCorpus(t *testing.T) {
 	}
 }
 
+func TestMiniShaiHuludMatchesCorpus(t *testing.T) {
+	scenarios, err := replay.LoadScenarios()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want *replay.Scenario
+	for i := range scenarios {
+		if scenarios[i].Name == "mini-shai-hulud" {
+			want = &scenarios[i]
+			break
+		}
+	}
+	if want == nil {
+		t.Fatal("mini-shai-hulud scenario missing from corpus")
+	}
+	got := MiniShaiHuludScenario()
+	if got.Service != want.Service || got.Package != want.Package {
+		t.Fatalf("identity mismatch: got %s/%s want %s/%s", got.Service, got.Package, want.Service, want.Package)
+	}
+	if strings.Join(got.Malicious.Behaviors, "|") != strings.Join(want.Malicious.Behaviors, "|") {
+		t.Fatalf("malicious behaviors drifted from corpus")
+	}
+	if strings.Join(got.ExpectRules, "|") != strings.Join(want.Expect.MatchedRules, "|") {
+		t.Fatalf("expected rules drifted: %v vs %v", got.ExpectRules, want.Expect.MatchedRules)
+	}
+}
+
 func TestSeedReachabilityPostsLockfileAndEvents(t *testing.T) {
 	var gotEvents int
 	var gotLockfile bool
@@ -111,6 +142,9 @@ func TestSeedReachabilityPostsLockfileAndEvents(t *testing.T) {
 			}
 			gotLockfile = true
 			persisted = r.URL.Query().Get("persist") == "1"
+			if r.URL.Query().Get("osv") != "1" {
+				t.Error("demo report must request deterministic OSV enrichment")
+			}
 			_ = json.NewEncoder(w).Encode(report.Report{
 				DeclaredCount: DeclaredCount,
 				ExecutedCount: ExecutedCount,
@@ -146,7 +180,7 @@ func TestGuidedScriptMentionsTabs(t *testing.T) {
 		"#alerts",
 		"#reachability",
 		"#coverage",
-		"flatmap-stream",
+		"Mini-Shai-Hulud",
 		"1,400",
 		"240",
 		"12s",

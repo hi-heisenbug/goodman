@@ -1,6 +1,6 @@
 // Package demo seeds a local collector for the five-minute product wow:
 // realistic fingerprints and alerts, a preloaded reachability report
-// (1,400 declared / 240 executed), and a live event-stream attack replay.
+// (1,400 declared / 240 executed), and a live Mini-Shai-Hulud attack replay.
 package demo
 
 import (
@@ -88,9 +88,31 @@ func (c *Client) PostEvents(ctx context.Context, events []model.Attributed) erro
 	return nil
 }
 
+// PostHeartbeat refreshes sensor health without changing fingerprints.
+func (c *Client) PostHeartbeat(ctx context.Context) error {
+	body, err := json.Marshal(model.EventBatch{Sensor: c.Sensor, Events: []model.Attributed{}})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/v1/events", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("POST heartbeat: %s", resp.Status)
+	}
+	return nil
+}
+
 // PostReport uploads a lockfile to /v1/report. When persist is set the
 // collector stores it so the dashboard Reachability tab loads on first paint.
-func (c *Client) PostReport(ctx context.Context, lockfile []byte, service string, persist bool) (*report.Report, error) {
+func (c *Client) PostReport(ctx context.Context, lockfile []byte, service string, persist, osv bool) (*report.Report, error) {
 	u, err := url.Parse(c.BaseURL + "/v1/report")
 	if err != nil {
 		return nil, err
@@ -101,6 +123,9 @@ func (c *Client) PostReport(ctx context.Context, lockfile []byte, service string
 	}
 	if persist {
 		q.Set("persist", "1")
+	}
+	if osv {
+		q.Set("osv", "1")
 	}
 	u.RawQuery = q.Encode()
 
@@ -204,8 +229,8 @@ func GenerateLockfile(n int) []byte {
 	packages := make(map[string]any, n+1)
 	packages[""] = map[string]any{"name": "demo-app", "version": "1.0.0"}
 	for i := 1; i <= n; i++ {
-		name := fmt.Sprintf("demo-dep-%04d", i)
-		packages["node_modules/"+name] = map[string]any{"version": "1.0.0"}
+		name := PackageName(i)
+		packages["node_modules/"+name] = map[string]any{"version": PackageVersion(i)}
 	}
 	raw, _ := json.Marshal(map[string]any{
 		"name":            "demo-app",
@@ -218,5 +243,27 @@ func GenerateLockfile(n int) []byte {
 
 // PackageName returns the synthetic package name for index i (1-based).
 func PackageName(i int) string {
+	switch i {
+	case 1:
+		return "lodash"
+	case 2:
+		return "jsonwebtoken"
+	case 3:
+		return "axios"
+	}
 	return fmt.Sprintf("demo-dep-%04d", i)
+}
+
+// PackageVersion returns the declared version for a synthetic package index.
+func PackageVersion(i int) string {
+	switch i {
+	case 1:
+		return "4.17.20"
+	case 2:
+		return "8.5.1"
+	case 3:
+		return "0.21.1"
+	default:
+		return "1.0.0"
+	}
 }

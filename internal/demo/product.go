@@ -34,7 +34,7 @@ func SeedProduct(ctx context.Context, c *Client) error {
 		}, 2000, 12},
 		{"auth-service", "jsonwebtoken", "9.0.0", []string{
 			"READ /app/node_modules/jsonwebtoken/**",
-			"READ /app/certs/public.pem",
+			"READ /app/certs/public.crt",
 		}, 5000, 12},
 		{"api-gateway", "lodash", "4.17.21", []string{
 			"READ /app/node_modules/lodash/**",
@@ -90,7 +90,7 @@ func SeedProduct(ctx context.Context, c *Client) error {
 	return nil
 }
 
-// Scenario is the event-stream attack used for the live wow moment.
+// Scenario describes a baseline-to-malicious package-version replay.
 type Scenario struct {
 	Service     string
 	Package     string
@@ -159,6 +159,60 @@ func FireEventStreamAttack(ctx context.Context, c *Client) error {
 	}
 	if err := c.PostEvents(ctx, batch); err != nil {
 		return fmt.Errorf("event-stream attack: %w", err)
+	}
+	return nil
+}
+
+// MiniShaiHuludScenario is the 2026 flagship replay. It stays in lockstep with
+// test/replay/scenarios/mini-shai-hulud.json.
+func MiniShaiHuludScenario() Scenario {
+	return Scenario{
+		Service: "developer-tools",
+		Package: "mini-shai-hulud-loader",
+		Baseline: VersionState{
+			Version:   "1.0.0",
+			Behaviors: []string{"READ /app/node_modules/mini-shai-hulud-loader/**"},
+		},
+		Malicious: VersionState{
+			Version: "1.0.1",
+			Behaviors: []string{
+				"READ /app/node_modules/mini-shai-hulud-loader/**",
+				"READ /home/app/.npmrc",
+				"CONNECT 169.254.169.254:80",
+				"CONNECT 203.0.113.42:443",
+				"EXEC /bin/sh",
+			},
+		},
+		ExpectRules: []string{"cloud-metadata", "new-exec", "new-outbound-connect", "secret-read"},
+	}
+}
+
+func SeedMiniShaiHuludBaseline(ctx context.Context, c *Client) error {
+	s := MiniShaiHuludScenario()
+	base := uint64(time.Now().UnixNano())
+	for i := 0; i < 4; i++ {
+		var batch []model.Attributed
+		for j, behavior := range s.Baseline.Behaviors {
+			batch = append(batch, attr(s.Service, s.Package, s.Baseline.Version, behavior,
+				base+uint64(i)*400_000_000+uint64(j)*1_000_000))
+		}
+		if err := c.PostEvents(ctx, batch); err != nil {
+			return fmt.Errorf("mini-shai-hulud baseline: %w", err)
+		}
+	}
+	return nil
+}
+
+func FireMiniShaiHuludAttack(ctx context.Context, c *Client) error {
+	s := MiniShaiHuludScenario()
+	base := uint64(time.Now().UnixNano())
+	batch := make([]model.Attributed, 0, len(s.Malicious.Behaviors))
+	for i, behavior := range s.Malicious.Behaviors {
+		batch = append(batch, attr(s.Service, s.Package, s.Malicious.Version, behavior,
+			base+uint64(i)*1_000_000))
+	}
+	if err := c.PostEvents(ctx, batch); err != nil {
+		return fmt.Errorf("mini-shai-hulud attack: %w", err)
 	}
 	return nil
 }

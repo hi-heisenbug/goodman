@@ -16,14 +16,16 @@ func SeedReachability(ctx context.Context, c *Client) (*report.Report, error) {
 	const service = "demo-app"
 	base := uint64(time.Now().UnixNano())
 
-	events := make([]model.Attributed, 0, ExecutedCount)
-	for i := 1; i <= ExecutedCount; i++ {
-		name := PackageName(i)
-		events = append(events, attr(
-			service, name, "1.0.0",
-			fmt.Sprintf("READ /app/node_modules/%s/**", name),
-			base+uint64(i)*1_000_000,
-		))
+	events := make([]model.Attributed, 0, ExecutedCount*3)
+	for round := 0; round < 3; round++ {
+		for i := 1; i <= ExecutedCount; i++ {
+			name := PackageName(i)
+			events = append(events, attr(
+				service, name, PackageVersion(i),
+				fmt.Sprintf("READ /app/node_modules/%s/**", name),
+				base+uint64(round)*600_000_000+uint64(i)*1_000_000,
+			))
+		}
 	}
 	// Batch in chunks so a single POST stays modest.
 	const chunk = 100
@@ -38,7 +40,7 @@ func SeedReachability(ctx context.Context, c *Client) (*report.Report, error) {
 	}
 
 	lockfile := GenerateLockfile(DeclaredCount)
-	rep, err := c.PostReport(ctx, lockfile, "", true)
+	rep, err := c.PostReport(ctx, lockfile, "", true, true)
 	if err != nil {
 		return nil, fmt.Errorf("persist reachability report: %w", err)
 	}

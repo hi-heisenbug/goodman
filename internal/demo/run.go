@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -60,10 +62,10 @@ Coverage:       %s/#coverage
         dependencies, 240 actually executed at runtime — the
         "shipped vs run" prioritization pitch.
 
-25–%ds  Stay on Alerts. In ~%s the 2018 event-stream /
-        flatmap-stream attack replays live: wallet.dat read +
-        exfil connect. Watch the new CRITICAL row appear with
-        secret-read and new-outbound-connect chips.
+25–%ds  Stay on Alerts. In ~%s the 2026 Mini-Shai-Hulud
+        behavior profile replays live: .npmrc + cloud metadata +
+        C2 + a shell exec. Watch one package-attributed CRITICAL
+        row appear with all four rule chips.
 
 %d+     Open Coverage: staging shows as an injection gap
         (unlabeled, pods without NODE_OPTIONS). Attribution
@@ -112,6 +114,11 @@ func Run(ctx context.Context, opt Options) error {
 	for _, suffix := range []string{"", "-shm", "-wal"} {
 		_ = os.Remove(db + suffix)
 	}
+	osvEndpoint, stopOSV, err := startDemoOSVServer()
+	if err != nil {
+		return fmt.Errorf("start demo OSV stub: %w", err)
+	}
+	defer stopOSV()
 
 	listen := opt.Host + ":" + opt.Port
 	cmd := exec.CommandContext(ctx, absBin, "-listen", listen)
@@ -119,6 +126,7 @@ func Run(ctx context.Context, opt Options) error {
 		"GOODMAN_DSN="+db,
 		"GOODMAN_LEARN_OBS=3",
 		"GOODMAN_LEARN_MIN_AGE=1s",
+		"GOODMAN_OSV_ENDPOINT="+osvEndpoint,
 	)
 	cmd.Stdout = opt.Stderr
 	cmd.Stderr = opt.Stderr
@@ -144,8 +152,8 @@ func Run(ctx context.Context, opt Options) error {
 	if err := SeedProduct(ctx, c); err != nil {
 		return err
 	}
-	fmt.Fprintln(opt.Stdout, "Seeding event-stream baseline (flatmap-stream@0.1.0)…")
-	if err := SeedEventStreamBaseline(ctx, c); err != nil {
+	fmt.Fprintln(opt.Stdout, "Seeding Mini-Shai-Hulud baseline (mini-shai-hulud-loader@1.0.0)…")
+	if err := SeedMiniShaiHuludBaseline(ctx, c); err != nil {
 		return err
 	}
 	fmt.Fprintln(opt.Stdout, "Preloading reachability report (1,400 / 240)…")
@@ -165,10 +173,11 @@ func Run(ctx context.Context, opt Options) error {
 	if opt.Check {
 		return runCheck(ctx, c, opt)
 	}
+	go demoHeartbeatLoop(ctx, c)
 
 	fmt.Fprint(opt.Stdout, GuidedScript(opt.URL(), opt.AttackDelay))
 
-	fmt.Fprintf(opt.Stdout, "\nReplaying event-stream attack in %s…\n", opt.AttackDelay)
+	fmt.Fprintf(opt.Stdout, "\nReplaying Mini-Shai-Hulud behavior in %s…\n", opt.AttackDelay)
 	timer := time.NewTimer(opt.AttackDelay)
 	defer timer.Stop()
 	select {
@@ -176,8 +185,8 @@ func Run(ctx context.Context, opt Options) error {
 		return ctx.Err()
 	case <-timer.C:
 	}
-	fmt.Fprintln(opt.Stdout, "Firing flatmap-stream@0.1.1 (wallet.dat + exfil)…")
-	if err := FireEventStreamAttack(ctx, c); err != nil {
+	fmt.Fprintln(opt.Stdout, "Firing mini-shai-hulud-loader@1.0.1 (.npmrc + IMDS + C2 + exec)…")
+	if err := FireMiniShaiHuludAttack(ctx, c); err != nil {
 		return err
 	}
 	fmt.Fprintln(opt.Stdout, "Attack injected. Watch the Alerts tab for the new CRITICAL row.")
@@ -192,6 +201,76 @@ func Run(ctx context.Context, opt Options) error {
 	}
 }
 
+func demoHeartbeatLoop(ctx context.Context, c *Client) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if err := c.PostHeartbeat(ctx); err != nil && ctx.Err() == nil {
+				log.Printf("demo heartbeat: %v", err)
+			}
+		}
+	}
+}
+
+func startDemoOSVServer() (string, func(), error) {
+	advisories := map[string]string{
+		"lodash@4.17.20":     "GHSA-35jh-r3h4-6jhm",
+		"jsonwebtoken@8.5.1": "GHSA-8cf7-32gw-wr33",
+		"axios@0.21.1":       "GHSA-42xw-2xvc-qx8m",
+	}
+	details := map[string]map[string]any{
+		"GHSA-35jh-r3h4-6jhm": {"summary": "Command injection in lodash template helpers", "database_specific": map[string]string{"severity": "HIGH"}},
+		"GHSA-8cf7-32gw-wr33": {"summary": "jsonwebtoken signature validation weakness", "database_specific": map[string]string{"severity": "HIGH"}},
+		"GHSA-42xw-2xvc-qx8m": {"summary": "Axios server-side request forgery", "database_specific": map[string]string{"severity": "MODERATE"}},
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/querybatch", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Queries []struct {
+				Version string            `json:"version"`
+				Package map[string]string `json:"package"`
+			} `json:"queries"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		results := make([]map[string]any, len(body.Queries))
+		for i, query := range body.Queries {
+			vulns := []map[string]string{}
+			if id := advisories[query.Package["name"]+"@"+query.Version]; id != "" {
+				vulns = append(vulns, map[string]string{"id": id})
+			}
+			results[i] = map[string]any{"vulns": vulns}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"results": results})
+	})
+	for id, detail := range details {
+		id, detail := id, detail
+		mux.HandleFunc("/v1/vulns/"+id, func(w http.ResponseWriter, _ *http.Request) {
+			_ = json.NewEncoder(w).Encode(detail)
+		})
+	}
+	listener, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		return "", nil, err
+	}
+	server := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
+	go func() {
+		_ = server.Serve(listener)
+	}()
+	stop := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		_ = server.Shutdown(ctx)
+	}
+	return "http://" + listener.Addr().String() + "/v1/querybatch", stop, nil
+}
+
 func runCheck(ctx context.Context, c *Client, opt Options) error {
 	stored, err := c.GetReport(ctx)
 	if err != nil {
@@ -200,6 +279,15 @@ func runCheck(ctx context.Context, c *Client, opt Options) error {
 	if stored.DeclaredCount != DeclaredCount || stored.ExecutedCount != ExecutedCount {
 		return fmt.Errorf("stored report: declared=%d executed=%d (want %d/%d)",
 			stored.DeclaredCount, stored.ExecutedCount, DeclaredCount, ExecutedCount)
+	}
+	reachableVulns := 0
+	for _, row := range stored.VulnRows {
+		if row.Executed {
+			reachableVulns += len(row.Vulns)
+		}
+	}
+	if reachableVulns < 3 {
+		return fmt.Errorf("stored report: reachable vulnerabilities=%d, want at least 3", reachableVulns)
 	}
 
 	covReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v1/coverage", nil)
@@ -241,18 +329,21 @@ func runCheck(ctx context.Context, c *Client, opt Options) error {
 		return fmt.Errorf("check: expected demo sensor in coverage")
 	}
 
-	if err := FireEventStreamAttack(ctx, c); err != nil {
+	if err := FireMiniShaiHuludAttack(ctx, c); err != nil {
 		return err
 	}
 	// Give the collector a beat to persist the alert.
 	deadline := time.Now().Add(3 * time.Second)
-	s := EventStreamScenario()
+	s := MiniShaiHuludScenario()
 	for {
 		alerts, err := c.GetAlerts(ctx)
 		if err != nil {
 			return err
 		}
 		for _, a := range alerts {
+			if a.Package == "jsonwebtoken" && a.OldVersion == "" {
+				return fmt.Errorf("check: jsonwebtoken package name triggered a false secret-read alert: %+v", a)
+			}
 			if a.Package == s.Package && a.NewVersion == s.Malicious.Version && a.Severity == "CRITICAL" {
 				fmt.Fprintf(opt.Stdout, "demo check OK: reachability %d/%d, CRITICAL %s@%s→%s\n",
 					stored.DeclaredCount, stored.ExecutedCount, a.Package, a.OldVersion, a.NewVersion)
