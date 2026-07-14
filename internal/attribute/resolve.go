@@ -265,9 +265,9 @@ func packageFromOpenedPath(pidRoot string, eventType model.EventType, path strin
 
 func contextEligible(ev *model.RawEvent) bool {
 	switch model.EventType(ev.Type) {
-	case model.EventNetConnect, model.EventProcExec:
+	case model.EventNetConnect, model.EventProcExec, model.EventDenyConnect, model.EventDenyExec:
 		return true
-	case model.EventFileOpen:
+	case model.EventFileOpen, model.EventDenyFileOpen:
 		return IsSensitivePath(ev.ArgString())
 	default:
 		return false

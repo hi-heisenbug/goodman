@@ -189,12 +189,38 @@ for round in $(seq 1 5); do drive 40; sleep 0.7; done
 
 echo "== 4. assert CRITICAL alert =="
 ALERTS=""
-for i in $(seq 1 20); do
+ready=0
+for i in $(seq 1 30); do
+  # Keep exercising the compromised path while the sensor receives the new
+  # verdict revision. The first observation creates the alert; a later read
+  # proves that the compiled file verdict reached the kernel.
+  drive 5
   ALERTS="$(curl -sf "$BASE/v1/alerts?status=open" || echo '[]')"
-  if echo "$ALERTS" | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin) else 1)' 2>/dev/null; then break; fi
+  if ALERTS_JSON="$ALERTS" python3 -c '
+import json, os, sys
+alerts = json.loads(os.environ["ALERTS_JSON"])
+package_alert = next((a for a in alerts if a["package"] == "good-pkg" and a["severity"] == "CRITICAL"), None)
+sys.exit(0 if package_alert and package_alert.get("blocked") else 1)
+' 2>/dev/null; then
+    ready=1
+    break
+  fi
   sleep 1
 done
+[[ "$ready" == "1" ]] || fail "timed out waiting for package drift and kernel deny"
 echo "alerts: $ALERTS"
+
+FINGERPRINTS="$(./bin/goodmanctl fingerprints -collector "$BASE" -json)"
+FINGERPRINTS_JSON="$FINGERPRINTS" python3 - <<'PY' || fail "forked exec was not captured"
+import json, os
+fingerprints = json.loads(os.environ["FINGERPRINTS_JSON"])
+assert any(
+    behavior.startswith("EXEC /") and behavior.endswith("/true")
+    for fingerprint in fingerprints
+    for behavior in fingerprint["behaviors"]
+), fingerprints
+print("OK: canonical forked child exec captured in fingerprint corpus")
+PY
 
 ALERTS_JSON="$ALERTS" python3 - <<'PY'
 import json, sys
@@ -208,7 +234,6 @@ assert a["old_version"] == "1.0.0", a["old_version"]
 nb = " ".join(a["new_behaviors"])
 assert "credential" in nb.lower() or "secret" in nb.lower(), f"missing secret read: {a['new_behaviors']}"
 assert "127.0.0.1:9999" in nb or "CONNECT" in nb, f"missing sink connect: {a['new_behaviors']}"
-assert any(b.startswith("EXEC /") and b.endswith("/true") for b in a["new_behaviors"]), f"missing canonical forked child exec: {a['new_behaviors']}"
 assert a.get("blocked"), f"file_open deny did not upgrade alert to blocked: {a}"
 # never misattribute to a different package
 assert not any(x["package"] not in ("good-pkg","<app>","<unknown>") for x in alerts), alerts

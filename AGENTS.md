@@ -264,6 +264,10 @@ Live proof requires human `sudo make e2e` on an LSM kernel — see
 them into composite `{cgroup_id, literal}` keys only for matching local pod
 cgroups. Detection resolves relative paths, dirfds, and symlinks through the
 target `/proc/<pid>/root`; unresolved paths alert but never compile to blocks.
+Declare LSM hooks with `BPF_PROG(..., int ret)` and return a non-zero incoming
+`ret` unchanged. A raw `SEC("lsm/...")` C signature receives the BPF context
+array, not typed hook arguments, and trusted-pointer helpers such as
+`bpf_d_path` will fail verification.
 
 **Add a high-risk rule** — edit `deploy/rules.example.json` (or `DefaultRules`
 in `internal/diff/diff.go`). Patterns are case-insensitive regexes matched

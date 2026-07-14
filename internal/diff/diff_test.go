@@ -168,6 +168,64 @@ func TestDriftPipeline(t *testing.T) {
 	}
 }
 
+func TestNewVersionDriftAlertsWhenFirstBatchPromotes(t *testing.T) {
+	ctx := context.Background()
+	s, err := store.Open(filepath.Join(t.TempDir(), "promoted-drift.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	fpEng := fingerprint.NewEngine(s, fingerprint.LearningWindow{MinObs: 3, MinAge: time.Nanosecond})
+	rules, err := LoadRules("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	diffEng := NewEngine(s, rules)
+
+	baselineEvents := []model.Attributed{
+		{Service: "web", Package: "pkg", Version: "1.0.0", Behavior: "READ /app/node_modules/pkg/**", Timestamp: 100},
+		{Service: "web", Package: "pkg", Version: "1.0.0", Behavior: "READ /app/node_modules/pkg/**", Timestamp: 200},
+		{Service: "web", Package: "pkg", Version: "1.0.0", Behavior: "READ /app/node_modules/pkg/**", Timestamp: 300},
+	}
+	updates, err := fpEng.Ingest(ctx, baselineEvents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 || !updates[0].JustPromoted {
+		t.Fatalf("baseline update = %+v, want one promoted fingerprint", updates)
+	}
+	if alert, err := diffEng.React(ctx, updates[0]); err != nil || alert != nil {
+		t.Fatalf("baseline promotion alert = %+v, err=%v", alert, err)
+	}
+
+	driftEvents := []model.Attributed{
+		{Service: "web", Package: "pkg", Version: "1.0.1", Behavior: "READ /app/node_modules/pkg/**", Timestamp: 400},
+		{Service: "web", Package: "pkg", Version: "1.0.1", Behavior: "READ /root/.npmrc", Timestamp: 500},
+		{Service: "web", Package: "pkg", Version: "1.0.1", Behavior: "CONNECT 127.0.0.1:9000", Timestamp: 600},
+	}
+	updates, err = fpEng.Ingest(ctx, driftEvents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(updates) != 1 || !updates[0].JustPromoted {
+		t.Fatalf("drift update = %+v, want one promoted fingerprint", updates)
+	}
+	alert, err := diffEng.React(ctx, updates[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if alert == nil {
+		t.Fatal("new version drift was silently baselined when its first batch crossed the learning threshold")
+	}
+	if alert.OldVersion != "1.0.0" || alert.NewVersion != "1.0.1" {
+		t.Fatalf("versions = %q -> %q", alert.OldVersion, alert.NewVersion)
+	}
+	if !sameStrings(alert.NewBehaviors, []string{"READ /root/.npmrc", "CONNECT 127.0.0.1:9000"}) {
+		t.Fatalf("new behaviors = %v", alert.NewBehaviors)
+	}
+}
+
 func sameStrings(got, want []string) bool {
 	if len(got) != len(want) {
 		return false

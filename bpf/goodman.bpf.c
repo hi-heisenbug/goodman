@@ -390,8 +390,11 @@ int trace_execve(struct trace_event_raw_sys_enter *ctx)
 }
 
 SEC("lsm/file_open")
-int enforce_file_open(struct file *file)
+int BPF_PROG(enforce_file_open, struct file *file, int ret)
 {
+    if (ret)
+        return ret;
+
     __u64 cgroup_id = 0;
     if (!enforce_active() || !enforced_cgroup(&cgroup_id))
         return 0;
@@ -416,8 +419,11 @@ int enforce_file_open(struct file *file)
 }
 
 SEC("lsm/socket_connect")
-int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int addrlen)
+int BPF_PROG(enforce_socket_connect, struct socket *sock, struct sockaddr *address, int addrlen, int ret)
 {
+    if (ret)
+        return ret;
+
     __u64 cgroup_id = 0;
     if (!enforce_active() || !enforced_cgroup(&cgroup_id))
         return 0;
@@ -428,9 +434,15 @@ int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int ad
     if (family != AF_INET && family != AF_INET6)
         return 0;
 
+    __u32 zero = 0;
+    struct deny_path *arg_scratch = bpf_map_lookup_elem(&deny_path_scratch, &zero);
+    if (!arg_scratch)
+        return 0;
+    __builtin_memset(arg_scratch->path, 0, sizeof(arg_scratch->path));
+
     struct deny_addr key = {.cgroup_id = cgroup_id};
     key.family = (__u8)family;
-    char arg_buf[PATH_MAX_LEN] = {};
+    char *arg_buf = arg_scratch->path;
     int pos = 0;
 
     if (family == AF_INET) {
@@ -480,8 +492,11 @@ int enforce_socket_connect(struct socket *sock, struct sockaddr *address, int ad
 }
 
 SEC("lsm/bprm_check_security")
-int enforce_bprm_check(struct linux_binprm *bprm)
+int BPF_PROG(enforce_bprm_check, struct linux_binprm *bprm, int ret)
 {
+    if (ret)
+        return ret;
+
     __u64 cgroup_id = 0;
     if (!enforce_active() || !enforced_cgroup(&cgroup_id))
         return 0;
@@ -492,8 +507,7 @@ int enforce_bprm_check(struct linux_binprm *bprm)
     if (!scratch)
         return 0;
     struct deny_path_key key = {.cgroup_id = cgroup_id};
-    struct file *file = NULL;
-    bpf_core_read(&file, sizeof(file), &bprm->file);
+    struct file *file = bprm->file;
     if (!file)
         return 0;
     long n = bpf_d_path((struct path *)&file->f_path, scratch->path, sizeof(scratch->path));

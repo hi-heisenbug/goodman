@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - File/exec detection now resolves `openat*` dirfds, cwd-relative paths,
   symlinks, and container mount namespaces to the same kernel path identity
   used by LSM enforcement. Unresolved paths remain alertable but fail open.
+- LSM hooks now use typed `BPF_PROG` arguments and preserve earlier LSM return
+  values, allowing live file, connect, and exec enforcement to load correctly.
+- New-version drift is still evaluated when its first event batch crosses the
+  learning threshold, and denied events retain short-lived package context so
+  kernel blocks upgrade the correct alert.
 
 ### Added
 

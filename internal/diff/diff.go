@@ -170,38 +170,25 @@ func alertID(service, pkg, oldV, newV string) string {
 //     (poisoning), and the product is mute for the whole learning window.
 func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Alert, error) {
 	fp := up.Fingerprint
+	if len(up.FreshBehaviors) == 0 {
+		return nil, nil
+	}
 
 	// Trigger 2: baseline version doing something it never did before.
 	// (JustPromoted means the fresh behaviors were learned, not drift.)
-	if fp.IsBaseline && !up.JustPromoted && len(up.FreshBehaviors) > 0 {
+	if fp.IsBaseline && !up.JustPromoted {
 		return eng.emit(ctx, fp.Service, fp.Package, fp.Version, fp.Version,
 			baselineBehaviors(fp.Behaviors, up.FreshBehaviors), up.FreshBehaviors, up.FreshEvents)
 	}
 
-	// Trigger 1: new (not yet baseline) version vs previous version's baseline.
-	if !fp.IsBaseline {
-		base, err := eng.store.LatestBaseline(ctx, fp.Service, fp.Package, fp.Version)
-		if err != nil {
-			return nil, err
-		}
-		if base == nil {
-			// Trigger 0: still learning, no baseline anywhere. Alert only on
-			// always-on high-risk behaviors; everything else is learning.
-			var hot []string
-			for _, b := range up.FreshBehaviors {
-				for i := range eng.rules {
-					if eng.rules[i].AlwaysOn && eng.rules[i].matches(b) {
-						hot = append(hot, b)
-						break
-					}
-				}
-			}
-			if len(hot) == 0 {
-				return nil, nil
-			}
-			return eng.emit(ctx, fp.Service, fp.Package, "", fp.Version,
-				baselineBehaviors(fp.Behaviors, hot), hot, up.FreshEvents)
-		}
+	// Trigger 1: compare a new version with the previous baseline even when a
+	// large first batch also crosses the learning threshold. Promotion must not
+	// silently bless drift that arrived in the same batch.
+	base, err := eng.store.LatestBaseline(ctx, fp.Service, fp.Package, fp.Version)
+	if err != nil {
+		return nil, err
+	}
+	if base != nil {
 		var novel []string
 		for _, b := range up.FreshBehaviors {
 			if _, inBaseline := base.Behaviors[b]; !inBaseline {
@@ -214,7 +201,23 @@ func (eng *Engine) React(ctx context.Context, up fingerprint.Update) (*model.Ale
 		return eng.emit(ctx, fp.Service, fp.Package, base.Version, fp.Version,
 			behaviorKeys(base.Behaviors), novel, up.FreshEvents)
 	}
-	return nil, nil
+
+	// Trigger 0: no previous baseline. Alert only on always-on high-risk
+	// behaviors, including when the first batch immediately promoted.
+	var hot []string
+	for _, b := range up.FreshBehaviors {
+		for i := range eng.rules {
+			if eng.rules[i].AlwaysOn && eng.rules[i].matches(b) {
+				hot = append(hot, b)
+				break
+			}
+		}
+	}
+	if len(hot) == 0 {
+		return nil, nil
+	}
+	return eng.emit(ctx, fp.Service, fp.Package, "", fp.Version,
+		baselineBehaviors(fp.Behaviors, hot), hot, up.FreshEvents)
 }
 
 func (eng *Engine) emit(ctx context.Context, service, pkg, oldV, newV string, baselineBehaviors, newBehaviors []string, freshEvents map[string]model.Attributed) (*model.Alert, error) {

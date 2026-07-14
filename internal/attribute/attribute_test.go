@@ -221,6 +221,13 @@ func TestAttributeUsesOpenedPackagePathAndShortThreadContext(t *testing.T) {
 		t.Fatalf("same-thread context for secret = %q@%q, want good-pkg@1.0.1", got.Package, got.Version)
 	}
 
+	deniedSecret := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventDenyFileOpen), Timestamp: baseTs + uint64(11*time.Millisecond)}
+	copy(deniedSecret.Arg[:], "/tmp/goodman-fake-secrets/credentials")
+	got = r.Attribute(deniedSecret, 0)
+	if got.Package != "good-pkg" || got.Version != "1.0.1" || got.Behavior != "READ /tmp/goodman-fake-secrets/credentials" {
+		t.Fatalf("denied secret context = %+v, want good-pkg@1.0.1 with canonical behavior", got)
+	}
+
 	connect := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventNetConnect), Timestamp: baseTs + uint64(20*time.Millisecond)}
 	copy(connect.Arg[:], "127.0.0.1:9999")
 	got = r.Attribute(connect, 0)
