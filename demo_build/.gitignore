@@ -1,0 +1,4 @@
+node_modules/
+public/
+poster.png
+*.tsbuildinfo

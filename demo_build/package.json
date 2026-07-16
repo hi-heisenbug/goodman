@@ -1,0 +1,40 @@
+{
+  "name": "goodman-remotion-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Cinematic Goodman product demo rendered with Remotion",
+  "license": "UNLICENSED",
+  "scripts": {
+    "assets": "python3 prepare_assets.py",
+    "dev": "npm run assets && remotion studio src/index.ts --no-open",
+    "test": "vitest run",
+    "lint": "eslint src tests && tsc --noEmit",
+    "compositions": "npm run assets && remotion compositions src/index.ts",
+    "check": "npm run test && npm run lint && npm run compositions",
+    "render": "npm run assets && remotion render src/index.ts GoodmanDemo goodman_demo.mp4 --codec=h264 --audio-codec=aac --crf=16 --pixel-format=yuv420p --concurrency=50%",
+    "poster": "npm run assets && remotion still src/index.ts GoodmanDemo poster.png --frame=300",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@fontsource/dm-sans": "5.2.8",
+    "@fontsource/inter": "5.2.8",
+    "@remotion/cli": "4.0.489",
+    "@remotion/media": "4.0.489",
+    "@remotion/transitions": "4.0.489",
+    "react": "19.2.3",
+    "react-dom": "19.2.3",
+    "remotion": "4.0.489"
+  },
+  "devDependencies": {
+    "@remotion/eslint-config-flat": "4.0.489",
+    "@types/react": "19.2.7",
+    "@types/web": "0.0.166",
+    "eslint": "9.19.0",
+    "prettier": "3.8.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "sideEffects": [
+    "*.css"
+  ]
+}

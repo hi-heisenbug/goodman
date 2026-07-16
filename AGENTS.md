@@ -359,6 +359,9 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
   detection attached.
 - Do not leave temporary servers, collectors, sensors, Chrome instances, or test
   databases running after local verification.
+- Keep `demo_build/go.mod` even though the Remotion demo contains no Go code. It
+  is a module boundary that stops root `go test ./...` from traversing npm
+  dependencies that happen to ship Go source files.
 - Do not commit stale Vite hashed assets. If `dashboard/dist` changes, old hashed
   files in `internal/api/ui/dist/assets/` should usually disappear and new ones
   should appear.

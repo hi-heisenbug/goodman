@@ -1,0 +1,15 @@
+@import "@fontsource/dm-sans/700.css";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: #050807;
+  font-family: "Inter", sans-serif;
+}
