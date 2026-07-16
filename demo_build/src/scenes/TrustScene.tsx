@@ -35,7 +35,13 @@ const BentoCell: React.FC<BentoCellProps> = ({ delay, children }) => {
 
 // The single bento-grid recap of the film: live coverage evidence plus the
 // trust numbers, all counted up in place.
-export const TrustScene: React.FC = () => {
+type TrustSceneProps = {
+  readonly playbackRate?: number;
+};
+
+export const TrustScene: React.FC<TrustSceneProps> = ({
+  playbackRate = 0.54,
+}) => {
   const frame = useCurrentFrame();
 
   return (
@@ -77,7 +83,7 @@ export const TrustScene: React.FC = () => {
             zoomAt={60}
             zoom={1.12}
             focus="55% 24%"
-            playbackRate={0.54}
+            playbackRate={playbackRate}
           />
         </div>
         <BentoCell delay={26}>

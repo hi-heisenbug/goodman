@@ -8,16 +8,23 @@ import { WalkthroughFrame } from "../components/WalkthroughFrame";
 import { progress, springIn, verdictPop } from "../motion";
 import { COLORS, FONTS, SAFE_X } from "../theme";
 
-// The recording plays from the first frame of the scene at 0.88x, so the
-// 8.8s alerts segment exactly covers the 300-frame scene, the live alert
-// (4.4s into the segment) lands at frame 150, and the rollback copy
-// confirmation (5.45s) lands at frame 186.
+// The recording plays from the first frame of the scene, so the 8.8s alerts
+// segment must cover the scene: rate <= 8.8 * fps / durationInFrames. At the
+// master's 0.88x the live alert (4.4s into the segment) lands at frame 150
+// and the rollback copy confirmation (5.45s) at frame 186; at the X cut's
+// 1.0x they land at 132 and 164.
 const VIDEO_ENTER = 14;
-const RATE = 0.88;
-const ALERT_FRAME = Math.round((4.4 / RATE) * 30);
-const COPY_FRAME = Math.round((5.45 / RATE) * 30);
 
-export const LiveAlertScene: React.FC = () => {
+type LiveAlertSceneProps = {
+  readonly playbackRate?: number;
+};
+
+export const LiveAlertScene: React.FC<LiveAlertSceneProps> = ({
+  playbackRate = 0.88,
+}) => {
+  const RATE = playbackRate;
+  const ALERT_FRAME = Math.round((4.4 / RATE) * 30);
+  const COPY_FRAME = Math.round((5.45 / RATE) * 30);
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const title = progress(frame, 4, 20);

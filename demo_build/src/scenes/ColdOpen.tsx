@@ -5,24 +5,70 @@ import { TerminalCard, type TerminalLine } from "../components/TerminalCard";
 import { fadeWindow, progress, springIn } from "../motion";
 import { COLORS, FONTS, SAFE_X } from "../theme";
 
-const TERMINAL_LINES: readonly TerminalLine[] = [
-  { text: "npm install", at: 88, kind: "command" },
-  { text: "added 1 package, audited 1401 packages in 2.1s", at: 116, kind: "output", typed: false },
-  { text: "found 0 vulnerabilities", at: 122, kind: "output", typed: false },
-];
-
 const KERNEL_EVENTS = [
   ["READ", "/home/app/.npmrc"],
   ["CONNECT", "169.254.169.254:80"],
   ["EXEC", "/bin/sh"],
 ] as const;
 
-export const ColdOpen: React.FC = () => {
+// Frame timings for the three beats: the 250-frame master pacing and the
+// tightened 190-frame X-cut pacing.
+const TIMINGS = {
+  master: {
+    hook: [2, 12, 66, 80],
+    middle: [80, 92, 184, 196],
+    terminalIn: 84,
+    kernelIn: 96,
+    command: 88,
+    output: 116,
+    rows: 138,
+    closer: 198,
+  },
+  compact: {
+    hook: [2, 10, 50, 60],
+    middle: [60, 70, 142, 152],
+    terminalIn: 64,
+    kernelIn: 76,
+    command: 66,
+    output: 94,
+    rows: 112,
+    closer: 154,
+  },
+} as const;
+
+type ColdOpenProps = {
+  readonly compact?: boolean;
+};
+
+export const ColdOpen: React.FC<ColdOpenProps> = ({ compact = false }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const hook = fadeWindow(frame, 2, 12, 66, 80);
-  const middle = fadeWindow(frame, 80, 92, 184, 196);
-  const closer = progress(frame, 198, 18);
+  const t = TIMINGS[compact ? "compact" : "master"];
+  const hook = fadeWindow(frame, t.hook[0], t.hook[1], t.hook[2], t.hook[3]);
+  const middle = fadeWindow(
+    frame,
+    t.middle[0],
+    t.middle[1],
+    t.middle[2],
+    t.middle[3],
+  );
+  const closer = progress(frame, t.closer, 18);
+
+  const terminalLines: readonly TerminalLine[] = [
+    { text: "npm install", at: t.command, kind: "command" },
+    {
+      text: "added 1 package, audited 1401 packages in 2.1s",
+      at: t.output,
+      kind: "output",
+      typed: false,
+    },
+    {
+      text: "found 0 vulnerabilities",
+      at: t.output + 6,
+      kind: "output",
+      typed: false,
+    },
+  ];
 
   return (
     <AbsoluteFill>
@@ -93,7 +139,11 @@ export const ColdOpen: React.FC = () => {
           opacity: middle,
         }}
       >
-        <div style={{ translate: `0px ${(1 - springIn(frame, fps, 84)) * 40}px` }}>
+        <div
+          style={{
+            translate: `0px ${(1 - springIn(frame, fps, t.terminalIn)) * 40}px`,
+          }}
+        >
           <div
             style={{
               color: COLORS.muted,
@@ -106,13 +156,17 @@ export const ColdOpen: React.FC = () => {
             A ROUTINE DEPENDENCY UPDATE
           </div>
           <TerminalCard
-            lines={TERMINAL_LINES}
+            lines={terminalLines}
             frame={frame}
             width={800}
             minHeight={230}
           />
         </div>
-        <div style={{ translate: `0px ${(1 - springIn(frame, fps, 96)) * 40}px` }}>
+        <div
+          style={{
+            translate: `0px ${(1 - springIn(frame, fps, t.kernelIn)) * 40}px`,
+          }}
+        >
           <div
             style={{
               color: COLORS.red,
@@ -135,7 +189,7 @@ export const ColdOpen: React.FC = () => {
             }}
           >
             {KERNEL_EVENTS.map(([type, value], index) => {
-              const row = springIn(frame, fps, 138 + index * 7);
+              const row = springIn(frame, fps, t.rows + index * 7);
               return (
                 <div
                   key={type}
@@ -179,7 +233,7 @@ export const ColdOpen: React.FC = () => {
         <KineticHeadline
           text="Your scanner said it was clean. Then it ran."
           frame={frame}
-          startAt={200}
+          startAt={t.closer + 2}
           fontSize={98}
           align="center"
           maxWidth={1420}

@@ -13,6 +13,7 @@
     "compositions": "npm run assets && remotion compositions src/index.ts",
     "check": "npm run test && npm run lint && npm run compositions",
     "render": "npm run assets && remotion render src/index.ts GoodmanDemo goodman_demo.mp4 --codec=h264 --audio-codec=aac --crf=16 --pixel-format=yuv420p --concurrency=50%",
+    "render:x": "npm run assets && remotion render src/index.ts GoodmanDemoX goodman_demo_x.mp4 --codec=h264 --audio-codec=aac --crf=16 --pixel-format=yuv420p --concurrency=50%",
     "poster": "npm run assets && remotion still src/index.ts GoodmanDemo poster.png --frame=600",
     "upgrade": "remotion upgrade"
   },

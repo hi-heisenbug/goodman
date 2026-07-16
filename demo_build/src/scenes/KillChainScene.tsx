@@ -15,13 +15,18 @@ const EVENTS = [
 ] as const;
 
 const EVENT_START = 52;
-const VERDICT_AT = 150;
 
-export const KillChainScene: React.FC = () => {
+type KillChainSceneProps = {
+  readonly verdictAt?: number;
+};
+
+export const KillChainScene: React.FC<KillChainSceneProps> = ({
+  verdictAt = 150,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const packageIn = springIn(frame, fps, 26);
-  const verdict = verdictPop(frame, fps, VERDICT_AT);
+  const verdict = verdictPop(frame, fps, verdictAt);
 
   return (
     <AbsoluteFill>

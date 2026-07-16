@@ -9,9 +9,17 @@ walkthrough clicks through Fingerprints, Reachability, and Coverage.
 
 Final output:
 
-- `goodman_demo.mp4` — 1920×1080, 30 fps, 54.7 seconds, H.264/AAC.
+- `goodman_demo.mp4` — 1920×1080, 30 fps, 54.7 seconds, H.264/AAC. The
+  founder-sales master cut.
+- `goodman_demo_x.mp4` — 1920×1080, 30 fps, 45.4 seconds, H.264/AAC. The
+  X/Twitter cut: same scenes, tightened beats, its own beat-matched score.
 - `recordings/goodman_walkthrough.mp4` — 20-second live dashboard interaction
   used inside the Remotion scenes.
+
+Both cuts render from one component tree: the `GoodmanDemo` and
+`GoodmanDemoX` compositions differ only in per-scene durations and the
+walkthrough playback rates that keep every recording segment covering its
+scene.
 
 The film follows the hook → turn → proof → trust → close arc used by
 premium dev-tool launch videos: a real-world Shai-Hulud cold open with no
@@ -37,10 +45,11 @@ scene.
 - `recordings/` — canonical live product recording consumed by Remotion.
 - `prepare_assets.py` — validates and copies the walkthrough into Remotion's
   generated `public/` directory.
-- `generate_audio.py` — creates the deterministic 56-second Goodman score with
-  Python's standard library; impacts land on scene beats, the mix dips to
-  near-silence under the brand turn, and the live-alert moment carries a
-  heavier sub-bass hit. No downloaded music or remote render dependency.
+- `generate_audio.py` — creates the deterministic Goodman scores (56s master,
+  46s X cut) with Python's standard library; impacts land on each cut's scene
+  beats, the mix dips to near-silence under the brand turn, and the
+  live-alert moment carries a heavier sub-bass hit. No downloaded music or
+  remote render dependency.
 - `tests/` — protects scene order, timing math, interaction choreography,
   duration, and required proof assets.
 - `screenshots/` and `capture_screens.py` — preserved static-capture workflow
@@ -78,6 +87,7 @@ Useful commands:
 
 ```bash
 npm run capture   # regenerate the live Chromium walkthrough
+npm run render:x  # render the 45s X/Twitter cut (goodman_demo_x.mp4)
 npm test          # storyboard and asset contract
 npm run lint      # ESLint + strict TypeScript
 npm run compositions

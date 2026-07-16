@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Generate a deterministic original score for the Goodman demo.
+"""Generate deterministic original scores for the Goodman demo cuts.
 
-The mix is timed to the storyboard: a near-silent notch under the dip-to-black
-"turn" at ~8.3s, a heavier sub-bass hit when the live alert lands at ~16.8s,
-and softer impacts on each scene beat after that.
+Each profile is timed to its storyboard: a near-silent notch under the
+dip-to-black "turn", a heavier sub-bass hit when the live alert lands, and
+softer impacts on the other scene beats.
 """
 
 import math
@@ -13,36 +13,67 @@ from pathlib import Path
 
 
 SAMPLE_RATE = 44_100
-DURATION_SECONDS = 56.0
 BPM = 100
 BEAT_SECONDS = 60 / BPM
 
-# Scene beats (seconds): kernel events, logo reveal, alert lands (weighted),
+
+class ScoreProfile:
+    """Beat map for one cut: (impact_time_seconds, weight) pairs plus the
+    silence notch under the brand turn."""
+
+    def __init__(
+        self,
+        duration_seconds: float,
+        impacts: tuple[tuple[float, float], ...],
+        silence: tuple[float, float],
+    ) -> None:
+        self.duration_seconds = duration_seconds
+        self.impacts = impacts
+        self.silence = silence
+
+
+# 54.7s master: kernel events, logo reveal, alert lands (weighted),
 # kill-chain verdict, reachability counter, trust bento, closing headline.
-IMPACT_TIMES = (
-    (4.7, 1.0),
-    (8.85, 1.0),
-    (16.8, 1.9),
-    (26.5, 1.2),
-    (31.0, 1.0),
-    (39.5, 1.0),
-    (47.1, 1.1),
+MASTER = ScoreProfile(
+    duration_seconds=56.0,
+    impacts=(
+        (4.7, 1.0),
+        (8.85, 1.0),
+        (16.8, 1.9),
+        (26.5, 1.2),
+        (31.0, 1.0),
+        (39.5, 1.0),
+        (47.1, 1.1),
+    ),
+    silence=(8.15, 8.72),
 )
 
-# The 400ms of stillness before the brand turn.
-SILENCE_START = 8.15
-SILENCE_END = 8.72
+# 45.4s X cut: same beats on the tightened storyboard.
+XCUT = ScoreProfile(
+    duration_seconds=46.0,
+    impacts=(
+        (3.75, 1.0),
+        (6.8, 1.0),
+        (13.77, 1.9),
+        (22.4, 1.2),
+        (26.2, 1.0),
+        (33.1, 1.0),
+        (39.2, 1.1),
+    ),
+    silence=(6.18, 6.7),
+)
 
 
-def envelope(time_seconds: float) -> float:
+def envelope(time_seconds: float, profile: ScoreProfile) -> float:
     fade_in = min(1.0, time_seconds / 1.5)
-    fade_out = min(1.0, (DURATION_SECONDS - time_seconds) / 2.0)
+    fade_out = min(1.0, (profile.duration_seconds - time_seconds) / 2.0)
     level = max(0.0, min(fade_in, fade_out))
-    if SILENCE_START - 0.2 <= time_seconds <= SILENCE_END + 0.25:
-        if time_seconds < SILENCE_START:
-            dip = (SILENCE_START - time_seconds) / 0.2
-        elif time_seconds > SILENCE_END:
-            dip = (time_seconds - SILENCE_END) / 0.25
+    silence_start, silence_end = profile.silence
+    if silence_start - 0.2 <= time_seconds <= silence_end + 0.25:
+        if time_seconds < silence_start:
+            dip = (silence_start - time_seconds) / 0.2
+        elif time_seconds > silence_end:
+            dip = (time_seconds - silence_end) / 0.25
         else:
             dip = 0.0
         level *= 0.04 + 0.96 * max(0.0, min(1.0, dip))
@@ -57,9 +88,9 @@ def kick(time_seconds: float) -> float:
     return math.sin(2 * math.pi * frequency * phase) * math.exp(-phase * 19)
 
 
-def impact(time_seconds: float) -> float:
+def impact(time_seconds: float, profile: ScoreProfile) -> float:
     total = 0.0
-    for start, weight in IMPACT_TIMES:
+    for start, weight in profile.impacts:
         phase = time_seconds - start
         if 0 <= phase <= 0.8:
             total += (
@@ -80,7 +111,7 @@ def shimmer(sample_index: int, time_seconds: float) -> float:
     return (noise * 2 - 1) * math.exp(-phase * 58)
 
 
-def sample(sample_index: int) -> tuple[int, int]:
+def sample(sample_index: int, profile: ScoreProfile) -> tuple[int, int]:
     time_seconds = sample_index / SAMPLE_RATE
     pad = (
         math.sin(2 * math.pi * 55.0 * time_seconds) * 0.11
@@ -88,17 +119,17 @@ def sample(sample_index: int) -> tuple[int, int]:
         + math.sin(2 * math.pi * 110.0 * time_seconds) * 0.035
     )
     movement = math.sin(2 * math.pi * 0.22 * time_seconds) * 0.025
-    transient = kick(time_seconds) * 0.24 + impact(time_seconds) * 0.23
+    transient = kick(time_seconds) * 0.24 + impact(time_seconds, profile) * 0.23
     high = shimmer(sample_index, time_seconds) * 0.055
-    mixed = (pad + movement + transient + high) * envelope(time_seconds)
+    mixed = (pad + movement + transient + high) * envelope(time_seconds, profile)
     left = max(-1.0, min(1.0, mixed + high * 0.20))
     right = max(-1.0, min(1.0, mixed - high * 0.20))
     return int(left * 32_767), int(right * 32_767)
 
 
-def render_score(output: Path) -> None:
+def render_score(output: Path, profile: ScoreProfile = MASTER) -> None:
     output.parent.mkdir(parents=True, exist_ok=True)
-    frame_count = int(SAMPLE_RATE * DURATION_SECONDS)
+    frame_count = int(SAMPLE_RATE * profile.duration_seconds)
 
     with wave.open(str(output), "wb") as audio:
         audio.setnchannels(2)
@@ -107,7 +138,7 @@ def render_score(output: Path) -> None:
 
         chunk = bytearray()
         for sample_index in range(frame_count):
-            chunk.extend(struct.pack("<hh", *sample(sample_index)))
+            chunk.extend(struct.pack("<hh", *sample(sample_index, profile)))
             if len(chunk) >= 256 * 1024:
                 audio.writeframesraw(chunk)
                 chunk.clear()
@@ -116,4 +147,6 @@ def render_score(output: Path) -> None:
 
 
 if __name__ == "__main__":
-    render_score(Path(__file__).parent / "public" / "audio" / "goodman-score.wav")
+    audio_dir = Path(__file__).parent / "public" / "audio"
+    render_score(audio_dir / "goodman-score.wav", MASTER)
+    render_score(audio_dir / "goodman-score-x.wav", XCUT)

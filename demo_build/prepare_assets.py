@@ -4,7 +4,7 @@
 import shutil
 from pathlib import Path
 
-from generate_audio import render_score
+from generate_audio import MASTER, XCUT, render_score
 from walkthrough import PLAN, validate_recording
 
 
@@ -28,7 +28,8 @@ def copy_walkthrough() -> None:
 
 def main() -> None:
     copy_walkthrough()
-    render_score(PUBLIC / "audio" / "goodman-score.wav")
+    render_score(PUBLIC / "audio" / "goodman-score.wav", MASTER)
+    render_score(PUBLIC / "audio" / "goodman-score-x.wav", XCUT)
     print(f"Prepared Remotion assets in {PUBLIC}")
 
 

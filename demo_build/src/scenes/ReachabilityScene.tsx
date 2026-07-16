@@ -8,7 +8,13 @@ import { WalkthroughFrame } from "../components/WalkthroughFrame";
 import { progress, springIn } from "../motion";
 import { COLORS, FONTS, SAFE_X } from "../theme";
 
-export const ReachabilityScene: React.FC = () => {
+type ReachabilitySceneProps = {
+  readonly playbackRate?: number;
+};
+
+export const ReachabilityScene: React.FC<ReachabilitySceneProps> = ({
+  playbackRate = 0.4,
+}) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
   const body = progress(frame, 26, 20);
@@ -119,7 +125,7 @@ export const ReachabilityScene: React.FC = () => {
           zoom={1.14}
           focus="55% 25%"
           shiftX={-24}
-          playbackRate={0.4}
+          playbackRate={playbackRate}
         />
       </div>
     </AbsoluteFill>
