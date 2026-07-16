@@ -1,24 +1,28 @@
 export const COLORS = {
-  ink: "#050505",
-  night: "#050807",
-  nightRaised: "#0b1210",
-  charcoal: "#464646",
-  muted: "#8b9691",
-  white: "#ffffff",
-  paper: "#fbfbfa",
-  blush: "#f2eeee",
+  // Canvas and surfaces: cool near-blacks, never pure #000 except letterbox.
+  ink: "#0a0a0c",
+  surface: "#0d1117",
+  surfaceRaised: "#11161d",
+  line: "rgba(255,255,255,0.08)",
+  // Text.
+  white: "#ededed",
+  muted: "#8b8f98",
+  faint: "rgba(255,255,255,0.42)",
+  // Goodman brand greens (matches the live dashboard).
   lime: "#93cb52",
   green: "#1c9770",
   mint: "#bef3e2",
-  red: "#d53f4f",
-  amber: "#f2a33a",
-  line: "rgba(190, 243, 226, 0.16)",
+  // Semantic threat colors.
+  red: "#ff5060",
+  amber: "#fbbf24",
 } as const;
 
 export const FONTS = {
   heading: '"DM Sans", sans-serif',
   body: '"Inter", sans-serif',
-  mono: '"DejaVu Sans Mono", "Liberation Mono", monospace',
+  mono: '"JetBrains Mono", "DejaVu Sans Mono", monospace',
 } as const;
 
-export const SAFE_X = 96;
+export const TNUM = { fontFeatureSettings: '"tnum"' } as const;
+
+export const SAFE_X = 110;

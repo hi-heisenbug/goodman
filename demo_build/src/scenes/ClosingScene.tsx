@@ -1,118 +1,27 @@
-import { AbsoluteFill, useCurrentFrame } from "remotion";
+import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
+import { Backdrop } from "../components/Backdrop";
 import { BrandMark } from "../components/BrandMark";
-import { SceneBackground } from "../components/SceneBackground";
-import { SceneLabel } from "../components/SceneLabel";
-import { fadeWindow, progress } from "../motion";
+import { KineticHeadline } from "../components/KineticHeadline";
+import { TerminalCard, type TerminalLine } from "../components/TerminalCard";
+import { progress, springIn } from "../motion";
 import { COLORS, FONTS } from "../theme";
 
-const STEPS = [
-  ["01", "Package update"],
-  ["02", "Behavior drift"],
-  ["03", "Culprit package"],
-  ["04", "Rollback"],
-] as const;
+const CTA_LINES: readonly TerminalLine[] = [
+  { text: "goodmanctl demo", at: 74, kind: "command" },
+  { text: "Goodman demo is ready → http://127.0.0.1:8844", at: 104, kind: "output", typed: false },
+];
 
 export const ClosingScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const outcome = fadeWindow(frame, 0, 20, 96, 112);
-  const final = progress(frame, 110, 26);
+  const { fps } = useVideoConfig();
+  const logo = springIn(frame, fps, 4);
+  const terminal = springIn(frame, fps, 66);
+  const pill = springIn(frame, fps, 128);
+  const tagline = progress(frame, 148, 16);
 
   return (
     <AbsoluteFill>
-      <SceneBackground accent={COLORS.lime} />
-
-      <div
-        style={{
-          position: "absolute",
-          inset: "150px 120px 100px",
-          opacity: outcome,
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <SceneLabel>The operational outcome</SceneLabel>
-          <div
-            style={{
-              marginTop: 22,
-              color: COLORS.white,
-              fontFamily: FONTS.heading,
-              fontSize: 94,
-              letterSpacing: -4,
-              lineHeight: 0.98,
-            }}
-          >
-            From package update to rollback in seconds.
-          </div>
-        </div>
-
-        <div
-          style={{
-            position: "relative",
-            marginTop: 120,
-            display: "grid",
-            gridTemplateColumns: "repeat(4, 1fr)",
-            gap: 34,
-          }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              left: 170,
-              right: 170,
-              top: 45,
-              height: 4,
-              backgroundColor: "rgba(255,255,255,0.12)",
-            }}
-          >
-            <div
-              style={{
-                width: `${progress(frame, 42, 66) * 100}%`,
-                height: "100%",
-                background: `linear-gradient(90deg, ${COLORS.lime}, ${COLORS.green}, ${COLORS.red})`,
-              }}
-            />
-          </div>
-          {STEPS.map(([number, label], index) => {
-            const reveal = progress(frame, 34 + index * 18, 18);
-            const isLast = index === STEPS.length - 1;
-            return (
-              <div key={number} style={{ textAlign: "center", opacity: reveal }}>
-                <div
-                  style={{
-                    width: 94,
-                    height: 94,
-                    margin: "0 auto",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    borderRadius: 22,
-                    backgroundColor: isLast ? COLORS.red : COLORS.mint,
-                    color: isLast ? COLORS.white : COLORS.ink,
-                    fontFamily: FONTS.heading,
-                    fontSize: 32,
-                    scale: 0.82 + reveal * 0.18,
-                    boxShadow: isLast
-                      ? "0 20px 60px rgba(213,63,79,0.3)"
-                      : "0 20px 60px rgba(28,151,112,0.18)",
-                  }}
-                >
-                  {number}
-                </div>
-                <div
-                  style={{
-                    marginTop: 24,
-                    color: COLORS.white,
-                    fontFamily: FONTS.heading,
-                    fontSize: 30,
-                  }}
-                >
-                  {label}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-
+      <Backdrop accent={COLORS.green} glowY="42%" glowOpacity={0.16} />
       <div
         style={{
           position: "absolute",
@@ -121,48 +30,72 @@ export const ClosingScene: React.FC = () => {
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          textAlign: "center",
-          opacity: final,
-          scale: 0.94 + final * 0.06,
+          gap: 44,
         }}
       >
-        <BrandMark light />
+        <div style={{ opacity: Math.min(1, logo * 1.3), scale: 0.94 + logo * 0.06 }}>
+          <BrandMark glow />
+        </div>
+        <KineticHeadline
+          text="See which dependency actually did it."
+          frame={frame}
+          startAt={14}
+          fontSize={92}
+          align="center"
+          maxWidth={1380}
+          accentWords={["actually"]}
+          accentColor={COLORS.lime}
+        />
         <div
           style={{
-            marginTop: 58,
-            maxWidth: 1350,
-            color: COLORS.white,
-            fontFamily: FONTS.heading,
-            fontSize: 102,
-            lineHeight: 0.98,
-            letterSpacing: -4.5,
+            opacity: Math.min(1, terminal * 1.3),
+            translate: `0px ${(1 - terminal) * 30}px`,
           }}
         >
-          See which dependency actually did it.
+          <TerminalCard
+            lines={CTA_LINES}
+            frame={frame}
+            width={880}
+            title="one afternoon to a running pilot"
+            fontSize={25}
+            minHeight={130}
+          />
         </div>
         <div
           style={{
-            marginTop: 46,
-            padding: "17px 26px",
-            borderRadius: 10,
-            backgroundColor: COLORS.mint,
-            color: COLORS.ink,
-            fontFamily: FONTS.mono,
-            fontSize: 25,
-            fontWeight: 700,
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "center",
+            gap: 20,
           }}
         >
-          github.com/hi-heisenbug/goodman
-        </div>
-        <div
-          style={{
-            marginTop: 28,
-            color: "rgba(255,255,255,0.5)",
-            fontSize: 21,
-            letterSpacing: 1.2,
-          }}
-        >
-          Runtime dependency security at package precision
+          <div
+            style={{
+              padding: "16px 28px",
+              borderRadius: 10,
+              backgroundColor: COLORS.mint,
+              color: "#0a0a0c",
+              fontFamily: FONTS.mono,
+              fontSize: 24,
+              fontWeight: 700,
+              opacity: Math.min(1, pill * 1.3),
+              scale: 0.95 + pill * 0.05,
+              boxShadow: `0 0 70px -16px ${COLORS.mint}aa`,
+            }}
+          >
+            github.com/hi-heisenbug/goodman
+          </div>
+          <div
+            style={{
+              color: COLORS.muted,
+              fontFamily: FONTS.mono,
+              fontSize: 19,
+              letterSpacing: 2.5,
+              opacity: tagline,
+            }}
+          >
+            RUNTIME DEPENDENCY SECURITY AT PACKAGE PRECISION
+          </div>
         </div>
       </div>
     </AbsoluteFill>

@@ -2,7 +2,7 @@ import { Video } from "@remotion/media";
 import { staticFile, useVideoConfig } from "remotion";
 import plan from "../../interaction_plan.json";
 import { progress } from "../motion";
-import { COLORS } from "../theme";
+import { COLORS, FONTS } from "../theme";
 
 type SegmentName = keyof typeof plan.segments;
 
@@ -16,6 +16,7 @@ type WalkthroughFrameProps = {
   readonly focus?: string;
   readonly shiftX?: number;
   readonly playbackRate?: number;
+  readonly glow?: string;
 };
 
 export const WalkthroughFrame: React.FC<WalkthroughFrameProps> = ({
@@ -28,6 +29,7 @@ export const WalkthroughFrame: React.FC<WalkthroughFrameProps> = ({
   focus = "50% 50%",
   shiftX = 0,
   playbackRate = 1,
+  glow = COLORS.green,
 }) => {
   const { fps } = useVideoConfig();
   const timing = plan.segments[segment];
@@ -39,47 +41,72 @@ export const WalkthroughFrame: React.FC<WalkthroughFrameProps> = ({
     <div
       style={{
         width,
-        borderRadius: 18,
+        borderRadius: 16,
         overflow: "hidden",
-        border: "1px solid rgba(190,243,226,0.28)",
-        backgroundColor: COLORS.white,
-        boxShadow: "0 35px 90px rgba(0,0,0,0.32)",
+        border: "1px solid rgba(255,255,255,0.12)",
+        backgroundColor: COLORS.surface,
+        boxShadow: `0 50px 130px rgba(0,0,0,0.65), 0 0 90px -30px ${glow}55`,
         opacity: enter,
-        scale: 0.95 + enter * 0.05,
-        translate: `${(1 - enter) * 70 + shiftX * zoomProgress}px ${(1 - enter) * 90}px`,
+        scale: 0.96 + enter * 0.04,
+        translate: `${(1 - enter) * 50 + shiftX * zoomProgress}px ${(1 - enter) * 70}px`,
       }}
     >
       <div
         style={{
-          height: 44,
+          height: 46,
           display: "flex",
           alignItems: "center",
-          gap: 10,
-          padding: "0 18px",
-          backgroundColor: "#101715",
-          borderBottom: "1px solid rgba(255,255,255,0.08)",
+          gap: 9,
+          padding: "0 20px",
+          backgroundColor: COLORS.surfaceRaised,
+          borderBottom: `1px solid ${COLORS.line}`,
         }}
       >
-        {[COLORS.red, COLORS.amber, COLORS.lime].map((color) => (
+        {[0, 1, 2].map((index) => (
           <div
-            key={color}
+            key={index}
             style={{
-              width: 11,
-              height: 11,
+              width: 12,
+              height: 12,
               borderRadius: "50%",
-              backgroundColor: color,
+              backgroundColor: "#3a3f47",
             }}
           />
         ))}
         <div
           style={{
-            marginLeft: 16,
-            color: "rgba(255,255,255,0.48)",
+            marginLeft: 14,
+            color: COLORS.muted,
+            fontFamily: FONTS.mono,
             fontSize: 17,
             letterSpacing: 0.3,
           }}
         >
-          goodman.local / live walkthrough
+          goodman.local — live product
+        </div>
+        <div
+          style={{
+            marginLeft: "auto",
+            display: "flex",
+            alignItems: "center",
+            gap: 8,
+            color: COLORS.lime,
+            fontFamily: FONTS.mono,
+            fontSize: 15,
+            fontWeight: 700,
+            letterSpacing: 2,
+          }}
+        >
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              backgroundColor: COLORS.lime,
+              boxShadow: `0 0 10px ${COLORS.lime}`,
+            }}
+          />
+          LIVE
         </div>
       </div>
       <div style={{ width, height: videoHeight, overflow: "hidden" }}>

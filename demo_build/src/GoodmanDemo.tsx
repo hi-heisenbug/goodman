@@ -1,21 +1,13 @@
 import { Audio } from "@remotion/media";
-import { TransitionSeries, linearTiming } from "@remotion/transitions";
-import { fade } from "@remotion/transitions/fade";
-import { slide } from "@remotion/transitions/slide";
-import { AbsoluteFill, interpolate, staticFile } from "remotion";
-import { AttackPathScene } from "./scenes/AttackPathScene";
-import { AttributionScene } from "./scenes/AttributionScene";
+import { AbsoluteFill, Series, interpolate, staticFile } from "remotion";
 import { ClosingScene } from "./scenes/ClosingScene";
 import { ColdOpen } from "./scenes/ColdOpen";
+import { KillChainScene } from "./scenes/KillChainScene";
 import { LiveAlertScene } from "./scenes/LiveAlertScene";
 import { ReachabilityScene } from "./scenes/ReachabilityScene";
 import { TrustScene } from "./scenes/TrustScene";
-import {
-  SCENES,
-  TOTAL_FRAMES,
-  TRANSITION_FRAMES,
-  type SceneId,
-} from "./storyboard";
+import { TurnScene } from "./scenes/TurnScene";
+import { SCENES, TOTAL_FRAMES, type SceneId } from "./storyboard";
 
 const durationOf = (id: SceneId) => {
   const scene = SCENES.find((candidate) => candidate.id === id);
@@ -25,64 +17,41 @@ const durationOf = (id: SceneId) => {
   return scene.durationInFrames;
 };
 
-const timing = linearTiming({ durationInFrames: TRANSITION_FRAMES });
-
 export const GoodmanDemo: React.FC = () => (
-  <AbsoluteFill>
+  <AbsoluteFill style={{ backgroundColor: "#0a0a0c" }}>
     <Audio
       src={staticFile("audio/goodman-score.wav")}
       volume={(frame) =>
         interpolate(
           frame,
           [0, 32, TOTAL_FRAMES - 65, TOTAL_FRAMES - 1],
-          [0, 0.46, 0.46, 0],
+          [0, 0.5, 0.5, 0],
           { extrapolateLeft: "clamp", extrapolateRight: "clamp" },
         )
       }
     />
-    <TransitionSeries>
-      <TransitionSeries.Sequence durationInFrames={durationOf("cold-open")}>
+    <Series>
+      <Series.Sequence durationInFrames={durationOf("cold-open")}>
         <ColdOpen />
-      </TransitionSeries.Sequence>
-      <TransitionSeries.Transition presentation={fade()} timing={timing} />
-
-      <TransitionSeries.Sequence durationInFrames={durationOf("attribution")}>
-        <AttributionScene />
-      </TransitionSeries.Sequence>
-      <TransitionSeries.Transition
-        presentation={slide({ direction: "from-bottom" })}
-        timing={timing}
-      />
-
-      <TransitionSeries.Sequence durationInFrames={durationOf("live-alert")}>
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={durationOf("turn")}>
+        <TurnScene />
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={durationOf("live-alert")}>
         <LiveAlertScene />
-      </TransitionSeries.Sequence>
-      <TransitionSeries.Transition presentation={fade()} timing={timing} />
-
-      <TransitionSeries.Sequence durationInFrames={durationOf("attack-path")}>
-        <AttackPathScene />
-      </TransitionSeries.Sequence>
-      <TransitionSeries.Transition
-        presentation={slide({ direction: "from-right" })}
-        timing={timing}
-      />
-
-      <TransitionSeries.Sequence durationInFrames={durationOf("reachability")}>
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={durationOf("kill-chain")}>
+        <KillChainScene />
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={durationOf("reachability")}>
         <ReachabilityScene />
-      </TransitionSeries.Sequence>
-      <TransitionSeries.Transition presentation={fade()} timing={timing} />
-
-      <TransitionSeries.Sequence durationInFrames={durationOf("trust")}>
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={durationOf("trust")}>
         <TrustScene />
-      </TransitionSeries.Sequence>
-      <TransitionSeries.Transition
-        presentation={slide({ direction: "from-bottom" })}
-        timing={timing}
-      />
-
-      <TransitionSeries.Sequence durationInFrames={durationOf("close")}>
+      </Series.Sequence>
+      <Series.Sequence durationInFrames={durationOf("close")}>
         <ClosingScene />
-      </TransitionSeries.Sequence>
-    </TransitionSeries>
+      </Series.Sequence>
+    </Series>
   </AbsoluteFill>
 );

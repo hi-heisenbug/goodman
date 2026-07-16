@@ -1,11 +1,17 @@
-import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
-import { BrandMark } from "../components/BrandMark";
-import { SceneBackground } from "../components/SceneBackground";
-import { SceneLabel } from "../components/SceneLabel";
-import { fadeWindow, progress } from "../motion";
+import { AbsoluteFill, useCurrentFrame, useVideoConfig } from "remotion";
+import { Backdrop } from "../components/Backdrop";
+import { KineticHeadline } from "../components/KineticHeadline";
+import { TerminalCard, type TerminalLine } from "../components/TerminalCard";
+import { fadeWindow, progress, springIn } from "../motion";
 import { COLORS, FONTS, SAFE_X } from "../theme";
 
-const EVENTS = [
+const TERMINAL_LINES: readonly TerminalLine[] = [
+  { text: "npm install", at: 88, kind: "command" },
+  { text: "added 1 package, audited 1401 packages in 2.1s", at: 116, kind: "output", typed: false },
+  { text: "found 0 vulnerabilities", at: 122, kind: "output", typed: false },
+];
+
+const KERNEL_EVENTS = [
   ["READ", "/home/app/.npmrc"],
   ["CONNECT", "169.254.169.254:80"],
   ["EXEC", "/bin/sh"],
@@ -13,22 +19,20 @@ const EVENTS = [
 
 export const ColdOpen: React.FC = () => {
   const frame = useCurrentFrame();
-  const first = fadeWindow(frame, 0, 14, 52, 70);
-  const second = fadeWindow(frame, 58, 75, 112, 132);
-  const final = progress(frame, 124, 24);
+  const { fps } = useVideoConfig();
+  const hook = fadeWindow(frame, 2, 12, 66, 80);
+  const middle = fadeWindow(frame, 80, 92, 184, 196);
+  const closer = progress(frame, 198, 18);
 
   return (
     <AbsoluteFill>
-      <SceneBackground accent={COLORS.red} />
-      <div style={{ position: "absolute", left: SAFE_X, top: 72 }}>
-        <BrandMark light compact />
-      </div>
+      <Backdrop accent={COLORS.red} glowOpacity={0.1} />
       <div
         style={{
           position: "absolute",
           right: SAFE_X,
-          top: 78,
-          color: "rgba(255,255,255,0.48)",
+          top: 82,
+          color: COLORS.faint,
           fontFamily: FONTS.mono,
           fontSize: 18,
           letterSpacing: 1.5,
@@ -37,140 +41,151 @@ export const ColdOpen: React.FC = () => {
         PROD / RUNTIME / 02:17:41
       </div>
 
+      {/* Beat 1: the real-world hook, no logo. */}
       <div
         style={{
           position: "absolute",
-          inset: "250px 140px 160px",
+          inset: "0 140px",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          opacity: first,
-          translate: `0px ${interpolate(first, [0, 1], [42, 0])}px`,
+          opacity: hook,
         }}
       >
         <div style={{ textAlign: "center" }}>
-          <SceneLabel>A routine release</SceneLabel>
           <div
             style={{
-              marginTop: 28,
-              color: COLORS.white,
-              fontFamily: FONTS.heading,
-              fontSize: 124,
-              letterSpacing: -5,
-              lineHeight: 0.98,
+              color: COLORS.red,
+              fontFamily: FONTS.mono,
+              fontSize: 22,
+              fontWeight: 700,
+              letterSpacing: 5,
+              marginBottom: 34,
             }}
           >
-            A dependency updated.
+            SEPTEMBER 2025 · THE SHAI-HULUD WORM
           </div>
-          <div
-            style={{
-              width: 230 * first,
-              height: 10,
-              margin: "36px auto 0",
-              borderRadius: 8,
-              backgroundColor: COLORS.lime,
-            }}
+          <KineticHeadline
+            text="One npm package compromised 500+ more."
+            frame={frame}
+            startAt={4}
+            fontSize={104}
+            align="center"
+            maxWidth={1450}
+            accentWords={["500+"]}
+            accentColor={COLORS.red}
           />
         </div>
       </div>
 
+      {/* Beat 2: the trojaned install, and what the kernel saw. */}
       <div
         style={{
           position: "absolute",
-          inset: "220px 150px 130px",
+          left: SAFE_X,
+          right: SAFE_X,
+          top: 0,
+          bottom: 0,
           display: "grid",
-          gridTemplateColumns: "0.9fr 1.1fr",
+          gridTemplateColumns: "1fr 1fr",
+          gap: 60,
           alignItems: "center",
-          gap: 100,
-          opacity: second,
+          opacity: middle,
         }}
       >
-        <div>
-          <SceneLabel>Seconds later</SceneLabel>
+        <div style={{ translate: `0px ${(1 - springIn(frame, fps, 84)) * 40}px` }}>
           <div
             style={{
-              marginTop: 28,
-              color: COLORS.white,
-              fontFamily: FONTS.heading,
-              fontSize: 88,
-              letterSpacing: -3,
-              lineHeight: 1.02,
-            }}
-          >
-            The syscall trail changed.
-          </div>
-        </div>
-        <div
-          style={{
-            padding: 34,
-            borderRadius: 16,
-            border: "1px solid rgba(213,63,79,0.5)",
-            backgroundColor: "rgba(8,12,11,0.88)",
-            boxShadow: "0 30px 90px rgba(0,0,0,0.45)",
-          }}
-        >
-          <div
-            style={{
-              color: "rgba(255,255,255,0.46)",
+              color: COLORS.muted,
               fontFamily: FONTS.mono,
-              fontSize: 19,
-              marginBottom: 18,
+              fontSize: 20,
+              letterSpacing: 3,
+              marginBottom: 24,
             }}
           >
-            live kernel events
+            A ROUTINE DEPENDENCY UPDATE
           </div>
-          {EVENTS.map(([type, value], index) => {
-            const row = progress(frame, 70 + index * 12, 14);
-            return (
-              <div
-                key={type}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "160px 1fr",
-                  gap: 20,
-                  padding: "18px 0",
-                  borderTop: "1px solid rgba(255,255,255,0.08)",
-                  opacity: row,
-                  translate: `${(1 - row) * 30}px 0px`,
-                  fontFamily: FONTS.mono,
-                  fontSize: 24,
-                }}
-              >
-                <span style={{ color: COLORS.red }}>+ {type}</span>
-                <span style={{ color: COLORS.white }}>{value}</span>
-              </div>
-            );
-          })}
+          <TerminalCard
+            lines={TERMINAL_LINES}
+            frame={frame}
+            width={800}
+            minHeight={230}
+          />
+        </div>
+        <div style={{ translate: `0px ${(1 - springIn(frame, fps, 96)) * 40}px` }}>
+          <div
+            style={{
+              color: COLORS.red,
+              fontFamily: FONTS.mono,
+              fontSize: 20,
+              letterSpacing: 3,
+              marginBottom: 24,
+            }}
+          >
+            SECONDS LATER, IN THE KERNEL
+          </div>
+          <div
+            style={{
+              borderRadius: 14,
+              border: `1px solid ${COLORS.line}`,
+              backgroundColor: COLORS.surface,
+              boxShadow: "0 40px 110px rgba(0,0,0,0.6)",
+              padding: "10px 30px",
+              minHeight: 300,
+            }}
+          >
+            {KERNEL_EVENTS.map(([type, value], index) => {
+              const row = springIn(frame, fps, 138 + index * 7);
+              return (
+                <div
+                  key={type}
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "170px 1fr",
+                    gap: 22,
+                    padding: "22px 0 22px 18px",
+                    borderTop: index === 0 ? "none" : `1px solid ${COLORS.line}`,
+                    borderLeft: `3px solid ${COLORS.red}`,
+                    marginLeft: -18,
+                    paddingLeft: 32,
+                    opacity: Math.min(1, row * 1.4),
+                    translate: `0px ${(1 - row) * 16}px`,
+                    fontFamily: FONTS.mono,
+                    fontSize: 25,
+                  }}
+                >
+                  <span style={{ color: COLORS.red, fontWeight: 700 }}>
+                    + {type}
+                  </span>
+                  <span style={{ color: COLORS.white }}>{value}</span>
+                </div>
+              );
+            })}
+          </div>
         </div>
       </div>
 
+      {/* Beat 3: the wedge. */}
       <div
         style={{
           position: "absolute",
-          inset: "250px 120px 120px",
+          inset: "0 140px",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          textAlign: "center",
-          opacity: final,
-          scale: 0.92 + final * 0.08,
+          opacity: closer,
         }}
       >
-        <div>
-          <SceneLabel>The question every scanner misses</SceneLabel>
-          <div
-            style={{
-              marginTop: 28,
-              color: COLORS.white,
-              fontFamily: FONTS.heading,
-              fontSize: 138,
-              letterSpacing: -6,
-              lineHeight: 0.95,
-            }}
-          >
-            Which package did it?
-          </div>
-        </div>
+        <KineticHeadline
+          text="Your scanner said it was clean. Then it ran."
+          frame={frame}
+          startAt={200}
+          fontSize={98}
+          align="center"
+          maxWidth={1420}
+          accentWords={["ran"]}
+          accentColor={COLORS.red}
+        />
       </div>
     </AbsoluteFill>
   );

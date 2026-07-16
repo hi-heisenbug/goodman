@@ -1,19 +1,28 @@
 import { COLORS, FONTS } from "../theme";
 
 type BrandMarkProps = {
-  readonly light?: boolean;
   readonly compact?: boolean;
+  readonly glow?: boolean;
 };
 
 export const BrandMark: React.FC<BrandMarkProps> = ({
-  light = false,
   compact = false,
+  glow = false,
 }) => {
-  const foreground = light ? COLORS.white : COLORS.ink;
+  const foreground = COLORS.white;
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-      <svg width={compact ? 42 : 54} height={compact ? 42 : 54} viewBox="0 0 54 54">
+      <svg
+        width={compact ? 42 : 60}
+        height={compact ? 42 : 60}
+        viewBox="0 0 54 54"
+        style={
+          glow
+            ? { filter: `drop-shadow(0 0 18px ${COLORS.lime}66)` }
+            : undefined
+        }
+      >
         <rect
           x="1"
           y="1"
@@ -21,7 +30,7 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
           height="52"
           rx="10"
           fill="none"
-          stroke={foreground}
+          stroke={glow ? COLORS.lime : foreground}
           strokeWidth="2"
         />
         <path
@@ -37,7 +46,8 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
           style={{
             color: foreground,
             fontFamily: FONTS.heading,
-            fontSize: compact ? 26 : 34,
+            fontWeight: 700,
+            fontSize: compact ? 26 : 38,
             letterSpacing: -0.8,
             lineHeight: 1,
           }}
@@ -47,9 +57,8 @@ export const BrandMark: React.FC<BrandMarkProps> = ({
         {!compact ? (
           <div
             style={{
-              color: light ? "rgba(255,255,255,0.55)" : COLORS.muted,
-              fontSize: 16,
-              fontStyle: "italic",
+              color: COLORS.muted,
+              fontSize: 17,
               letterSpacing: 3,
               marginTop: 8,
             }}

@@ -9,9 +9,19 @@ walkthrough clicks through Fingerprints, Reachability, and Coverage.
 
 Final output:
 
-- `goodman_demo.mp4` — 1920×1080, 30 fps, 41.9 seconds, H.264/AAC.
+- `goodman_demo.mp4` — 1920×1080, 30 fps, 54.7 seconds, H.264/AAC.
 - `recordings/goodman_walkthrough.mp4` — 20-second live dashboard interaction
   used inside the Remotion scenes.
+
+The film follows the hook → turn → proof → trust → close arc used by
+premium dev-tool launch videos: a real-world Shai-Hulud cold open with no
+logo, a dip-to-black brand turn with 400 ms of silence, the live alert
+landing mid-recording with a synced screen flash, a kill-chain attribution
+cascade, animated reachability counters, one bento-grid trust recap, and a
+typed-terminal call to action. Motion uses critically damped springs for
+entrances and reserves the single overshoot spring for verdict moments; the
+canvas is a dark grid with film grain, vignette, and one radial glow per
+scene.
 
 ## What is here
 
@@ -27,8 +37,10 @@ Final output:
 - `recordings/` — canonical live product recording consumed by Remotion.
 - `prepare_assets.py` — validates and copies the walkthrough into Remotion's
   generated `public/` directory.
-- `generate_audio.py` — creates the deterministic 44-second Goodman score with
-  Python's standard library; no downloaded music or remote render dependency.
+- `generate_audio.py` — creates the deterministic 56-second Goodman score with
+  Python's standard library; impacts land on scene beats, the mix dips to
+  near-silence under the brand turn, and the live-alert moment carries a
+  heavier sub-bass hit. No downloaded music or remote render dependency.
 - `tests/` — protects scene order, timing math, interaction choreography,
   duration, and required proof assets.
 - `screenshots/` and `capture_screens.py` — preserved static-capture workflow
@@ -106,16 +118,23 @@ action inside its intended segment and recapture before rendering.
 
 ## Storyboard
 
-1. Cold open: a routine dependency update becomes suspicious syscall drift.
-2. Attribution: kernel event → user stack → package@version → drift alert.
-3. Live Mini-Shai-Hulud alert: the alert lands during a real browser session,
-   then the cursor copies the package-specific rollback command.
-4. Attack path: four new behaviors grouped under the single package update.
-5. Reachability: the walkthrough clicks into the report as 1,400 declared
-   dependencies collapse to 240 executed packages.
-6. Trust: the cursor moves through promoted behavior fingerprints and live
-   coverage health to establish confidence in the signal.
-7. Close: package update to rollback, followed by the Goodman call to action.
+1. Cold open (8.3s): the real September 2025 Shai-Hulud hook, a typed
+   `npm install` that reports zero vulnerabilities, and the red kernel-event
+   cascade that followed. No logo yet.
+2. Turn (3.2s): dip to black, 400 ms of silence, then the first green frame —
+   "Goodman watches what your code actually does."
+3. Live alert (10s): the alerts segment of the real recording plays at 0.88×
+   so it exactly covers the scene; the Mini-Shai-Hulud alert lands on frame
+   150 with a synced screen flash and a border-beam verdict card, then the
+   cursor copies the rollback command.
+4. Kill chain (8.3s): package update card → four escalating behavior events →
+   ATTRIBUTED verdict bar with the film's one overshoot spring.
+5. Reachability (8.7s): 1,400 declared counts down to 240 executed with
+   tabular numerals while the walkthrough clicks into the live report.
+6. Trust (8.2s): a single bento grid — live coverage view plus fingerprint,
+   coverage, and attribution counters.
+7. Close (8s): typed `goodmanctl demo`, the repository URL, and a 2-second
+   hold on the final frame.
 
 ## Interactive five-minute product demo
 
