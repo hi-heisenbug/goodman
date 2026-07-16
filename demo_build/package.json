@@ -5,6 +5,7 @@
   "description": "Cinematic Goodman product demo rendered with Remotion",
   "license": "UNLICENSED",
   "scripts": {
+    "capture": "python3 capture_walkthrough.py",
     "assets": "python3 prepare_assets.py",
     "dev": "npm run assets && remotion studio src/index.ts --no-open",
     "test": "vitest run",

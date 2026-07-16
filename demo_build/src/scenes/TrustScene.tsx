@@ -1,8 +1,8 @@
-import { AbsoluteFill, useCurrentFrame } from "remotion";
+import { AbsoluteFill, Sequence, useCurrentFrame } from "remotion";
 import { BrandMark } from "../components/BrandMark";
-import { BrowserFrame } from "../components/BrowserFrame";
 import { SceneBackground } from "../components/SceneBackground";
 import { SceneLabel } from "../components/SceneLabel";
+import { WalkthroughFrame } from "../components/WalkthroughFrame";
 import { fadeWindow, progress } from "../motion";
 import { COLORS, FONTS, SAFE_X } from "../theme";
 
@@ -29,54 +29,14 @@ const Metric: React.FC<MetricProps> = ({ value, label, color }) => (
 
 export const TrustScene: React.FC = () => {
   const frame = useCurrentFrame();
-  const coverage = fadeWindow(frame, 0, 18, 88, 108);
-  const fingerprints = progress(frame, 98, 24);
+  const fingerprints = fadeWindow(frame, 0, 18, 78, 92);
+  const coverage = progress(frame, 94, 22);
 
   return (
     <AbsoluteFill>
       <SceneBackground accent={COLORS.green} />
       <div style={{ position: "absolute", left: SAFE_X, top: 58 }}>
         <BrandMark light compact />
-      </div>
-
-      <div style={{ position: "absolute", inset: 0, opacity: coverage }}>
-        <div style={{ position: "absolute", left: SAFE_X, top: 145 }}>
-          <SceneLabel>Coverage and trust</SceneLabel>
-          <div
-            style={{
-              marginTop: 12,
-              color: COLORS.white,
-              fontFamily: FONTS.heading,
-              fontSize: 66,
-              letterSpacing: -2.8,
-            }}
-          >
-            Know when the signal is trustworthy.
-          </div>
-        </div>
-        <div style={{ position: "absolute", left: 190, top: 255 }}>
-          <BrowserFrame
-            screenshot="04_coverage.png"
-            frame={frame}
-            width={1350}
-            zoomAt={44}
-            zoom={1.12}
-            focus="55% 24%"
-          />
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            right: 110,
-            top: 380,
-            display: "grid",
-            gap: 14,
-          }}
-        >
-          <Metric value="100%" label="attribution success" color={COLORS.lime} />
-          <Metric value="1" label="sensor reporting" color={COLORS.mint} />
-          <Metric value="0" label="unknown packages" color={COLORS.white} />
-        </div>
       </div>
 
       <div style={{ position: "absolute", inset: 0, opacity: fingerprints }}>
@@ -95,13 +55,14 @@ export const TrustScene: React.FC = () => {
           </div>
         </div>
         <div style={{ position: "absolute", left: 190, top: 255 }}>
-          <BrowserFrame
-            screenshot="05_fingerprints.png"
-            frame={Math.max(0, frame - 96)}
+          <WalkthroughFrame
+            segment="fingerprints"
+            frame={frame}
             width={1350}
-            zoomAt={46}
+            zoomAt={44}
             zoom={1.12}
             focus="55% 30%"
+            playbackRate={0.92}
           />
         </div>
         <div
@@ -118,6 +79,49 @@ export const TrustScene: React.FC = () => {
           <Metric value="98%" label="baseline coverage" color={COLORS.mint} />
         </div>
       </div>
+
+      <Sequence from={88}>
+        <div style={{ position: "absolute", inset: 0, opacity: coverage }}>
+          <div style={{ position: "absolute", left: SAFE_X, top: 145 }}>
+            <SceneLabel>Coverage and trust</SceneLabel>
+            <div
+              style={{
+                marginTop: 12,
+                color: COLORS.white,
+                fontFamily: FONTS.heading,
+                fontSize: 66,
+                letterSpacing: -2.8,
+              }}
+            >
+              Know when the signal is trustworthy.
+            </div>
+          </div>
+          <div style={{ position: "absolute", left: 190, top: 255 }}>
+            <WalkthroughFrame
+              segment="coverage"
+              frame={Math.max(0, frame - 88)}
+              width={1350}
+              zoomAt={46}
+              zoom={1.12}
+              focus="55% 24%"
+              playbackRate={1.28}
+            />
+          </div>
+          <div
+            style={{
+              position: "absolute",
+              right: 110,
+              top: 380,
+              display: "grid",
+              gap: 14,
+            }}
+          >
+            <Metric value="100%" label="attribution success" color={COLORS.lime} />
+            <Metric value="1" label="sensor reporting" color={COLORS.mint} />
+            <Metric value="0" label="unknown packages" color={COLORS.white} />
+          </div>
+        </div>
+      </Sequence>
     </AbsoluteFill>
   );
 };

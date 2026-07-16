@@ -13,7 +13,7 @@ export type SceneId =
 export type StoryScene = {
   readonly id: SceneId;
   readonly durationInFrames: number;
-  readonly screenshot?: readonly string[];
+  readonly recording?: string;
 };
 
 export const SCENES: readonly StoryScene[] = [
@@ -22,22 +22,18 @@ export const SCENES: readonly StoryScene[] = [
   {
     id: "live-alert",
     durationInFrames: 240,
-    screenshot: ["02_mini_shai_hulud.png"],
+    recording: "goodman_walkthrough.mp4",
   },
-  {
-    id: "attack-path",
-    durationInFrames: 165,
-    screenshot: ["01_alerts_seeded.png"],
-  },
+  { id: "attack-path", durationInFrames: 165 },
   {
     id: "reachability",
     durationInFrames: 210,
-    screenshot: ["03_reachability.png"],
+    recording: "goodman_walkthrough.mp4",
   },
   {
     id: "trust",
     durationInFrames: 210,
-    screenshot: ["04_coverage.png", "05_fingerprints.png"],
+    recording: "goodman_walkthrough.mp4",
   },
   { id: "close", durationInFrames: 180 },
 ] as const;

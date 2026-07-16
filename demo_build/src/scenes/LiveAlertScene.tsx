@@ -1,15 +1,15 @@
 import { AbsoluteFill, useCurrentFrame } from "remotion";
 import { BrandMark } from "../components/BrandMark";
-import { BrowserFrame } from "../components/BrowserFrame";
 import { SceneBackground } from "../components/SceneBackground";
 import { SceneLabel } from "../components/SceneLabel";
+import { WalkthroughFrame } from "../components/WalkthroughFrame";
 import { progress } from "../motion";
 import { COLORS, FONTS, SAFE_X } from "../theme";
 
 export const LiveAlertScene: React.FC = () => {
   const frame = useCurrentFrame();
   const title = progress(frame, 3, 24);
-  const callout = progress(frame, 112, 26);
+  const callout = progress(frame, 128, 26);
 
   return (
     <AbsoluteFill>
@@ -55,12 +55,12 @@ export const LiveAlertScene: React.FC = () => {
       </div>
 
       <div style={{ position: "absolute", left: 150, top: 185 }}>
-        <BrowserFrame
-          screenshot="02_mini_shai_hulud.png"
+        <WalkthroughFrame
+          segment="alerts"
           frame={frame}
           width={1460}
-          zoomAt={82}
-          zoom={1.32}
+          zoomAt={92}
+          zoom={1.24}
           focus="58% 66%"
           shiftX={-110}
         />

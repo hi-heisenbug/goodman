@@ -1,4 +1,4 @@
-import { AbsoluteFill, Img, staticFile, useCurrentFrame } from "remotion";
+import { AbsoluteFill, useCurrentFrame } from "remotion";
 import { BrandMark } from "../components/BrandMark";
 import { SceneBackground } from "../components/SceneBackground";
 import { SceneLabel } from "../components/SceneLabel";
@@ -20,19 +20,6 @@ export const AttackPathScene: React.FC = () => {
   return (
     <AbsoluteFill>
       <SceneBackground accent={COLORS.red} />
-      <Img
-        src={staticFile("screenshots/01_alerts_seeded.png")}
-        style={{
-          position: "absolute",
-          inset: 0,
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          opacity: 0.06,
-          filter: "grayscale(1) contrast(1.2)",
-          scale: 1.05,
-        }}
-      />
       <div style={{ position: "absolute", left: SAFE_X, top: 58 }}>
         <BrandMark light compact />
       </div>

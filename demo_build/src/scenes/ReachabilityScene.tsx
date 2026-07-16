@@ -1,8 +1,8 @@
 import { AbsoluteFill, interpolate, useCurrentFrame } from "remotion";
 import { BrandMark } from "../components/BrandMark";
-import { BrowserFrame } from "../components/BrowserFrame";
 import { SceneBackground } from "../components/SceneBackground";
 import { SceneLabel } from "../components/SceneLabel";
+import { WalkthroughFrame } from "../components/WalkthroughFrame";
 import { progress } from "../motion";
 import { COLORS, FONTS, SAFE_X } from "../theme";
 
@@ -131,14 +131,15 @@ export const ReachabilityScene: React.FC = () => {
       </div>
 
       <div style={{ position: "absolute", left: 720, top: 210 }}>
-        <BrowserFrame
-          screenshot="03_reachability.png"
+        <WalkthroughFrame
+          segment="reachability"
           frame={frame}
           width={1120}
-          zoomAt={88}
-          zoom={1.17}
+          zoomAt={82}
+          zoom={1.14}
           focus="55% 25%"
           shiftX={-28}
+          playbackRate={0.5}
         />
       </div>
     </AbsoluteFill>

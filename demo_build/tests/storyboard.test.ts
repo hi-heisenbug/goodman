@@ -33,14 +33,14 @@ describe("Goodman demo storyboard", () => {
     expect(TOTAL_FRAMES / FPS).toBeLessThanOrEqual(45);
   });
 
-  it("references real captured dashboard screenshots", () => {
-    const screenshotAssets = SCENES.flatMap((scene) => scene.screenshot ?? []);
+  it("uses one real interactive dashboard recording", () => {
+    const recordingAssets = SCENES.flatMap((scene) =>
+      scene.recording ? [scene.recording] : [],
+    );
 
-    expect(screenshotAssets.length).toBeGreaterThanOrEqual(4);
-    for (const asset of screenshotAssets) {
-      expect(existsSync(resolve(__dirname, "..", "screenshots", asset))).toBe(
-        true,
-      );
+    expect([...new Set(recordingAssets)]).toEqual(["goodman_walkthrough.mp4"]);
+    for (const asset of recordingAssets) {
+      expect(existsSync(resolve(__dirname, "..", "recordings", asset))).toBe(true);
     }
   });
 });

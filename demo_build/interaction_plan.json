@@ -1,0 +1,25 @@
+{
+  "output": "goodman_walkthrough.mp4",
+  "width": 1920,
+  "height": 1080,
+  "fps": 30,
+  "duration_seconds": 20,
+  "attack_delay_seconds": 12,
+  "attack_visible_at": 4.4,
+  "ready_text": "Dependency drift review",
+  "segments": {
+    "alerts": { "start": 0, "end": 8.8 },
+    "fingerprints": { "start": 8.8, "end": 12.0 },
+    "reachability": { "start": 12.0, "end": 15.5 },
+    "coverage": { "start": 15.5, "end": 20.0 }
+  },
+  "actions": [
+    { "at": 0.3, "label": "alerts-focus", "x": 376, "y": 146, "duration": 0.5, "click": false },
+    { "at": 4.55, "label": "new-alert", "x": 785, "y": 575, "duration": 0.5, "click": false, "expect_text": "mini-shai-hulud-loader" },
+    { "at": 5.45, "label": "copy-rollback", "x": 660, "y": 836, "duration": 0.45, "click": true, "expect_text": "Copied" },
+    { "at": 8.0, "label": "fingerprints", "x": 370, "y": 198, "duration": 0.65, "click": true, "expect_hash": "#fingerprints", "expect_text": "Behavior fingerprint library" },
+    { "at": 11.3, "label": "reachability", "x": 370, "y": 250, "duration": 0.6, "click": true, "expect_hash": "#reachability", "expect_text": "Runtime reachability report" },
+    { "at": 14.8, "label": "coverage", "x": 370, "y": 302, "duration": 0.6, "click": true, "expect_hash": "#coverage", "expect_text": "Coverage and trust" },
+    { "at": 17.1, "label": "coverage-metric", "x": 742, "y": 236, "duration": 0.8, "click": false }
+  ]
+}

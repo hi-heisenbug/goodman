@@ -1,26 +1,39 @@
 # Goodman Demo Build
 
 This directory is the self-contained generation workspace for the Goodman
-product demo. The canonical video is now a Remotion composition built from real
-Goodman dashboard captures plus deterministic motion graphics and an original,
-locally generated score.
+product demo. The canonical video is a Remotion composition built around a
+real, scripted Chromium walkthrough of the Goodman dashboard, deterministic
+motion graphics, and an original locally generated score. The cursor moves,
+the Mini-Shai-Hulud alert arrives live, the rollback command is copied, and the
+walkthrough clicks through Fingerprints, Reachability, and Coverage.
 
 Final output:
 
 - `goodman_demo.mp4` — 1920×1080, 30 fps, 41.9 seconds, H.264/AAC.
+- `recordings/goodman_walkthrough.mp4` — 20-second live dashboard interaction
+  used inside the Remotion scenes.
 
 ## What is here
 
 - `src/` — Remotion composition, shared motion components, and seven scenes.
-- `screenshots/` — live dashboard proof captures used by the composition.
-- `capture_screens.py` — starts the real `goodmanctl demo` flow, captures
-  bounded headless Chromium screenshots, and stops every local process.
-- `prepare_assets.py` — validates and copies captures into Remotion's generated
-  `public/` directory.
+- `interaction_plan.json` — recording dimensions, synchronized scene segments,
+  and the cursor/click choreography.
+- `capture_walkthrough.py` — starts the real `goodmanctl demo` flow and records
+  a deterministic Chromium session under Xvfb with FFmpeg and `xdotool`.
+- `browser_state.mjs` — reads the live page through Chrome DevTools so every
+  coordinate-driven click is verified against its route and rendered text.
+- `walkthrough.py` — shared plan loading and strict FFprobe validation used by
+  both capture and asset preparation.
+- `recordings/` — canonical live product recording consumed by Remotion.
+- `prepare_assets.py` — validates and copies the walkthrough into Remotion's
+  generated `public/` directory.
 - `generate_audio.py` — creates the deterministic 44-second Goodman score with
   Python's standard library; no downloaded music or remote render dependency.
-- `tests/storyboard.test.ts` — protects scene order, timing math, duration, and
-  required proof assets.
+- `tests/` — protects scene order, timing math, interaction choreography,
+  duration, and required proof assets.
+- `screenshots/` and `capture_screens.py` — preserved static-capture workflow
+  for the legacy renderer and release comparison; they are no longer used by
+  the canonical Remotion composition.
 - `assemble.py` — preserved legacy Pillow/FFmpeg slideshow assembler. It is not
   the canonical renderer, but remains available for comparison and fallback.
 
@@ -36,7 +49,7 @@ From the repository root:
 
 ```bash
 cd demo_build
-npm install
+npm ci
 npm run check
 npm run dev
 ```
@@ -52,6 +65,7 @@ npm run render
 Useful commands:
 
 ```bash
+npm run capture   # regenerate the live Chromium walkthrough
 npm test          # storyboard and asset contract
 npm run lint      # ESLint + strict TypeScript
 npm run compositions
@@ -62,38 +76,51 @@ npm run upgrade   # upgrade aligned Remotion packages
 Remotion packages must stay on the same exact version. The checked-in lockfile
 currently pins Remotion 4.0.489.
 
-## Refresh the live product proof
+## Refresh the interactive product proof
 
-The screenshots are real-shaped product data served by the actual collector and
-dashboard, not mock UI. Regenerate them before a release when the dashboard or
-demo seed changes:
+The walkthrough is served by the actual Goodman collector and dashboard, not a
+mock UI. Regenerate it before a release when the dashboard, navigation, or demo
+seed changes. The capture host needs `Xvfb`, Chromium, FFmpeg/FFprobe, and
+`xdotool` on `PATH`. On Debian, Ubuntu, or Kali:
+
+```bash
+sudo apt-get install -y chromium xvfb ffmpeg xdotool
+```
 
 ```bash
 make dashboard
 make build
-python3 demo_build/capture_screens.py
 cd demo_build
+npm run capture
 npm run check
 npm run render
 ```
 
-The capture script uses a fresh port, temporary Chromium profile, and temporary
-SQLite database. It verifies each screenshot is large enough to be a real page
-and cleans up the demo process and database on exit.
+The capture script uses a fresh port, X display, Chromium profile, and SQLite
+database. It synchronizes the recording to the live attack timer, verifies the
+alert arrival, copied rollback state, routes, and page headings through Chrome
+DevTools, then checks the output's codec, resolution, exact frame count, frame
+rate, duration, and size. Every process is stopped on exit. Adjust
+`interaction_plan.json` if dashboard navigation or layout changes; keep every
+action inside its intended segment and recapture before rendering.
 
 ## Storyboard
 
 1. Cold open: a routine dependency update becomes suspicious syscall drift.
 2. Attribution: kernel event → user stack → package@version → drift alert.
-3. Live Mini-Shai-Hulud alert: guided zoom into the real package-level evidence.
+3. Live Mini-Shai-Hulud alert: the alert lands during a real browser session,
+   then the cursor copies the package-specific rollback command.
 4. Attack path: four new behaviors grouped under the single package update.
-5. Reachability: 1,400 declared dependencies collapse to 240 executed packages.
-6. Trust: coverage health and promoted behavior baselines establish confidence.
+5. Reachability: the walkthrough clicks into the report as 1,400 declared
+   dependencies collapse to 240 executed packages.
+6. Trust: the cursor moves through promoted behavior fingerprints and live
+   coverage health to establish confidence in the signal.
 7. Close: package update to rollback, followed by the Goodman call to action.
 
 ## Interactive five-minute product demo
 
-The video build is separate from Goodman's live interactive demo:
+The recorded walkthrough uses the same live Goodman demo flow that can also be
+run manually for a longer presentation:
 
 ```bash
 make demo

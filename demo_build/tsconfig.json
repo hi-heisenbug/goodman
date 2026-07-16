@@ -7,6 +7,7 @@
     "strict": true,
     "noEmit": true,
     "lib": ["ES2020", "DOM"],
+    "resolveJsonModule": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
