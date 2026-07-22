@@ -112,7 +112,8 @@ master gate is on, check `make doctor` LSM lines — the node runs detection-onl
 Dead-man: killing the sensor allows traffic within ≤10s even if step 1 fails.
 
 Full enforcement design: [`docs/enforcement.md`](enforcement.md). Live LSM proof
-requires `sudo make e2e` on a real kernel — not runnable from unprivileged CI.
+requires `sudo make e2e` or `make docker-e2e` on a real kernel — not runnable
+from unprivileged CI.
 
 ## Rollback / exit
 

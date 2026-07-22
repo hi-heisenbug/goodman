@@ -1,6 +1,7 @@
 bin/
 dashboard/node_modules/
 dashboard/dist/
+demo_build/
 test/workload/node_modules/
 *.db
 *.db-*

@@ -8,14 +8,18 @@ working. It is written for both humans and coding agents.
 
 | Goal | Command | Needs root? | What it proves |
 |---|---|---:|---|
+| Set up and verify the portable demo | `bash scripts/setup-everything.sh demo --check` | no | Chooses local Go or Docker and verifies the complete demo contract. |
+| Set up and verify everything on Linux | `bash scripts/setup-everything.sh all --install --install-openclaw` | yes | Installs supported host prerequisites and OpenClaw, then runs portable plus both live eBPF proofs. |
+| Verify everything with a clean host | `bash scripts/setup-everything.sh all --backend docker --live-backend docker` | Docker | Runs the portable demo, then both real-kernel proofs in disposable containers. |
 | Check machine readiness | `make doctor` | no | Toolchain, kernel, BTF, LSM capability status. |
 | Build everything locally | `make build` | no | eBPF object, sensor, collector, and CLI compile. |
 | Backend correctness | `make smoke` | no | Collector/store/fingerprint/diff/API (+ enforce pipeline without kernel). |
-| Attack replay corpus | `make replay` | no | Real npm attack fixtures raise the expected CRITICAL alerts. |
-| Product dashboard demo | `make demo` | no | Seeded alerts, reachability, live Mini-Shai-Hulud replay. |
+| Attack replay corpus | `make replay` | no | npm incident and integration fixtures raise the expected CRITICAL alerts. |
+| Product dashboard demo | `make demo` | no | OpenClaw skill drift, reachability, live Mini-Shai-Hulud replay. |
 | Demo DoD check | `make demo-check` | no | Non-interactive verification of the five-minute wow. |
 | HA ingest smoke | `make ha-smoke` | Docker | Two collectors vs Postgres: fingerprint parity + alert dedup (skips without Docker). |
 | Real local eBPF demo | `sudo make e2e` | yes | Sensor captures real syscalls and attributes package drift. |
+| Containerized real-kernel e2e | `make docker-e2e` | Docker | Runs OpenClaw attribution and drift/LSM enforcement against the Linux host kernel. |
 | Kubernetes install | `scripts/install-k8s.sh --cluster prod` | cluster-dependent | Installs sensor DaemonSet, collector, dashboard, and service. |
 
 If you are a coding agent, do not stop after `make build`. Use `make smoke` for
@@ -23,16 +27,21 @@ the no-root product path, and state clearly if `sudo make e2e` was not run.
 
 ## Prerequisites
 
-Local development needs an x86-64 Linux host or VM:
+The portable demo needs Go 1.25+ or Docker and works on Linux, macOS, and
+Windows. Live sensor development needs an x86-64 or arm64 Linux host or VM:
 
 - Linux kernel 5.8+ with BTF at `/sys/kernel/btf/vmlinux`
-- Go 1.23+
+- Go 1.25+
 - `clang`, `llvm`, `bpftool`
 - Node 20.19+ only when rebuilding the dashboard
 
+When `--install` and `--install-openclaw` are combined, the setup path installs
+Node 22.22.3 if the host does not already satisfy OpenClaw's current engine
+range.
+
 Kubernetes deployment needs:
 
-- Linux x86-64 nodes with kernel 5.8+ and BTF
+- Linux x86-64 or arm64 nodes with kernel 5.8+ and BTF
 - Privileged DaemonSets allowed
 - `kubectl` and `helm` on the operator machine
 - Postgres for production persistence, or default SQLite for a pilot
@@ -49,19 +58,25 @@ On other systems, install the prerequisites manually and run:
 make doctor
 ```
 
-## Fresh Local Setup
+## Fresh Portable Setup
 
 ```bash
 git clone https://github.com/hi-heisenbug/goodman
 cd goodman
-make doctor
-make build
-make demo
+bash scripts/setup-everything.sh demo
+```
+
+Force the Docker path with `--backend docker`. On Windows PowerShell, where
+Bash may not be installed, run:
+
+```bash
+docker compose -f deploy/docker/demo.compose.yml up --build
 ```
 
 Open **http://127.0.0.1:8844**. Expected result:
 
 - CRITICAL alerts with rule chips already in the queue
+- an OpenClaw `@goodman-demo/calendar-sync@1.2.3` skill alert
 - Reachability tab shows **1,400 declared / 240 executed**
 - ~12s later, the 2026 Mini-Shai-Hulud behavior replay appears live
 - no root is required for this path
@@ -79,8 +94,7 @@ make demo-check
 Use this on every discovery call and every "try it yourself" link:
 
 ```bash
-make demo
-# or: goodmanctl demo
+bash scripts/setup-everything.sh demo
 ```
 
 Open:
@@ -91,9 +105,10 @@ http://127.0.0.1:8844
 
 What happens:
 
-- starts the real collector (`goodmanctl demo`)
+- starts the real collector through the portable `goodman-demo` runner
 - uses a local SQLite database at `demo_build/goodman_demo.db`
 - seeds multi-service fingerprints and CRITICAL drift alerts via `/v1/events`
+- replays a fictional OpenClaw/ClawHub skill drift before the dashboard opens
 - persists a reachability snapshot (1,400 declared / 240 executed)
 - prints a 60-second guided script
 - after ~12s, replays the 2026 Mini-Shai-Hulud behavior profile live
@@ -102,8 +117,7 @@ What happens:
 If port `8844` is busy:
 
 ```bash
-GOODMAN_DEMO_PORT=8855 make demo
-# or: goodmanctl demo -port 8855
+bash scripts/setup-everything.sh demo --port 8855
 ```
 
 Useful dashboard routes:
@@ -142,6 +156,7 @@ With a collector running:
 ```bash
 ./bin/goodmanctl alerts
 ./bin/goodmanctl fingerprints
+./bin/goodmanctl export -o goodman-export.json
 ./bin/goodmanctl tail
 ```
 
@@ -158,6 +173,41 @@ Acknowledge or resolve an alert:
 ./bin/goodmanctl resolve <alert-id>
 ```
 
+## Integrate OpenClaw
+
+Preview the integration on any CI host, even when OpenClaw is absent:
+
+```bash
+scripts/integrate-openclaw.sh --dry-run
+```
+
+Create the local env file and Tier-1 launcher:
+
+```bash
+scripts/integrate-openclaw.sh
+```
+
+Optionally install OpenClaw into a user-local Goodman prefix and persist the
+required environment in its user systemd service:
+
+```bash
+scripts/integrate-openclaw.sh \
+  --install-openclaw --systemd-user --restart
+```
+
+For Kubernetes:
+
+```bash
+scripts/integrate-openclaw.sh --k8s -n agents -l app=openclaw
+```
+
+Without `--install-openclaw`, the script leaves the OpenClaw installation
+untouched. It detects the CLI and running process, writes the local config,
+prepares `openclaw-goodman`, and prints exact collector, sensor, Gateway, and
+complete-export commands. Kubernetes patches preserve existing literal
+`NODE_OPTIONS`; `valueFrom` values are rejected instead of overwritten. See
+[OpenClaw integration](openclaw.md) for the trust boundary and daemon setup.
+
 ## Run The Real Local eBPF Path
 
 This path proves Goodman can load the sensor, capture real syscalls, attribute
@@ -165,11 +215,21 @@ them to a package, and raise a real drift alert:
 
 ```bash
 sudo make e2e
+sudo make e2e-openclaw
 ```
 
 Why sudo is required: the sensor loads eBPF programs and needs root or equivalent
 `CAP_BPF`/`CAP_PERFMON` privileges. If you cannot run privileged eBPF on the
-host, use `make smoke` and say the live kernel path was not verified.
+host directly but have rootful Docker, use:
+
+```bash
+make docker-e2e
+```
+
+The container is disposable but the proof is not synthetic: it uses the host
+kernel, PID namespace, tracefs/debugfs/securityfs, and cgroup hierarchy. If
+neither host root nor privileged Docker is available, use `make smoke` and say
+the live kernel path was not verified.
 
 Manual local tracing flow:
 
@@ -295,9 +355,11 @@ For eBPF, loader, or attribution changes:
 
 ```bash
 sudo make e2e
+# or, on a Linux host with rootful Docker:
+make docker-e2e
 ```
 
-If you cannot run `sudo make e2e`, explicitly say that only the no-root path was
+If neither live path can run, explicitly say that only the no-root path was
 verified.
 
 ## Common Setup Failures
@@ -306,6 +368,9 @@ verified.
   product before the host is ready.
 - sensor fails with permission errors: run the sensor with root or deploy as the
   privileged DaemonSet.
+- privileged Docker e2e cannot attach tracepoints/LSM: use `make docker-e2e` or
+  `setup-everything`; their command mounts host tracefs, debugfs, securityfs,
+  and cgroup v2 explicitly.
 - dashboard shows no data: confirm the collector is healthy and events were
   ingested with `curl http://127.0.0.1:8844/v1/healthz`.
 - Node events show `<unknown>`: start the workload with

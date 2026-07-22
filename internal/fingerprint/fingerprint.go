@@ -41,63 +41,75 @@ type Update struct {
 	JustPromoted   bool                        // crossed the learning window in this batch
 }
 
+type fingerprintKey struct {
+	service string
+	pkg     string
+	version string
+}
+
 // Ingest merges a batch of events into fingerprints and returns one Update
 // per touched (service, package, version) so the diff engine can react.
 func (e *Engine) Ingest(ctx context.Context, events []model.Attributed) ([]Update, error) {
-	type key struct{ service, pkg, version string }
-	grouped := map[key][]model.Attributed{}
-	for _, ev := range events {
-		if ev.Denied {
-			continue // denied attempts must not feed baseline learning
-		}
-		if ev.Package == "" || ev.Behavior == "" {
-			continue
-		}
-		k := key{ev.Service, ev.Package, ev.Version}
-		grouped[k] = append(grouped[k], ev)
-	}
-
-	var updates []Update
-	for k, evs := range grouped {
-		var fresh []string
-		freshEvents := map[string]model.Attributed{}
-		promoted := false
-
-		fp, err := e.store.MergeFingerprint(ctx, k.service, k.pkg, k.version, func(fp *model.Fingerprint) {
-			if fp.Behaviors == nil {
-				fp.Behaviors = map[string]model.BehaviorStat{}
-			}
-			for _, ev := range evs {
-				st, known := fp.Behaviors[ev.Behavior]
-				if !known {
-					st = model.BehaviorStat{FirstSeen: ev.Timestamp}
-					fresh = append(fresh, ev.Behavior)
-					freshEvents[ev.Behavior] = ev
-				}
-				st.Count++
-				if ev.Timestamp > st.LastSeen {
-					st.LastSeen = ev.Timestamp
-				}
-				fp.Behaviors[ev.Behavior] = st
-				fp.ObsCount++
-				if ev.Timestamp > fp.LastSeen {
-					fp.LastSeen = ev.Timestamp
-				}
-				if fp.FirstSeen == 0 || ev.Timestamp < fp.FirstSeen {
-					fp.FirstSeen = ev.Timestamp
-				}
-			}
-			if !fp.IsBaseline && e.qualifies(fp) {
-				fp.IsBaseline = true
-				promoted = true
-			}
-		})
+	grouped := groupEvents(events)
+	updates := make([]Update, 0, len(grouped))
+	for key, group := range grouped {
+		update, err := e.ingestGroup(ctx, key, group)
 		if err != nil {
 			return nil, err
 		}
-		updates = append(updates, Update{Fingerprint: fp, FreshBehaviors: fresh, FreshEvents: freshEvents, JustPromoted: promoted})
+		updates = append(updates, update)
 	}
 	return updates, nil
+}
+
+func groupEvents(events []model.Attributed) map[fingerprintKey][]model.Attributed {
+	grouped := make(map[fingerprintKey][]model.Attributed)
+	for _, event := range events {
+		if event.Denied || event.Package == "" || event.Behavior == "" {
+			continue
+		}
+		key := fingerprintKey{service: event.Service, pkg: event.Package, version: event.Version}
+		grouped[key] = append(grouped[key], event)
+	}
+	return grouped
+}
+
+func (e *Engine) ingestGroup(ctx context.Context, key fingerprintKey, events []model.Attributed) (Update, error) {
+	update := Update{FreshEvents: make(map[string]model.Attributed)}
+	fingerprint, err := e.store.MergeFingerprint(ctx, key.service, key.pkg, key.version, func(fingerprint *model.Fingerprint) {
+		update.FreshBehaviors, update.FreshEvents = mergeEvents(fingerprint, events)
+		if !fingerprint.IsBaseline && e.qualifies(fingerprint) {
+			fingerprint.IsBaseline = true
+			update.JustPromoted = true
+		}
+	})
+	update.Fingerprint = fingerprint
+	return update, err
+}
+
+func mergeEvents(fingerprint *model.Fingerprint, events []model.Attributed) ([]string, map[string]model.Attributed) {
+	if fingerprint.Behaviors == nil {
+		fingerprint.Behaviors = make(map[string]model.BehaviorStat)
+	}
+	var fresh []string
+	freshEvents := make(map[string]model.Attributed)
+	for _, event := range events {
+		stat, known := fingerprint.Behaviors[event.Behavior]
+		if !known {
+			stat.FirstSeen = event.Timestamp
+			fresh = append(fresh, event.Behavior)
+			freshEvents[event.Behavior] = event
+		}
+		stat.Count++
+		stat.LastSeen = max(stat.LastSeen, event.Timestamp)
+		fingerprint.Behaviors[event.Behavior] = stat
+		fingerprint.ObsCount++
+		fingerprint.LastSeen = max(fingerprint.LastSeen, event.Timestamp)
+		if fingerprint.FirstSeen == 0 || event.Timestamp < fingerprint.FirstSeen {
+			fingerprint.FirstSeen = event.Timestamp
+		}
+	}
+	return fresh, freshEvents
 }
 
 func (e *Engine) qualifies(fp *model.Fingerprint) bool {

@@ -114,24 +114,10 @@ func apiBase() (string, string, error) {
 }
 
 func listNamespaceInjectLabels(client *http.Client) (map[string]bool, error) {
-	base, token, err := apiBase()
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest(http.MethodGet, base+"/api/v1/namespaces", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
-		return nil, fmt.Errorf("list namespaces: %s: %s", resp.Status, b)
-	}
+	return listNamespaceLabelState(client, InjectLabelKey)
+}
+
+func listNamespaceLabelState(client *http.Client, labelKey string) (map[string]bool, error) {
 	var list struct {
 		Items []struct {
 			Metadata struct {
@@ -140,36 +126,17 @@ func listNamespaceInjectLabels(client *http.Client) (map[string]bool, error) {
 			} `json:"metadata"`
 		} `json:"items"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	if err := getKubernetesJSON(client, "/api/v1/namespaces", "list namespaces", &list); err != nil {
 		return nil, err
 	}
 	out := map[string]bool{}
 	for _, ns := range list.Items {
-		out[ns.Metadata.Name] = ns.Metadata.Labels[InjectLabelKey] == "enabled"
+		out[ns.Metadata.Name] = ns.Metadata.Labels[labelKey] == "enabled"
 	}
 	return out, nil
 }
 
 func listNodePods(client *http.Client, nodeName string) ([]podRow, error) {
-	base, token, err := apiBase()
-	if err != nil {
-		return nil, err
-	}
-	url := base + "/api/v1/pods?fieldSelector=spec.nodeName%3D" + nodeName
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
-		return nil, fmt.Errorf("list pods: %s: %s", resp.Status, b)
-	}
 	var list struct {
 		Items []struct {
 			Metadata struct {
@@ -185,7 +152,8 @@ func listNodePods(client *http.Client, nodeName string) ([]podRow, error) {
 			} `json:"spec"`
 		} `json:"items"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	path := "/api/v1/pods?fieldSelector=spec.nodeName%3D" + nodeName
+	if err := getKubernetesJSON(client, path, "list pods", &list); err != nil {
 		return nil, err
 	}
 	out := make([]podRow, 0, len(list.Items))
@@ -196,6 +164,28 @@ func listNodePods(client *http.Client, nodeName string) ([]podRow, error) {
 		})
 	}
 	return out, nil
+}
+
+func getKubernetesJSON(client *http.Client, path, action string, out any) error {
+	base, token, err := apiBase()
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequest(http.MethodGet, base+path, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
+		return fmt.Errorf("%s: %s: %s", action, resp.Status, body)
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
 }
 
 func containerHasPerfFlags(containers []struct {

@@ -66,6 +66,21 @@ build: bpf $(UI_DIST)/index.html ## Build sensor, collector, goodmanctl into bin
 	$(GO) build -o bin/collector ./cmd/collector
 	$(GO) build -o bin/goodmanctl ./cmd/goodmanctl
 
+.PHONY: portable-build
+portable-build: $(UI_DIST)/index.html ## Build collector + demo runner without eBPF tooling
+	$(GO) build -o bin/collector ./cmd/collector
+	$(GO) build -o bin/goodman-demo ./cmd/goodman-demo
+
+.PHONY: portable-cross-build
+portable-cross-build: $(UI_DIST)/index.html ## Cross-build the portable demo for macOS and Windows
+	@tmp="$$(mktemp -d)"; trap 'rm -rf "$$tmp"' EXIT; \
+	for target in darwin/amd64 darwin/arm64 windows/amd64 windows/arm64; do \
+		os="$${target%/*}"; arch="$${target#*/}"; ext=""; \
+		[ "$$os" = windows ] && ext=.exe; \
+		GOOS="$$os" GOARCH="$$arch" CGO_ENABLED=0 $(GO) build -o "$$tmp/collector-$$os-$$arch$$ext" ./cmd/collector; \
+		GOOS="$$os" GOARCH="$$arch" CGO_ENABLED=0 $(GO) build -o "$$tmp/goodman-demo-$$os-$$arch$$ext" ./cmd/goodman-demo; \
+	done
+
 .PHONY: test
 test: bpf $(UI_DIST)/index.html ## Run unit tests
 	$(GO) test ./...
@@ -73,6 +88,17 @@ test: bpf $(UI_DIST)/index.html ## Run unit tests
 .PHONY: vet
 vet: ## go vet
 	$(GO) vet ./...
+
+.PHONY: quality
+quality: fmt-check vet ## Static, dead-code, duplicate, complexity, vulnerability, and module checks
+	$(GO) run honnef.co/go/tools/cmd/staticcheck@2025.1.1 ./...
+	$(GO) run golang.org/x/tools/cmd/deadcode@v0.30.0 -test ./...
+	$(GO) run github.com/mibk/dupl@v1.0.0 -t 80 cmd internal test
+	@output="$$( $(GO) run github.com/fzipp/gocyclo/cmd/gocyclo@v0.6.0 -over 15 cmd internal 2>&1 || true )"; \
+		hotspots="$$( printf '%s\n' "$$output" | grep -v '^exit status 1$$' | grep -v '_test\.go' || true )"; \
+		test -z "$$hotspots" || { printf '%s\n' "$$hotspots"; exit 1; }
+	$(GO) run golang.org/x/vuln/cmd/govulncheck@latest ./...
+	$(GO) mod tidy -diff
 
 ## --- End to end ---
 .PHONY: workload
@@ -102,18 +128,44 @@ bench: ## Benchmark the collector ingest pipeline and canonicalization (no root)
 	go test -run='^$$' -bench=. -benchmem ./internal/fingerprint/ ./internal/attribute/
 
 .PHONY: demo
-demo: build ## Five-minute product wow: seeded alerts, reachability, live Mini-Shai-Hulud replay
-	./bin/goodmanctl demo
+demo: portable-build ## Portable product wow: OpenClaw skill drift + Mini-Shai-Hulud replay
+	./bin/goodman-demo
 
 .PHONY: demo-check
-demo-check: build ## Non-interactive demo verification (CI / DoD check)
-	./bin/goodmanctl demo -check -port $${GOODMAN_DEMO_PORT:-8855}
+demo-check: portable-demo-check ## Non-interactive demo verification (CI / DoD check)
+
+.PHONY: portable-demo-check
+portable-demo-check: portable-build ## Verify the complete demo without eBPF/root
+	./bin/goodman-demo -check -port $${GOODMAN_DEMO_PORT:-8855}
+
+.PHONY: setup-everything
+setup-everything: ## Auto-prepare and verify the portable demo
+	bash scripts/setup-everything.sh demo --check
+
+.PHONY: e2e-openclaw
+e2e-openclaw: ## Real eBPF OpenClaw runtime-contract proof (run after make build; needs root)
+	bash test/e2e/openclaw_test.sh
 
 ## --- Docker / Helm ---
 .PHONY: docker
 docker: ## Build sensor + collector images
 	docker build -f deploy/docker/collector.Dockerfile -t $(REGISTRY)/collector:$(TAG) .
 	docker build -f deploy/docker/sensor.Dockerfile -t $(REGISTRY)/sensor:$(TAG) .
+
+.PHONY: docker-demo
+docker-demo: ## Build the portable all-in-one demo image
+	docker build -f deploy/docker/demo.Dockerfile -t $(REGISTRY)/demo:$(TAG) .
+
+.PHONY: docker-e2e
+docker-e2e: ## Run both real eBPF proofs in a privileged Linux container
+	docker build -f deploy/docker/e2e.Dockerfile -t $(REGISTRY)/e2e:$(TAG) .
+	docker run --rm --privileged --pid=host --cgroupns=host \
+		--security-opt seccomp=unconfined --ulimit memlock=-1:-1 \
+		-v /sys/fs/cgroup:/sys/fs/cgroup:rw \
+		-v /sys/kernel/tracing:/sys/kernel/tracing:rw \
+		-v /sys/kernel/debug:/sys/kernel/debug:rw \
+		-v /sys/kernel/security:/sys/kernel/security:rw \
+		$(REGISTRY)/e2e:$(TAG) all
 
 .PHONY: install-k8s
 install-k8s: ## Install Goodman into the current Kubernetes context

@@ -2,14 +2,15 @@
 
 [![CI](https://github.com/hi-heisenbug/goodman/actions/workflows/ci.yml/badge.svg)](https://github.com/hi-heisenbug/goodman/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/go-1.23+-00ADD8.svg)](go.mod)
+[![Go](https://img.shields.io/badge/go-1.25+-00ADD8.svg)](go.mod)
 [![Kubernetes](https://img.shields.io/badge/kubernetes-helm-326CE5.svg)](deploy/helm/goodman)
 
 **Goodman** (by [Heisenbug](https://github.com/hi-heisenbug)) watches Node and
 Python processes on Linux, attributes `open` / `connect` / `execve` to the
-exact **npm or PyPI `package@version`** on the call stack, learns a baseline
-per `(service, package, version)`, and alerts when that package starts doing
-something new.
+exact **npm or PyPI `package@version`** on the call stack, and can identify
+versioned ClawHub skill code. It learns a baseline per
+`(service, package, version)` and alerts when that actor starts doing something
+new.
 
 Kernel tools say "this process touched a file." SCA tools say "this lockfile
 has a CVE." Goodman answers: **which dependency made that syscall.**
@@ -28,23 +29,29 @@ I named it **Goodman** on purpose: short, boring, about the work. The hard
 problem is attribution (`internal/attribute/`), not a flashy wrapper around
 `auditd`.
 
-## Demo (judges: start here)
+## Reproduce the demo anywhere
 
-No root required for the product walkthrough:
+On Linux, macOS, or WSL, one command chooses local Go when available and
+otherwise uses Docker. No root or eBPF support is required:
 
 ```bash
-make doctor   # optional: toolchain + BTF check
-make build
-make demo
+bash scripts/setup-everything.sh demo
 ```
 
-Open **http://127.0.0.1:8844**. You get seeded CRITICAL alerts, reachability
-numbers, and a live Mini-Shai-Hulud behavior replay: secret read, cloud
-metadata, outbound C2, child-process exec, each tied to a package.
+Open **http://127.0.0.1:8844**. You get a seeded OpenClaw/ClawHub skill alert,
+reachability numbers, and a live Mini-Shai-Hulud behavior replay. Each behavior
+stays tied to the responsible package or versioned skill.
 
 ```bash
-make demo-check              # headless DoD
+bash scripts/setup-everything.sh demo --check
+bash scripts/setup-everything.sh demo --backend docker --check
 make test && make smoke && make replay
+```
+
+On any Docker Desktop host, including Windows PowerShell, use Compose:
+
+```bash
+docker compose -f deploy/docker/demo.compose.yml up --build
 ```
 
 Video:
@@ -52,10 +59,19 @@ Video:
 - local: [demo_build/goodman_demo.mp4](demo_build/goodman_demo.mp4)
 - Vimeo: https://vimeo.com/1211851029
 
-Live eBPF on a real kernel (needs root / `CAP_BPF`):
+For the full Linux setup and both real-kernel proofs, including the
+OpenClaw-shaped Node runtime contract:
 
 ```bash
-sudo make e2e
+bash scripts/setup-everything.sh all --install --install-openclaw
+```
+
+If the host has rootful Docker but you do not want to install build tools or
+use host sudo, run the same real-kernel proofs in a disposable privileged
+container:
+
+```bash
+bash scripts/setup-everything.sh all --live-backend docker
 ```
 
 If you are in a sandbox that cannot load BPF, use `make smoke` + `make demo`.
@@ -63,15 +79,26 @@ That still exercises store → fingerprint → diff → API → dashboard.
 
 ## OpenClaw / agent runtimes
 
-OpenClaw is a Node process. ClawHub skills are npm packages. Goodman's Tier-1
-path (V8 perf map → stack frame → `package.json`) was built for that shape of
-workload.
+OpenClaw ships as an npm package and runs its Gateway on Node. Current ClawHub
+skills install into directories with versioned origin and workspace-lock
+metadata. Goodman resolves normal npm frames through `package.json`; when Node
+executes JavaScript inside a ClawHub skill, Goodman requires matching
+`.clawhub/origin.json` and workspace `.clawhub/lock.json` records before it
+reports an exact identity such as `@owner/skill@1.2.3`.
 
-What we want the demo to show: not "something read `~/.npmrc`," but
-`skill-xyz@1.2.3` did. Next up: one-command attach to an OpenClaw host, plus
-the same data over HTTP so you do not need our UI.
+Preview or install the host integration:
 
-Integration surface today (any SIEM, skill, or script):
+```bash
+scripts/integrate-openclaw.sh --dry-run
+scripts/integrate-openclaw.sh
+scripts/integrate-openclaw.sh --install-openclaw --systemd-user --restart
+```
+
+`make demo` includes a fictional `service=openclaw` skill drift with a
+credential read and new outbound connection. Full host and Kubernetes steps:
+[docs/openclaw.md](docs/openclaw.md).
+
+Dashboard-independent integration surface:
 
 | Endpoint | Role |
 |---|---|
@@ -79,6 +106,7 @@ Integration surface today (any SIEM, skill, or script):
 | `GET /v1/alerts` | open / ack / resolved |
 | `GET /v1/stream` | SSE |
 | `GET /v1/fingerprints` | baselines |
+| `GET /v1/export` | all alert states, fingerprints, reachability, coverage, enforcement |
 
 Full reference: [docs/api.md](docs/api.md).
 
@@ -128,14 +156,23 @@ they drift. Do not "fix" the test; fix the layout.
 
 ## Quick start (dev machine)
 
-x86-64 Linux, kernel ≥ 5.8 with BTF (5.10+ and `bpf` in `lsm=` for
-enforcement). Go 1.23+, clang/LLVM, bpftool. Node only if you rebuild the
-dashboard (built `dist/` is committed).
+The portable path needs Go 1.25+ or Docker on Linux, macOS, or Windows:
 
 ```bash
-./scripts/setup.sh   # or: make doctor
-make build
-make demo
+bash scripts/setup-everything.sh demo
+```
+
+The live sensor needs x86-64 or arm64 Linux, kernel ≥ 5.8 with BTF (5.10+ and
+`bpf` in `lsm=` for enforcement), clang/LLVM, and bpftool:
+
+```bash
+bash scripts/setup-everything.sh all --install
+```
+
+Or keep the host toolchain untouched and use rootful Docker:
+
+```bash
+make docker-e2e
 ```
 
 Collector alone:
@@ -178,10 +215,10 @@ Postgres for HA (`collector.replicas > 1`), SQLite PVC for pilots. See
 | [Getting started](docs/getting-started.md) | first alert locally |
 | [Setup and usage](docs/setup-and-usage.md) | full workflow |
 | [Architecture](docs/architecture.md) | design |
-| [Attribution](docs/attribution.md) | npm + PyPI resolve |
+| [Attribution](docs/attribution.md) | npm + PyPI + ClawHub resolve |
+| [OpenClaw](docs/openclaw.md) | one-command host/Kubernetes integration |
 | [API](docs/api.md) | REST + SSE |
 | [Enforcement](docs/enforcement.md) | LSM block mode |
-| [Devpost / judges](docs/devpost.md) | short story + verify steps |
 | [AGENTS.md](AGENTS.md) | invariants for coding agents |
 
 ## Built with Codex (GPT-5.6)
@@ -219,8 +256,8 @@ Shipped on `main` (see [CHANGELOG](CHANGELOG.md)):
 - reachability, weekly digest, coverage tab, embedded UI
 - Helm, Docker, admission webhook for attribution flags
 
-Still human-gated before a tagged release: `sudo make e2e` on LSM kernels,
-two-replica Postgres proof, then image tag
+Still human-gated before a tagged release: a live LSM-kernel proof
+(`sudo make e2e` or `make docker-e2e`), two-replica Postgres proof, then image tag
 ([docs/release.md](docs/release.md)).
 
 Tier-2 flagless V8 attribution is **PARK** —

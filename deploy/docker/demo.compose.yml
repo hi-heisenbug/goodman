@@ -1,0 +1,8 @@
+services:
+  demo:
+    image: goodman/demo:local
+    build:
+      context: ../..
+      dockerfile: deploy/docker/demo.Dockerfile
+    ports:
+      - "${GOODMAN_DEMO_PORT:-8844}:8844"

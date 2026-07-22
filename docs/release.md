@@ -7,7 +7,11 @@ human with Postgres/root.
 ## Automated (no root)
 
 ```bash
-make vet && make test && make smoke && make replay && make helm-lint
+make quality && make build && make test && make smoke
+make demo-check && make replay && make portable-cross-build && make helm-lint
+make quality
+(cd dashboard && npm audit --audit-level=moderate)
+(cd demo_build && npm audit --audit-level=moderate && npm run check)
 ```
 
 All must be green. CI covers SQLite (single-replica path), transactional
@@ -17,10 +21,12 @@ All must be green. CI covers SQLite (single-replica path), transactional
 
 ```bash
 sudo make e2e
+# or on a Linux host with rootful Docker
+make docker-e2e
 ```
 
 Confirms the eBPF sensor → collector path on a real kernel. Unprivileged
-sandboxes cannot run this; note in the release notes if skipped.
+sandboxes cannot run this; note in the release notes if both paths are skipped.
 
 ## HA proof (Postgres)
 

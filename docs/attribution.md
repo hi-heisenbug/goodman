@@ -79,11 +79,11 @@ The algorithm (`resolve.go` + `perfmap.go`):
 2. For each address in the event's stack, binary-search the interval list. If a
    JIT symbol is found, extract the source path with a regex
    (`\s(/\S+\.[cm]?js)(?::\d+)?(?::\d+)?$`).
-3. Walk the frames from **innermost outward** and take the **deepest frame whose
-   source path contains `/node_modules/`** — that is the actual actor. (Frames
-   above it may just be the caller passing through.)
-4. If no frame is inside `node_modules`, attribute to the application itself
-   (`Package = "<app>"`, version from the app's own `package.json`).
+3. Walk the frames from **innermost outward** and take the deepest exact actor:
+   an npm path under `/node_modules/`, or versioned ClawHub skill JavaScript
+   backed by `SKILL.md` plus `.clawhub/origin.json`.
+4. If no package or versioned skill frame resolves, attribute to the application
+   itself (`Package = "<app>"`, version from the app's own `package.json`).
 5. If nothing resolves at all, attribute to `<unknown>`.
 
 Then the source path is mapped to a package (`package.go`).
@@ -101,6 +101,31 @@ PathToPackage("/proc/<pid>/root", "/app/node_modules/@scope/name/dist/x.js")
 - The version is read from that package's `package.json`, resolved through
   **`/proc/<pid>/root`** so it works inside container filesystems.
 - Results are cached per package.json path — it doesn't change while a pid lives.
+
+### OpenClaw / ClawHub skill paths
+
+OpenClaw runs its Gateway on Node, so npm and plugin frames use the normal
+`node_modules` path above. Current ClawHub installs use workspace or managed
+skill directories instead of npm package directories. A trusted installation
+has both per-skill origin metadata and a workspace lock:
+
+```text
+<workspace>/skills/calendar-sync/.clawhub/origin.json
+<workspace>/.clawhub/lock.json
+```
+
+`PathToOpenClawSkill` walks upward from a resolved JavaScript frame and accepts
+the skill only when one of ClawHub's accepted card markers (`SKILL.md`,
+`skill.md`, `skills.md`, or `SKILL.MD`) exists and the origin plus lock agree on
+slug, owner, version, install timestamp, registry, source, and optional artifact
+provenance. Owner metadata produces a scoped identity such as
+`@acme/calendar-sync@1.2.3`. Origin-only, lock-only, missing, malformed, or
+mismatched metadata does not become a package match.
+
+Instruction-only skills and skills that invoke an external binary may not put a
+skill JavaScript frame on the captured stack. Goodman reports the npm/PyPI
+actor, `<app>`, or `<unknown>` in those cases. It never infers the skill from a
+prompt or directory name. See [OpenClaw integration](openclaw.md).
 
 ## Tier 2 — in-kernel V8 unwinding (future, not in v1)
 
@@ -125,6 +150,8 @@ Do not start a production build until that doc's GO criteria are met.
   are reported as `<unknown>` rather than guessed.
 - Bundled or heavily minified JavaScript can resolve to the bundle owner rather
   than the original transitive package when source paths are erased.
+- An OpenClaw skill that only supplies instructions or launches a non-Node tool
+  may have no versioned skill frame to resolve.
 
 Track the Coverage tab and `goodman_sensor_attributed_total{outcome="unknown"}`.
 Goodman treats rising unknowns as a trust signal, not as a package match.
@@ -197,10 +224,11 @@ metadata IP `169.254.169.254` is likewise always kept verbatim and flagged.
 
 The `service` label for an event (`resolve.go` `detectService`) is:
 
-1. In Kubernetes (cgroup path contains `kubepods`): the pod name from the
+1. Explicit `GOODMAN_SERVICE` from the watched process environment.
+2. In Kubernetes (cgroup path contains `kubepods`): the pod name from the
    process's `HOSTNAME` env var.
-2. Locally: the basename of the process's working directory.
-3. Fallback: `pid-<pid>`.
+3. Locally: the basename of the process's working directory.
+4. Fallback: `pid-<pid>`.
 
 ## The guarantee: never misattribute
 

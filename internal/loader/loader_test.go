@@ -11,6 +11,18 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
+func TestWatchedCommsIncludesCurrentOpenClawGateway(t *testing.T) {
+	if !WatchedComms["openclaw-gatewa"] {
+		t.Fatal("current OpenClaw Gateway comm openclaw-gatewa must be watched by default")
+	}
+}
+
+func TestCloseIsIdempotent(t *testing.T) {
+	loader := &Loader{}
+	loader.Close()
+	loader.Close()
+}
+
 // TestEmbeddedObjectSpec parses the embedded eBPF object (no privileges
 // required) and asserts the tracepoint programs and the maps the loader
 // relies on are present with the expected types. This catches a stale/broken

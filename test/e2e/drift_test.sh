@@ -32,7 +32,7 @@ PY
 
 PORT="${GOODMAN_E2E_COLLECTOR_PORT:-$(free_port)}"
 BASE="http://127.0.0.1:$PORT"
-DB="$(mktemp -u /tmp/goodman-e2e-XXXX.db)"
+DB="$(mktemp /tmp/goodman-e2e-XXXX.db)"
 WORK="$ROOT/test/workload"
 FAKE_SECRETS="/tmp/goodman-fake-secrets"
 RULES="/tmp/goodman-e2e-rules.json"
@@ -111,9 +111,13 @@ python3 /tmp/goodman-e2e-sink.py "$SINK_PORT" >/tmp/goodman-e2e-sink.log 2>&1 &
 pids+=("$!")
 
 echo "== 1. build + start collector and sensor =="
-make -s bpf >/dev/null
-go build -o bin/collector ./cmd/collector
-go build -o bin/sensor ./cmd/sensor
+if [[ "${GOODMAN_E2E_SKIP_BUILD:-0}" != "1" ]]; then
+	make -s bpf >/dev/null
+	go build -o bin/collector ./cmd/collector
+	go build -o bin/sensor ./cmd/sensor
+elif [[ ! -x ./bin/collector || ! -x ./bin/sensor ]]; then
+	fail "GOODMAN_E2E_SKIP_BUILD=1 requires bin/collector and bin/sensor (run make build first)"
+fi
 
 GOODMAN_DSN="$DB" GOODMAN_LEARN_OBS="$LEARN_OBS" GOODMAN_LEARN_MIN_AGE=1ns GOODMAN_LISTEN=":$PORT" \
   GOODMAN_RULES="$RULES" GOODMAN_ENFORCE_ENABLED=true \
@@ -235,8 +239,13 @@ nb = " ".join(a["new_behaviors"])
 assert "credential" in nb.lower() or "secret" in nb.lower(), f"missing secret read: {a['new_behaviors']}"
 assert "127.0.0.1:9999" in nb or "CONNECT" in nb, f"missing sink connect: {a['new_behaviors']}"
 assert a.get("blocked"), f"file_open deny did not upgrade alert to blocked: {a}"
-# never misattribute to a different package
-assert not any(x["package"] not in ("good-pkg","<app>","<unknown>") for x in alerts), alerts
+# The sensor watches every supported runtime on the host. Unrelated services
+# may produce alerts during this run, so the misattribution invariant is scoped
+# to the workload under test.
+assert not any(
+    x["service"] == "workload" and x["package"] not in ("good-pkg", "<app>", "<unknown>")
+    for x in alerts
+), alerts
 print("OK: CRITICAL drift alert for good-pkg 1.0.0 -> 1.0.1 with secret read + sink connect + child exec")
 PY
 

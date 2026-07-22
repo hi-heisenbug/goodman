@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -18,6 +19,32 @@ func writeFile(t *testing.T, path, content string) {
 	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func writeClawHubInstall(t *testing.T, workspace, slug, owner, version string, installedAt int64) string {
+	t.Helper()
+	skillDir := filepath.Join(workspace, "skills", slug)
+	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: "+slug+"\n---\n")
+	writeFile(t, filepath.Join(skillDir, ".clawhub/origin.json"), fmt.Sprintf(`{
+  "version": 1,
+  "registry": "https://clawhub.ai",
+  "slug": %q,
+  "ownerHandle": %q,
+  "installedVersion": %q,
+  "installedAt": %d
+}`, slug, owner, version, installedAt))
+	writeFile(t, filepath.Join(workspace, ".clawhub/lock.json"), fmt.Sprintf(`{
+  "version": 1,
+  "skills": {
+    %q: {
+      "version": %q,
+      "installedAt": %d,
+      "registry": "https://clawhub.ai",
+      "ownerHandle": %q
+    }
+  }
+}`, slug, version, installedAt, owner))
+	return skillDir
 }
 
 func TestPathToPackage(t *testing.T) {
@@ -46,6 +73,160 @@ func TestPathToPackage(t *testing.T) {
 	}
 }
 
+func TestPathToOpenClawSkillUsesClawHubOrigin(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "home/alice/.openclaw/workspace")
+	writeClawHubInstall(t, workspace, "calendar-sync", "goodman-demo", "1.2.3", 1784678400000)
+
+	path := "/home/alice/.openclaw/workspace/skills/calendar-sync/scripts/run.mjs"
+	pkg, version, ok := PathToOpenClawSkill(root, path)
+	if !ok || pkg != "@goodman-demo/calendar-sync" || version != "1.2.3" {
+		t.Fatalf("PathToOpenClawSkill(%q) = (%q,%q,%v)", path, pkg, version, ok)
+	}
+}
+
+func TestPathToOpenClawSkillRejectsOriginWithoutWorkspaceLock(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "workspace/skills/calendar-sync")
+	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: calendar-sync\n---\n")
+	writeFile(t, filepath.Join(skillDir, ".clawhub/origin.json"), `{
+  "version": 1,
+  "registry": "https://clawhub.ai",
+  "slug": "calendar-sync",
+  "ownerHandle": "goodman-demo",
+  "installedVersion": "1.2.3",
+  "installedAt": 1784678400000
+}`)
+
+	if pkg, version, ok := PathToOpenClawSkill(root, "/workspace/skills/calendar-sync/run.mjs"); ok {
+		t.Fatalf("origin-only skill attributed as %q@%q", pkg, version)
+	}
+}
+
+func TestPathToOpenClawSkillRejectsLockVersionMismatch(t *testing.T) {
+	root := t.TempDir()
+	workspace := filepath.Join(root, "workspace")
+	skillDir := writeClawHubInstall(t, workspace, "calendar-sync", "goodman-demo", "1.2.3", 1784678400000)
+	writeFile(t, filepath.Join(workspace, ".clawhub/lock.json"), `{
+  "version": 1,
+  "skills": {
+    "calendar-sync": {
+      "version": "9.9.9",
+      "installedAt": 1784678400000,
+      "registry": "https://clawhub.ai",
+      "ownerHandle": "goodman-demo"
+    }
+  }
+}`)
+
+	path := strings.TrimPrefix(filepath.Join(skillDir, "run.mjs"), root)
+	if pkg, version, ok := PathToOpenClawSkill(root, path); ok {
+		t.Fatalf("mismatched lock attributed as %q@%q", pkg, version)
+	}
+}
+
+func TestPathToOpenClawSkillAcceptsClawHubSkillCardNames(t *testing.T) {
+	for _, name := range []string{"SKILL.md", "skill.md", "skills.md", "SKILL.MD"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			workspace := filepath.Join(root, "workspace")
+			skillDir := writeClawHubInstall(t, workspace, "calendar-sync", "goodman-demo", "1.2.3", 1784678400000)
+			if name != "SKILL.md" {
+				if err := os.Rename(filepath.Join(skillDir, "SKILL.md"), filepath.Join(skillDir, name)); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			pkg, version, ok := PathToOpenClawSkill(root, "/workspace/skills/calendar-sync/run.mjs")
+			if !ok || pkg != "@goodman-demo/calendar-sync" || version != "1.2.3" {
+				t.Fatalf("recognized %s = (%q,%q,%v)", name, pkg, version, ok)
+			}
+		})
+	}
+}
+
+func TestPathToOpenClawSkillRejectsUnknownSkillCardNames(t *testing.T) {
+	for _, name := range []string{"Skill.md", "README.md"} {
+		t.Run(name, func(t *testing.T) {
+			root := t.TempDir()
+			workspace := filepath.Join(root, "workspace")
+			skillDir := writeClawHubInstall(t, workspace, "calendar-sync", "goodman-demo", "1.2.3", 1784678400000)
+			if err := os.Rename(filepath.Join(skillDir, "SKILL.md"), filepath.Join(skillDir, name)); err != nil {
+				t.Fatal(err)
+			}
+
+			if pkg, version, ok := PathToOpenClawSkill(root, "/workspace/skills/calendar-sync/run.mjs"); ok {
+				t.Fatalf("unknown %s attributed as %q@%q", name, pkg, version)
+			}
+		})
+	}
+}
+
+func TestPathToOpenClawSkillRejectsUnversionedLocalSkill(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "workspace/skills/local-helper")
+	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: local-helper\n---\n")
+
+	if pkg, version, ok := PathToOpenClawSkill(root, "/workspace/skills/local-helper/run.mjs"); ok {
+		t.Fatalf("unversioned local skill attributed as %q@%q", pkg, version)
+	}
+}
+
+func TestPathToOpenClawSkillRejectsMismatchedOriginSlug(t *testing.T) {
+	root := t.TempDir()
+	skillDir := filepath.Join(root, "workspace/skills/calendar-sync")
+	writeFile(t, filepath.Join(skillDir, "SKILL.md"), "---\nname: calendar-sync\n---\n")
+	writeFile(t, filepath.Join(skillDir, ".clawhub/origin.json"), `{
+  "version": 1,
+  "registry": "https://clawhub.ai",
+  "slug": "different-skill",
+  "installedVersion": "1.2.3",
+  "installedAt": 1784678400000
+}`)
+
+	if pkg, version, ok := PathToOpenClawSkill(root, "/workspace/skills/calendar-sync/run.mjs"); ok {
+		t.Fatalf("mismatched origin attributed as %q@%q", pkg, version)
+	}
+}
+
+func TestForgetClearsClawHubIdentityBeforePIDReuse(t *testing.T) {
+	proc := t.TempDir()
+	pid := 4444
+	pidRoot := filepath.Join(proc, "4444/root")
+	workspace := filepath.Join(pidRoot, "workspace")
+	skillDir := writeClawHubInstall(t, workspace, "calendar-sync", "", "1.2.3", 1784678400000)
+	originPath := filepath.Join(skillDir, ".clawhub/origin.json")
+	path := "/workspace/skills/calendar-sync/run.mjs"
+	if _, version, ok := PathToOpenClawSkill(pidRoot, path); !ok || version != "1.2.3" {
+		t.Fatalf("initial identity = %q,%v", version, ok)
+	}
+	writeFile(t, originPath, `{
+  "version": 1,
+  "registry": "https://clawhub.ai",
+  "slug": "calendar-sync",
+  "installedVersion": "2.0.0",
+  "installedAt": 1784678401000
+}`)
+	writeFile(t, filepath.Join(workspace, ".clawhub/lock.json"), `{
+  "version": 1,
+  "skills": {
+    "calendar-sync": {
+      "version": "2.0.0",
+      "installedAt": 1784678401000,
+      "registry": "https://clawhub.ai"
+    }
+  }
+}`)
+	if _, version, ok := PathToOpenClawSkill(pidRoot, path); !ok || version != "1.2.3" {
+		t.Fatalf("cached identity = %q,%v", version, ok)
+	}
+
+	NewResolver(proc).Forget(pid)
+	if _, version, ok := PathToOpenClawSkill(pidRoot, path); !ok || version != "2.0.0" {
+		t.Fatalf("identity after Forget = %q,%v, want 2.0.0", version, ok)
+	}
+}
+
 func TestCanonicalize(t *testing.T) {
 	cases := []struct {
 		t    model.EventType
@@ -64,8 +245,8 @@ func TestCanonicalize(t *testing.T) {
 		{model.EventProcExec, "/usr/bin/curl", "EXEC /usr/bin/curl"},
 	}
 	for _, c := range cases {
-		if got := Canonicalize(c.t, c.arg); got != c.want {
-			t.Errorf("Canonicalize(%v,%q) = %q, want %q", c.t, c.arg, got, c.want)
+		if got := CanonicalizeWith(c.t, c.arg, 0); got != c.want {
+			t.Errorf("CanonicalizeWith(%v,%q,0) = %q, want %q", c.t, c.arg, got, c.want)
 		}
 	}
 }
@@ -182,6 +363,69 @@ func TestAttributeEndToEnd(t *testing.T) {
 	ev3.Stack[0] = 0xdeadbeef
 	if got3 := r.Attribute(ev3, 0); got3.Package != "<unknown>" {
 		t.Fatalf("attributed %q, want <unknown>", got3.Package)
+	}
+}
+
+func TestAttributeOpenClawSkillAndExplicitService(t *testing.T) {
+	proc := t.TempDir()
+	pid := 4343
+	pidDir := fmt.Sprintf("%s/%d", proc, pid)
+	workspace := pidDir + "/root/home/alice/.openclaw/workspace"
+	writeClawHubInstall(t, workspace, "calendar-sync", "goodman-demo", "1.2.3", 1784678400000)
+	writeFile(t, pidDir+"/root/tmp/perf-4343.map",
+		"5000 100 LazyCompile:*run /home/alice/.openclaw/workspace/skills/calendar-sync/scripts/run.mjs:5:10\n")
+	writeFile(t, pidDir+"/status", "Name:\tMainThread\nNSpid:\t4343\n")
+	writeFile(t, pidDir+"/maps", "00400000-00500000 r-xp 00000000 08:01 1 /usr/bin/node\n")
+	writeFile(t, pidDir+"/cgroup", "0::/user.slice\n")
+	writeFile(t, pidDir+"/environ", "HOME=/home/alice\x00GOODMAN_SERVICE=openclaw\x00")
+	if err := os.Symlink("/home/alice", pidDir+"/cwd"); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewResolver(proc)
+	ev := &model.RawEvent{PID: uint32(pid), Type: uint8(model.EventNetConnect), StackLen: 1}
+	copy(ev.Arg[:], "203.0.113.77:443")
+	ev.Stack[0] = 0x5010
+
+	got := r.Attribute(ev, 0)
+	if got.Service != "openclaw" {
+		t.Fatalf("service = %q, want explicit openclaw", got.Service)
+	}
+	if got.Package != "@goodman-demo/calendar-sync" || got.Version != "1.2.3" {
+		t.Fatalf("attributed %q@%q, want ClawHub skill identity", got.Package, got.Version)
+	}
+}
+
+func TestAttributeUsesTrustedClawHubPathAndShortThreadContext(t *testing.T) {
+	proc := t.TempDir()
+	pid := 4344
+	pidDir := fmt.Sprintf("%s/%d", proc, pid)
+	workspace := pidDir + "/root/workspace"
+	writeClawHubInstall(t, workspace, "calendar-sync", "goodman-demo", "1.2.3", 1784678400000)
+	writeFile(t, pidDir+"/root/tmp/perf-4344.map", "")
+	writeFile(t, pidDir+"/status", "Name:\topenclaw-gatewa\nNSpid:\t4344\n")
+	writeFile(t, pidDir+"/maps", "00400000-00500000 r-xp 00000000 08:01 1 /usr/bin/node\n")
+	writeFile(t, pidDir+"/cgroup", "0::/user.slice\n")
+	writeFile(t, pidDir+"/environ", "GOODMAN_SERVICE=openclaw\x00")
+	if err := os.Symlink("/workspace", pidDir+"/cwd"); err != nil {
+		t.Fatal(err)
+	}
+
+	r := NewResolver(proc)
+	tid := uint32(7001)
+	base := uint64(10_000_000_000)
+	ownFile := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventFileOpen), Timestamp: base}
+	copy(ownFile.Arg[:], "/workspace/skills/calendar-sync/SKILL.md")
+	got := r.Attribute(ownFile, 0)
+	if got.Package != "@goodman-demo/calendar-sync" || got.Version != "1.2.3" {
+		t.Fatalf("trusted skill file = %q@%q", got.Package, got.Version)
+	}
+
+	secret := &model.RawEvent{PID: uint32(pid), TID: tid, Type: uint8(model.EventFileOpen), Timestamp: base + 10_000_000}
+	copy(secret.Arg[:], "/workspace/credentials")
+	got = r.Attribute(secret, 0)
+	if got.Package != "@goodman-demo/calendar-sync" || got.Version != "1.2.3" {
+		t.Fatalf("short-thread secret = %q@%q", got.Package, got.Version)
 	}
 }
 

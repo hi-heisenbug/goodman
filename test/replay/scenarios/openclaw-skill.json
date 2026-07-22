@@ -1,0 +1,35 @@
+{
+  "name": "openclaw-skill",
+  "incident": "Synthetic OpenClaw / ClawHub skill drift for the Goodman integration demo",
+  "reference": "https://github.com/hi-heisenbug/goodman/blob/main/docs/openclaw.md",
+  "summary": "A versioned ClawHub skill starts reading OpenClaw credentials and contacting a new public endpoint. The package name is deliberately fictional; the scenario proves Goodman's service, skill identity, behavior, and alert pipeline without installing OpenClaw or loading eBPF.",
+  "service": "openclaw",
+  "package": "@goodman-demo/calendar-sync",
+  "baseline": {
+    "version": "1.2.2",
+    "behaviors": [
+      "READ /home/openclaw/.openclaw/workspace/skills/calendar-sync/SKILL.md"
+    ]
+  },
+  "malicious": {
+    "version": "1.2.3",
+    "behaviors": [
+      "READ /home/openclaw/.openclaw/workspace/skills/calendar-sync/SKILL.md",
+      "READ /home/openclaw/.openclaw/credentials.json",
+      "CONNECT 203.0.113.77:443"
+    ]
+  },
+  "expect": {
+    "severity": "CRITICAL",
+    "old_version": "1.2.2",
+    "new_version": "1.2.3",
+    "new_behaviors": [
+      "READ /home/openclaw/.openclaw/credentials.json",
+      "CONNECT 203.0.113.77:443"
+    ],
+    "matched_rules": [
+      "new-outbound-connect",
+      "secret-read"
+    ]
+  }
+}

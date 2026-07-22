@@ -3,6 +3,8 @@
 # Goodman, and prints clear, actionable guidance for anything missing.
 # Exit code 0 = ready to build; non-zero = something required is missing.
 set -uo pipefail
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/runtime-versions.sh"
 
 # ---- pretty output ---------------------------------------------------------
 if [[ -t 1 ]]; then
@@ -31,9 +33,11 @@ if [[ "$OS" == "Linux" ]]; then ok "OS: Linux"; else
   bad "OS: $OS — Goodman's sensor needs a real Linux kernel."
   hint "On macOS/Windows, provision a Linux VM (multipass/UTM/cloud) and work there."
 fi
-if [[ "$ARCH" == "x86_64" ]]; then ok "Arch: x86_64"; else
-  warn "Arch: $ARCH — v1 targets x86-64; the eBPF object is built with -D__TARGET_ARCH_x86."
-fi
+case "$ARCH" in
+	x86_64|amd64) ok "Arch: $ARCH (BPF target x86)" ;;
+	aarch64|arm64) ok "Arch: $ARCH (BPF target arm64)" ;;
+	*) warn "Arch: $ARCH — Makefile ARCH auto-detection has not been validated for this target." ;;
+esac
 [[ "$OS" == "Linux" ]] && ok "Kernel: $(uname -r)"
 
 # ---- build toolchain -------------------------------------------------------
@@ -42,13 +46,19 @@ for t in go clang bpftool; do
   if have "$t"; then
     case "$t" in
       clang) ok "clang — $(ver clang --version)";;
-      go)    ok "go — $(ver go version)";;
+      go)
+        if goodman_go_is_supported; then
+          ok "go — $(ver go version)"
+        else
+          bad "go — $(ver go version) (Goodman requires Go 1.25+)"
+        fi
+        ;;
       *)     ok "$t — $(ver "$t" version 2>/dev/null | head -1)";;
     esac
   else
     bad "$t not found"
     case "$t" in
-      go)      hint "Install Go 1.23+: https://go.dev/dl/  (or: sudo apt-get install -y golang)";;
+      go)      hint "Install Go 1.25+: https://go.dev/dl/  (or use scripts/setup.sh)";;
       clang)   hint "sudo apt-get install -y clang llvm";;
       bpftool) hint "sudo apt-get install -y bpftool  (or linux-tools-\$(uname -r))";;
     esac

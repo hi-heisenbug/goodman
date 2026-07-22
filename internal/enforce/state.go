@@ -55,8 +55,6 @@ func (m *Manager) SetRules(rules []diff.Rule) {
 	m.persistRev(rev)
 }
 
-func (m *Manager) MasterGate() bool { return m.masterGate }
-
 func (m *Manager) RecordBehavior(service, behavior string) {
 	if service == "" || behavior == "" {
 		return
@@ -174,18 +172,6 @@ func (m *Manager) SetEnabled(ctx context.Context, on bool) error {
 	m.mu.Unlock()
 	m.persistRev(rev)
 	return nil
-}
-
-func (m *Manager) Enabled() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.enabled
-}
-
-func (m *Manager) Rev() int {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.rev
 }
 
 func (m *Manager) StateForSensor() (enabled bool, rev int, vs ServiceVerdicts) {

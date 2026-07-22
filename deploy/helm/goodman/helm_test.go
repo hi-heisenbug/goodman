@@ -65,12 +65,15 @@ func TestHelmDefaultsUseReleaseImagesAndActionableNotes(t *testing.T) {
 		t.Fatalf("read NOTES.txt: %v", err)
 	}
 	for _, want := range []string{
-		`kubectl -n <app-namespace> set env deployment --all NODE_OPTIONS=`,
-		`kubectl -n <app-namespace> set env deployment -l app=<app-label> NODE_OPTIONS=`,
+		`scripts/enable-node-attribution.sh --namespace <app-namespace> --all`,
+		`scripts/enable-node-attribution.sh --namespace <app-namespace> --selector app=<app-label>`,
 	} {
 		if !strings.Contains(string(notes), want) {
 			t.Fatalf("NOTES.txt missing %q\n%s", want, notes)
 		}
+	}
+	if strings.Contains(string(notes), "kubectl -n <app-namespace> set env") {
+		t.Fatal("NOTES.txt must not recommend clobbering NODE_OPTIONS with kubectl set env")
 	}
 }
 

@@ -13,10 +13,9 @@ import (
 // Spool is a FIFO of events with a hard capacity. Pushing past capacity
 // evicts the oldest events and reports how many were dropped.
 type Spool struct {
-	mu   sync.Mutex
-	cap  int
-	buf  []model.Attributed
-	drop uint64
+	mu  sync.Mutex
+	cap int
+	buf []model.Attributed
 }
 
 // New returns a spool that holds at most cap events. Cap ≤ 0 uses 50_000.
@@ -40,7 +39,6 @@ func (s *Spool) Push(events []model.Attributed) int {
 	if len(s.buf) > s.cap {
 		evicted = len(s.buf) - s.cap
 		s.buf = append([]model.Attributed{}, s.buf[evicted:]...)
-		s.drop += uint64(evicted)
 	}
 	return evicted
 }
@@ -62,13 +60,6 @@ func (s *Spool) Len() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.buf)
-}
-
-// Dropped returns the total number of events evicted since creation.
-func (s *Spool) Dropped() uint64 {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return s.drop
 }
 
 func min(a, b int) int {

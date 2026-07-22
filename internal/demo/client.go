@@ -1,6 +1,6 @@
 // Package demo seeds a local collector for the five-minute product wow:
-// realistic fingerprints and alerts, a preloaded reachability report
-// (1,400 declared / 240 executed), and a live Mini-Shai-Hulud attack replay.
+// realistic fingerprints and alerts, an OpenClaw skill drift, a preloaded
+// reachability report, and a live Mini-Shai-Hulud attack replay.
 package demo
 
 import (
@@ -29,6 +29,26 @@ type Client struct {
 	BaseURL string
 	Sensor  string
 	HTTP    *http.Client
+}
+
+// Snapshot is the collector's stable dashboard-independent export used by
+// SIEMs and agent runtimes.
+type Snapshot struct {
+	Schema       string              `json:"schema"`
+	GeneratedAt  uint64              `json:"generated_at"`
+	Alerts       []model.Alert       `json:"alerts"`
+	Fingerprints []model.Fingerprint `json:"fingerprints"`
+}
+
+// Export is the complete persisted-state bundle for SIEM/bootstrap consumers.
+type Export struct {
+	Schema       string              `json:"schema"`
+	GeneratedAt  uint64              `json:"generated_at"`
+	Alerts       []model.Alert       `json:"alerts"`
+	Fingerprints []model.Fingerprint `json:"fingerprints"`
+	Reachability []struct {
+		Service string `json:"service"`
+	} `json:"reachability"`
 }
 
 // NewClient returns a demo client pointed at baseURL.
@@ -170,6 +190,37 @@ func (c *Client) GetAlerts(ctx context.Context) ([]model.Alert, error) {
 		return nil, err
 	}
 	return alerts, nil
+}
+
+// GetSnapshot returns the SIEM/agent bundle from /v1/snapshot.
+func (c *Client) GetSnapshot(ctx context.Context) (*Snapshot, error) {
+	return getJSON[Snapshot](ctx, c, "/v1/snapshot")
+}
+
+// GetExport returns all persisted collector state from /v1/export.
+func (c *Client) GetExport(ctx context.Context) (*Export, error) {
+	return getJSON[Export](ctx, c, "/v1/export")
+}
+
+func getJSON[T any](ctx context.Context, c *Client, path string) (*T, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
+		return nil, fmt.Errorf("GET %s: %s: %s", path, resp.Status, body)
+	}
+	var result T
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // GetReport returns the persisted reachability report (no service filter).

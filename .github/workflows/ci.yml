@@ -27,20 +27,22 @@ jobs:
             libelf-dev \
             libbpf-dev
 
-      - name: Set up Go 1.23
+      - name: Set up Go 1.25
         uses: actions/setup-go@v6
         with:
-          go-version: "1.23"
+          go-version: "1.25"
           cache: true
 
       - name: Compile eBPF object (make bpf)
         run: make bpf
 
-      - name: Check Go formatting
-        run: make fmt-check
+      - name: Repository quality gate
+        run: make quality
 
-      - name: Go vet
-        run: make vet
+      - name: Shell and Python syntax
+        run: |
+          bash -n scripts/*.sh test/e2e/*.sh test/*.sh
+          python3 -m py_compile scripts/merge-k8s-node-env.py demo_build/*.py
 
       - name: Run unit tests
         run: make test
@@ -50,6 +52,28 @@ jobs:
 
       - name: Backend smoke test (no root)
         run: make smoke
+
+      - name: Attack and integration replay corpus
+        run: make replay
+
+      - name: Portable setup contract (no root or make dependency)
+        run: bash scripts/setup-everything.sh demo --check
+
+      - name: Cross-build portable demo for macOS and Windows
+        run: make portable-cross-build
+
+  portable-docker-demo:
+    name: Portable Docker Demo
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Build self-contained demo image
+        run: docker build -f deploy/docker/demo.Dockerfile -t goodman/demo:ci .
+
+      - name: Verify demo, OpenClaw alert, and complete export
+        run: docker run --rm goodman/demo:ci -check -port 8844
 
   dashboard:
     name: Dashboard Build (Node)
@@ -73,9 +97,39 @@ jobs:
         working-directory: dashboard
         run: npm run build
 
+      - name: Audit dashboard dependencies
+        working-directory: dashboard
+        run: npm audit --audit-level=moderate
+
       - name: Verify build output exists
         working-directory: dashboard
         run: test -f dist/index.html
+
+  demo-video:
+    name: Demo Video Workspace
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: demo_build/package-lock.json
+
+      - name: Install dependencies
+        working-directory: demo_build
+        run: npm ci
+
+      - name: Audit dependencies
+        working-directory: demo_build
+        run: npm audit --audit-level=moderate
+
+      - name: Test, lint, and bundle compositions
+        working-directory: demo_build
+        run: npm run check
 
   helm:
     name: Helm Chart Lint & Template

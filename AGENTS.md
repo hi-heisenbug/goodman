@@ -150,6 +150,8 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make bpf` | Compile `bpf/goodman.bpf.c` → `.o` (also copied into the loader pkg) | no |
 | `make dashboard` | `npm install && vite build`, copy into `internal/api/ui/dist` | no |
 | `make build` | Build `sensor`, `collector`, `goodmanctl` into `bin/` | no |
+| `make portable-build` | Build only collector + portable demo runner | no |
+| `make portable-cross-build` | Cross-build collector + demo for macOS/Windows amd64/arm64 | no |
 | `make test` | `go test ./...` (unit tests, all packages) | no |
 | `make smoke` | Backend end-to-end via synthetic events → asserts one CRITICAL alert | **no** |
 | `make replay` | Replay real npm attacks (event-stream, eslint-scope, ua-parser-js, node-ipc); assert each is caught | **no** |
@@ -157,16 +159,25 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make demo` | Five-minute product wow: seeded alerts, reachability 1,400/240, live Mini-Shai-Hulud replay | **no** |
 | `make demo-check` | Non-interactive demo DoD check (CI) | **no** |
 | `make e2e` | **Real eBPF** drift replay: sensor + Node workload → alert | **yes** |
+| `make e2e-openclaw` | Real eBPF/V8 OpenClaw runtime-contract proof | **yes** |
+| `make docker-e2e` | Both real eBPF proofs in a privileged Linux container | Docker root |
 | `make docker` | Build both container images | no (docker daemon) |
 | `make install-k8s` | Install Goodman into the current Kubernetes context | no |
 | `make helm-lint` | Lint the Helm chart | no |
 | `make vet` | `go vet ./...` | no |
+| `make quality` | Formatting, vet, static/dead/duplicate/complexity/vulnerability/module gates | no |
 | `make clean` | Remove build artifacts | no |
 
 **When you finish a change, the bar is:** `make vet && make test && make smoke`
 all green. If you touched anything under `bpf/` or `internal/loader/`, note in
-your summary that `sudo make e2e` still needs to be run by a human on a real
-kernel, and why (unprivileged sandboxes can't load BPF — see below).
+your summary whether `sudo make e2e` or `make docker-e2e` ran on a real kernel.
+If neither ran, say why (unprivileged sandboxes cannot load BPF — see below).
+
+`make quality` and CI additionally enforce `staticcheck`, `deadcode -test`,
+`dupl`, a production cyclomatic-complexity ceiling of 15, `govulncheck`, and
+`go mod tidy -diff`.
+Keep genuinely domain-heavy code decomposed into named helpers instead of
+raising those budgets.
 
 For dashboard/UI changes, the finish bar is higher:
 
@@ -203,7 +214,7 @@ environment:
 
 ## Conventions
 
-- **Language:** Go 1.23+ for all binaries; C (CO-RE) for the eBPF program;
+- **Language:** Go 1.25+ for all binaries; C (CO-RE) for the eBPF program;
   TypeScript + React for the dashboard.
 - **Go style:** standard `gofmt`; errors wrapped with `fmt.Errorf("...: %w", err)`;
   no naked `panic` in library code. Keep `internal/model` dependency-free — it is
@@ -259,7 +270,7 @@ prefix tries. New `EventType` deny values (`EVENT_DENY_*`) mirror in
 `internal/model/types.go` in the same commit; they are enum values on the
 existing `type` field, not layout changes (`types_test.go` stays unedited).
 Denied events skip fingerprint learning; ring-buffer reader stays non-blocking.
-Live proof requires human `sudo make e2e` on an LSM kernel — see
+Live proof requires `sudo make e2e` or `make docker-e2e` on an LSM kernel — see
 `docs/enforcement.md`. Collector verdicts stay keyed by service; sensors expand
 them into composite `{cgroup_id, literal}` keys only for matching local pod
 cgroups. Detection resolves relative paths, dirfds, and symlinks through the
@@ -304,6 +315,10 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
   Fix the C and Go structs so they match.
 - Do not make attribution guessier to reduce `<unknown>` results. A wrong package
   name is worse than an unknown package.
+- Do not treat a ClawHub skill directory as an npm package. OpenClaw accepts
+  only `SKILL.md`, `skill.md`, `skills.md`, or `SKILL.MD` as card markers;
+  `PathToOpenClawSkill` also requires valid `.clawhub/origin.json` plus a
+  matching workspace lock before returning `@owner/slug@version`.
 - Do not read `/tmp/perf-<pid>.map` directly from the host namespace. Goodman
   reads `/proc/<pid>/root/tmp/perf-<pid>.map` so containerized workloads resolve
   against their own mount namespace.
@@ -352,8 +367,12 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 
 - Do not treat `make smoke` as redundant. It catches real collector, store,
   fingerprint, diff, API, and alert behavior without root.
-- Do not claim live eBPF coverage if `sudo make e2e` did not run. Say clearly
-  when only the no-root test path was verified.
+- Do not claim live eBPF coverage unless `sudo make e2e` or `make docker-e2e`
+  ran. The Docker path must retain host PID/cgroup namespaces and explicit
+  tracefs, debugfs, and securityfs mounts; otherwise it is not the same proof.
+- The local e2e sensor watches every supported Node/Python process on the host,
+  so unrelated services can produce alerts during a run. Scope assertions to
+  the workload service/package instead of requiring a globally empty collector.
 - Keep enforcement programs in their separate load/attach path. An LSM verifier
   or attach failure must close only LSM resources and leave syscall/fork
   detection attached.
@@ -362,12 +381,19 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 - Keep `demo_build/go.mod` even though the Remotion demo contains no Go code. It
   is a module boundary that stops root `go test ./...` from traversing npm
   dependencies that happen to ship Go source files.
+- `demo_build/` has one renderer: the Remotion composition backed by the real
+  Chromium walkthrough. Do not reintroduce the retired static screenshot or
+  slideshow pipeline; run `npm audit --audit-level=moderate && npm run check`
+  there when its source or lockfile changes.
 - Do not commit stale Vite hashed assets. If `dashboard/dist` changes, old hashed
   files in `internal/api/ui/dist/assets/` should usually disappear and new ones
   should appear.
 - Do not change repo scripts just because a local agent/container lacks a tool.
   For example, use `grep` locally if `rg` is missing, but do not weaken project
   tooling for that environment.
+- Keep the sensor image multi-architecture. Its BPF target must be derived from
+  Docker's `TARGETARCH` (`amd64` -> `x86`, `arm64` -> `arm64`); never hard-code
+  `__TARGET_ARCH_x86` in `deploy/docker/sensor.Dockerfile`.
 
 ### Known non-bugs
 
@@ -378,7 +404,8 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 - Live e2e chooses dynamic collector/workload/sink ports by default. For a
   port-sensitive reproduction, set `GOODMAN_E2E_COLLECTOR_PORT`,
   `GOODMAN_E2E_WORKLOAD_PORT`, or `GOODMAN_E2E_SINK_PORT`.
-- Node may report its process comm as `node`, `nodejs`, or `MainThread`. Keep
+- Node may report its process comm as `node`, `nodejs`, or `MainThread`.
+  Current OpenClaw Gateways use `openclaw-gatewa` after Linux truncation. Keep
   those names covered when changing watch logic.
 - Simple headless screenshot commands may hang on pages with SSE. Use bounded
   browser automation that waits for rendered DOM text, captures, then exits.
@@ -390,9 +417,9 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 | Doc | Purpose |
 |---|---|
 | [`docs/getting-started.md`](docs/getting-started.md) | Local setup, first run, first alert |
-| [`docs/devpost.md`](docs/devpost.md) | Hackathon / judge paste blocks (voice + verify steps) |
 | [`docs/architecture.md`](docs/architecture.md) | Components, data flow, design decisions |
 | [`docs/attribution.md`](docs/attribution.md) | Why npm/PyPI first; stack→package (Tier 1; Tier 2 PARK) |
+| [`docs/openclaw.md`](docs/openclaw.md) | OpenClaw host/Kubernetes setup and ClawHub attribution boundary |
 | [`docs/enforcement.md`](docs/enforcement.md) | Optional LSM block mode (fail-open, off by default) |
 | [`docs/pilot-runbook.md`](docs/pilot-runbook.md) | Pilot install, noise, digest, rollback |
 | [`docs/release.md`](docs/release.md) | Release gate checklist |

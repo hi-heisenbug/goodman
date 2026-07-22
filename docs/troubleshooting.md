@@ -17,7 +17,7 @@ headers, `sudo apt-get install -y libbpf-dev` and add `-I /usr/include` to the
 compile.
 
 **`go build` complains about the Go version**
-The module targets Go 1.23+. `go version` must be ≥ 1.23.
+The module targets Go 1.25+. `go version` must be ≥ 1.25.
 
 ## Sensor won't start
 

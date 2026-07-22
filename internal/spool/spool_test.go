@@ -22,9 +22,6 @@ func TestSpoolRetryDrain(t *testing.T) {
 	if len(got) != 2 || s.Len() != 0 {
 		t.Fatalf("take=%d remain=%d", len(got), s.Len())
 	}
-	if s.Dropped() != 0 {
-		t.Fatalf("dropped=%d", s.Dropped())
-	}
 }
 
 func TestSpoolEvictsOldest(t *testing.T) {
@@ -37,8 +34,5 @@ func TestSpoolEvictsOldest(t *testing.T) {
 	got := s.TakeAll()
 	if len(got) != 3 || got[0].Timestamp != 3 || got[2].Timestamp != 5 {
 		t.Fatalf("got=%v", got)
-	}
-	if s.Dropped() != 2 {
-		t.Fatalf("dropped=%d", s.Dropped())
 	}
 }

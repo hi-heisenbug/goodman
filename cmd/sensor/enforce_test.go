@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"net/url"
 	"testing"
 
 	"github.com/hi-heisenbug/goodman/internal/enforce"
@@ -12,6 +13,13 @@ type fakeEnforcementLoader struct {
 	failNext bool
 	scopes   map[uint64]string
 	verdicts enforce.ServiceVerdicts
+}
+
+func TestEnforcementSensorQueryValueUsesStandardEscaping(t *testing.T) {
+	value := "node a&zone=west/1"
+	if got, want := urlQueryEscape(value), url.QueryEscape(value); got != want {
+		t.Fatalf("urlQueryEscape(%q) = %q, want %q", value, got, want)
+	}
 }
 
 func (f *fakeEnforcementLoader) ReconcileEnforcement(scopes map[uint64]string, verdicts enforce.ServiceVerdicts) error {

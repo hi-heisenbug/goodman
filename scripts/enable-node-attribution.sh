@@ -7,7 +7,9 @@ SELECTOR=""
 PATCH_ALL=0
 DRY_RUN=0
 NODE_OPTIONS_VALUE="${GOODMAN_NODE_OPTIONS:---perf-basic-prof-only-functions --interpreted-frames-native-stack}"
+SERVICE="${GOODMAN_SERVICE:-openclaw}"
 RESOURCES=()
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<'EOF'
@@ -20,7 +22,8 @@ Options:
   --namespace, -n NAME   Workload namespace (default: default)
   --selector, -l LABEL   Patch Deployments matching a label selector
   --all                  Patch every Deployment in the namespace
-  --dry-run              Print the kubectl command without applying it
+  --service NAME         Set GOODMAN_SERVICE while patching (default: openclaw)
+  --dry-run              Print the planned patches without applying them
   -h, --help             Show this help
 
 Examples:
@@ -34,7 +37,8 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --namespace|-n) NAMESPACE="$2"; shift 2 ;;
     --selector|-l) SELECTOR="$2"; shift 2 ;;
-    --all) PATCH_ALL=1; shift ;;
+		--all) PATCH_ALL=1; shift ;;
+		--service) SERVICE="$2"; shift 2 ;;
     --dry-run) DRY_RUN=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) echo "unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -53,34 +57,58 @@ if [[ "$TARGET_COUNT" -ne 1 ]]; then
   exit 2
 fi
 
-CMD=(kubectl -n "$NAMESPACE" set env)
-if [[ "$PATCH_ALL" -eq 1 ]]; then
-  CMD+=(deployment --all)
-elif [[ -n "$SELECTOR" ]]; then
-  CMD+=(deployment -l "$SELECTOR")
-else
-  CMD+=("${RESOURCES[@]}")
-fi
-CMD+=("NODE_OPTIONS=$NODE_OPTIONS_VALUE")
-
 if [[ "$DRY_RUN" -eq 1 ]]; then
-  printf '%q ' "${CMD[@]}"
-  printf '\n'
-  exit 0
+	echo "Would patch selected Deployments without replacing existing NODE_OPTIONS:"
+	if [[ "$PATCH_ALL" -eq 1 ]]; then
+		printf '  kubectl -n %q get deployment --all -o name\n' "$NAMESPACE"
+	elif [[ -n "$SELECTOR" ]]; then
+		printf '  kubectl -n %q get deployment -l %q -o name\n' "$NAMESPACE" "$SELECTOR"
+	else
+		printf '  %q\n' "${RESOURCES[@]}"
+	fi
+	printf '  append NODE_OPTIONS=%q\n' "$NODE_OPTIONS_VALUE"
+	printf '  set GOODMAN_SERVICE=%q\n' "$SERVICE"
+	exit 0
 fi
 
 if ! command -v kubectl >/dev/null 2>&1; then
-  echo "kubectl is required." >&2
-  exit 1
+	echo "kubectl is required." >&2
+	exit 1
+fi
+if ! command -v python3 >/dev/null 2>&1; then
+	echo "python3 is required to preserve existing Deployment environment values." >&2
+	exit 1
 fi
 
-"${CMD[@]}"
+TARGETS=()
+if [[ "$PATCH_ALL" -eq 1 ]]; then
+	mapfile -t TARGETS < <(kubectl -n "$NAMESPACE" get deployment -o name)
+elif [[ -n "$SELECTOR" ]]; then
+	mapfile -t TARGETS < <(kubectl -n "$NAMESPACE" get deployment -l "$SELECTOR" -o name)
+else
+	TARGETS=("${RESOURCES[@]}")
+fi
+if [[ "${#TARGETS[@]}" -eq 0 ]]; then
+	echo "no Deployments matched the requested OpenClaw target" >&2
+	exit 1
+fi
+
+for resource in "${TARGETS[@]}"; do
+	deployment_json="$(kubectl -n "$NAMESPACE" get "$resource" -o json)"
+	patch="$(python3 "$SCRIPT_DIR/merge-k8s-node-env.py" "$NODE_OPTIONS_VALUE" "$SERVICE" <<<"$deployment_json")"
+	if [[ "$patch" == "[]" ]]; then
+		echo "$resource already has Goodman Node attribution enabled."
+		continue
+	fi
+	kubectl -n "$NAMESPACE" patch "$resource" --type=json -p "$patch"
+done
 
 cat <<EOF
 
 Node attribution enabled for the selected Deployment(s).
 Kubernetes will roll new pods with:
   NODE_OPTIONS=${NODE_OPTIONS_VALUE}
+  GOODMAN_SERVICE=${SERVICE}
 
 Watch rollout:
   kubectl -n ${NAMESPACE} rollout status deployment --selector='<same selector>'

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Oversized collector, sensor, CLI, loader, API, and store modules are split by
+  responsibility; production complexity, duplicate code, dead code, static
+  analysis, vulnerabilities, and module tidiness now have one `make quality`
+  gate enforced by CI.
+- The demo-video workspace now uses one canonical Remotion/Chromium pipeline
+  and a patched, audit-clean ESLint dependency chain.
+- The minimum Go version is now 1.25 so Goodman can use patched pgx and
+  `x/text` releases for reachable SQL-sanitization and text-processing
+  vulnerabilities; setup, CI, and container builders were updated together.
 - Enforcement verdicts are isolated per service and local cgroup through
   composite BPF keys; sibling services on the same node no longer share deny
   literals.
@@ -23,6 +32,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Portable one-command setup: `scripts/setup-everything.sh` selects local Go or
+  Docker for the no-root demo and can install supported Linux prerequisites,
+  optionally install OpenClaw, configure its user systemd service, and run both
+  live eBPF proofs.
+- Portable binaries now cross-build for macOS and Windows on amd64/arm64, and
+  `make docker-e2e` runs both real-kernel proofs from a disposable privileged
+  Linux container with the required host kernel filesystems mounted explicitly.
+- OpenClaw integration: `scripts/integrate-openclaw.sh` creates a Tier-1 Node
+  launcher and stable service config, supports optional user-local installation,
+  persistent user systemd setup, and safe Kubernetes patches that preserve
+  existing `NODE_OPTIONS`.
+- Versioned ClawHub skill attribution from JavaScript stack frames backed by a
+  ClawHub-accepted skill card marker plus matching `.clawhub/origin.json` and
+  workspace lock metadata, plus an OpenClaw-shaped demo/replay and real eBPF
+  contract test.
+- `GET /v1/snapshot` and `goodmanctl snapshot` expose open alerts and
+  fingerprints as the stable `goodman.snapshot/v1` bundle for SIEM and agent
+  consumers.
+- `GET /v1/export` and `goodmanctl export` expose every alert state, all
+  fingerprints, persisted reachability, coverage, enforcement, and the explicit
+  live-event delivery contract as `goodman.export/v1`.
+- The default sensor watch list includes the current OpenClaw Gateway Linux comm
+  (`openclaw-gatewa`).
 - True HA collector (deferred Phase 5): `GOODMAN_HA_REPLICAS` / `-ha-replicas`
   with Postgres required when `>1`; `store.WithLeader` Postgres advisory locks
   for retention/reachability/digest loops; transactional `UpsertAlert` with
@@ -70,7 +102,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`-digest-interval`, Helm `notifications.digestInterval=168h`), and Slack
   alert messages enriched with matched rules, sensor, first-seen times, and
   dashboard deep links (`-public-url`).
-- Five-minute product wow (`make demo` / `goodmanctl demo` / `make demo-check`):
+- Five-minute product wow (`make demo` / `goodman-demo` / `make demo-check`):
   seeds alerts and fingerprints, preloads Reachability at 1,400 declared /
   240 executed, prints a 60-second guided script, then live-replays the
   2026 Mini-Shai-Hulud behavior profile with rule chips. README
@@ -134,15 +166,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Store unit tests covering fingerprints, baseline lookup, alert
   merge/escalation, status transitions, and retention pruning.
 
-### Changed
-
-### Deprecated
-
 ### Removed
+
+- The unused static screenshot/slideshow demo pipeline and redundant demo shell
+  wrapper were removed; the real interactive walkthrough is the sole source.
 
 ### Fixed
 
-### Security
+- Sensor enforcement polling now URL-escapes arbitrary node names correctly.
+- Portable demo clients connect through loopback when the server binds a
+  wildcard address, including valid bracketed IPv6 URLs.
+- The production sensor image derives its eBPF target from Docker
+  `TARGETARCH`, so amd64 and arm64 builds no longer share an x86-only object.
 
 ## [0.1.0] - 2026-07-08
 

@@ -89,7 +89,7 @@ Recorded design — now implemented except the dockerized two-replica proof.
 |---|---|---|
 | N replicas | `collector.replicas: N` behind the existing Service; **Postgres required** — fail fast at startup when replicas>1 is implied and the DSN is SQLite (single-writer by design, stays the single-replica path) | **Shipped** — Helm guard, `GOODMAN_HA_REPLICAS`, collector fatals on SQLite+N>1 |
 | Concurrent ingest | 5a's `MergeFingerprint` already correct cross-replica on Postgres (`FOR UPDATE`); `UpsertAlert` transactional merge keyed on deterministic `alertID` | **Shipped** — create-race retry loop in `UpsertAlert`; concurrency test on SQLite |
-| Singleton background loops | `pruneLoop`, `reachabilityLoop`, `digestLoop` (`cmd/collector/main.go`) must not double-fire (double webhooks/digests). Postgres advisory-lock leader election — no new dependency | **Shipped** — `store.WithLeader`, lock keys 1/2/3 |
+| Singleton background loops | `pruneLoop`, `reachabilityLoop`, `digestLoop` (`cmd/collector/maintenance.go`) must not double-fire (double webhooks/digests). Postgres advisory-lock leader election — no new dependency | **Shipped** — `store.WithLeader`, lock keys 1/2/3 |
 | SSE | per-replica streams: a client sees events ingested by *its* replica only. Acceptable as a documented round-one limitation (the dashboard polls REST for state; SSE is live flavor) | **Shipped (docs)** — `docs/deployment.md` HA section |
 | readyz | unchanged semantics (DB ping) work per-replica already | **Shipped** |
 | Migrations | `migrate()` already tolerates concurrent replica startup (`ON CONFLICT (name) DO NOTHING` on `schema_migrations`) — verify with a two-replica startup test | **Shipped** (codepath); explicit two-replica startup test not added |

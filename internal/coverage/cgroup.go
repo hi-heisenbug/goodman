@@ -1,14 +1,11 @@
 package coverage
 
 import (
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 const EnforceLabelKey = "goodman.io/enforce"
@@ -39,14 +36,6 @@ func CgroupIDsForPodUID(cgroupRoot, podUID string) ([]uint64, error) {
 		return nil
 	})
 	return ids, err
-}
-
-func cgroupDirID(path string) (uint64, error) {
-	var st syscall.Stat_t
-	if err := syscall.Stat(path, &st); err != nil {
-		return 0, err
-	}
-	return st.Ino, nil
 }
 
 // ScanEnforcedCgroups lists enforce-labeled namespaces and resolves each local
@@ -97,40 +86,7 @@ func buildEnforcedCgroupScopes(
 }
 
 func listNamespaceEnforceLabels(client *http.Client) (map[string]bool, error) {
-	base, token, err := apiBase()
-	if err != nil {
-		return nil, err
-	}
-	req, err := http.NewRequest(http.MethodGet, base+"/api/v1/namespaces", nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
-		return nil, fmt.Errorf("list namespaces: %s: %s", resp.Status, b)
-	}
-	var list struct {
-		Items []struct {
-			Metadata struct {
-				Name   string            `json:"name"`
-				Labels map[string]string `json:"labels"`
-			} `json:"metadata"`
-		} `json:"items"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
-		return nil, err
-	}
-	out := map[string]bool{}
-	for _, ns := range list.Items {
-		out[ns.Metadata.Name] = ns.Metadata.Labels[EnforceLabelKey] == "enabled"
-	}
-	return out, nil
+	return listNamespaceLabelState(client, EnforceLabelKey)
 }
 
 type podRowWithUID struct {
@@ -148,25 +104,6 @@ func (p podRowWithUID) serviceName() string {
 }
 
 func listNodePodsWithUID(client *http.Client, nodeName string) ([]podRowWithUID, error) {
-	base, token, err := apiBase()
-	if err != nil {
-		return nil, err
-	}
-	url := base + "/api/v1/pods?fieldSelector=spec.nodeName%3D" + nodeName
-	req, err := http.NewRequest(http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(io.LimitReader(resp.Body, 2<<10))
-		return nil, fmt.Errorf("list pods: %s: %s", resp.Status, b)
-	}
 	var list struct {
 		Items []struct {
 			Metadata struct {
@@ -179,7 +116,8 @@ func listNodePodsWithUID(client *http.Client, nodeName string) ([]podRowWithUID,
 			} `json:"spec"`
 		} `json:"items"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&list); err != nil {
+	path := "/api/v1/pods?fieldSelector=spec.nodeName%3D" + nodeName
+	if err := getKubernetesJSON(client, path, "list pods", &list); err != nil {
 		return nil, err
 	}
 	out := make([]podRowWithUID, 0, len(list.Items))
@@ -228,24 +166,4 @@ func ResolveExplicitCgroupScopes(entries []string) (map[uint64]string, error) {
 		}
 	}
 	return out, nil
-}
-
-// ResolveCgroupPaths resolves explicit cgroup2 directory paths to ids (e2e/lab).
-func ResolveCgroupPaths(paths []string) map[uint64]bool {
-	out := map[uint64]bool{}
-	for _, p := range paths {
-		if p == "" {
-			continue
-		}
-		_ = filepath.WalkDir(p, func(path string, d os.DirEntry, err error) error {
-			if err != nil || !d.IsDir() {
-				return nil
-			}
-			if id, err := cgroupDirID(path); err == nil {
-				out[id] = true
-			}
-			return nil
-		})
-	}
-	return out
 }

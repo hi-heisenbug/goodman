@@ -66,6 +66,9 @@ func (r *Resolver) Forget(pid int) {
 	r.mu.Lock()
 	delete(r.pids, pid)
 	r.mu.Unlock()
+	// Package and ClawHub metadata caches include /proc/<pid>/root paths. Clear
+	// them before Linux can reuse the pid for a different filesystem/process.
+	FlushVersionCache()
 }
 
 // perf map symbols embed the JS source location, e.g.
@@ -134,83 +137,13 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 	pid := int(ev.PID)
 	st := r.state(pid)
 	eventType := model.EventType(ev.Type)
-	rawArg := ev.ArgString()
-	packagePath := rawArg
-	behaviorArg := rawArg
-	if eventType == model.EventFileOpen || eventType == model.EventProcExec {
-		if resolved, ok := resolveProcessPath(r.procRoot, pid, ev.DirFD, rawArg); ok {
-			packagePath = resolved
-			behaviorArg = resolved
-		} else {
-			behaviorArg = unresolvedPath(resolved)
-		}
-	}
-
-	pkg, version := "", ""
-	appSource := ""
-	refreshContext := false
-	// stack[0] is the innermost (deepest) frame. The first frame that
-	// resolves into a node_modules path is the deepest actor.
-	for _, addr := range ev.UserStack() {
-		var src string
-		if sym, ok := st.perf.Lookup(addr); ok {
-			s, ok := sourcePathOf(sym)
-			if !ok {
-				continue // builtin / stub / RegExp — no source location
-			}
-			src = s
-		} else if m, ok := st.maps.Lookup(addr); ok && (strings.Contains(m.Path, "/node_modules/") ||
-			strings.Contains(m.Path, "/site-packages/") ||
-			strings.Contains(m.Path, "/dist-packages/")) {
-			src = m.Path // native extension inside a dependency tree
-		} else {
-			continue
-		}
-		if strings.Contains(src, "/node_modules/") {
-			if p, v, ok := PathToPackage(st.pidRoot, src); ok {
-				pkg, version = p, v
-			} else {
-				// node_modules frame but unreadable package.json: attribute
-				// the package name without version rather than guessing.
-				if p, _, _ := splitNodeModules(src); p != "" {
-					pkg, version = p, ""
-				}
-			}
-			refreshContext = pkg != ""
-			break
-		}
-		if strings.Contains(src, "/site-packages/") || strings.Contains(src, "/dist-packages/") {
-			if p, v, ok := PathToPyPackage(st.pidRoot, src); ok {
-				pkg, version = p, v
-			} else if ir, _, _, ok := splitSitePackages(src); ok && ir != "" {
-				pkg, version = ir, ""
-			}
-			refreshContext = pkg != ""
-			break
-		}
-		if appSource == "" && !strings.HasPrefix(src, "node:") {
-			appSource = src
-		}
-	}
+	packagePath, behaviorArg := resolveEventPaths(r.procRoot, pid, ev, eventType)
+	pkg, version, appSource := resolveStackIdentity(st, ev.UserStack())
+	refreshContext := pkg != ""
 	if pkg == "" {
-		if p, v, ok := packageFromOpenedPath(st.pidRoot, eventType, packagePath); ok {
-			pkg, version = p, v
-			refreshContext = true
-		} else if appSource != "" {
-			pkg = "<app>" // application's own code, not a dependency
-			version = appVersion(st.pidRoot, appSource)
-		} else if ev.TID != 0 && contextEligible(ev) {
-			if ctx, ok := st.threadContext[ev.TID]; ok && ev.Timestamp >= ctx.timestamp &&
-				ev.Timestamp-ctx.timestamp <= uint64(packageContextTTL) {
-				pkg, version = ctx.pkg, ctx.version
-			} else {
-				pkg = "<unknown>"
-			}
-		} else {
-			pkg = "<unknown>"
-		}
+		pkg, version, refreshContext = fallbackIdentity(st, ev, eventType, packagePath, appSource)
 	}
-	if refreshContext && ev.TID != 0 && pkg != "" && pkg != "<app>" && pkg != "<unknown>" {
+	if refreshContext && isDependencyIdentity(ev.TID, pkg) {
 		rememberPackageContext(st, ev.TID, packageContext{pkg: pkg, version: version, timestamp: ev.Timestamp})
 	}
 
@@ -222,6 +155,100 @@ func (r *Resolver) Attribute(ev *model.RawEvent, bootToUnixNs uint64) model.Attr
 		Behavior:  CanonicalizeWith(eventType, behaviorArg, r.ConnectCIDRBits),
 		Timestamp: ev.Timestamp + bootToUnixNs,
 	}
+}
+
+func resolveEventPaths(procRoot string, pid int, ev *model.RawEvent, eventType model.EventType) (string, string) {
+	raw := ev.ArgString()
+	if eventType != model.EventFileOpen && eventType != model.EventProcExec {
+		return raw, raw
+	}
+	resolved, ok := resolveProcessPath(procRoot, pid, ev.DirFD, raw)
+	if ok {
+		return resolved, resolved
+	}
+	return raw, unresolvedPath(resolved)
+}
+
+func resolveStackIdentity(st *pidState, stack []uint64) (string, string, string) {
+	appSource := ""
+	// stack[0] is the innermost frame, so the first dependency source is the
+	// deepest actor and the only safe package identity for this event.
+	for _, addr := range stack {
+		source, ok := frameSource(st, addr)
+		if !ok {
+			continue
+		}
+		if pkg, version, ok := packageFromSource(st.pidRoot, source); ok {
+			return pkg, version, appSource
+		}
+		if appSource == "" && !strings.HasPrefix(source, "node:") {
+			appSource = source
+		}
+	}
+	return "", "", appSource
+}
+
+func frameSource(st *pidState, addr uint64) (string, bool) {
+	if symbol, ok := st.perf.Lookup(addr); ok {
+		return sourcePathOf(symbol)
+	}
+	mapping, ok := st.maps.Lookup(addr)
+	if !ok || !isDependencyPath(mapping.Path) {
+		return "", false
+	}
+	return mapping.Path, true
+}
+
+func packageFromSource(pidRoot, source string) (string, string, bool) {
+	if strings.Contains(source, "/node_modules/") {
+		if pkg, version, ok := PathToPackage(pidRoot, source); ok {
+			return pkg, version, true
+		}
+		pkg, _, _ := splitNodeModules(source)
+		return pkg, "", true
+	}
+	if strings.Contains(source, "/site-packages/") || strings.Contains(source, "/dist-packages/") {
+		if pkg, version, ok := PathToPyPackage(pidRoot, source); ok {
+			return pkg, version, true
+		}
+		pkg, _, _, _ := splitSitePackages(source)
+		return pkg, "", true
+	}
+	return PathToOpenClawSkill(pidRoot, source)
+}
+
+func isDependencyPath(path string) bool {
+	return strings.Contains(path, "/node_modules/") ||
+		strings.Contains(path, "/site-packages/") ||
+		strings.Contains(path, "/dist-packages/")
+}
+
+func fallbackIdentity(st *pidState, ev *model.RawEvent, eventType model.EventType, packagePath, appSource string) (string, string, bool) {
+	if pkg, version, ok := packageFromOpenedPath(st.pidRoot, eventType, packagePath); ok {
+		return pkg, version, true
+	}
+	if appSource != "" {
+		return "<app>", appVersion(st.pidRoot, appSource), false
+	}
+	if context, ok := recentPackageContext(st, ev); ok {
+		return context.pkg, context.version, false
+	}
+	return "<unknown>", "", false
+}
+
+func recentPackageContext(st *pidState, ev *model.RawEvent) (packageContext, bool) {
+	if ev.TID == 0 || !contextEligible(ev) {
+		return packageContext{}, false
+	}
+	context, ok := st.threadContext[ev.TID]
+	if !ok || ev.Timestamp < context.timestamp || ev.Timestamp-context.timestamp > uint64(packageContextTTL) {
+		return packageContext{}, false
+	}
+	return context, true
+}
+
+func isDependencyIdentity(tid uint32, pkg string) bool {
+	return tid != 0 && pkg != "" && pkg != "<app>" && pkg != "<unknown>"
 }
 
 func rememberPackageContext(st *pidState, tid uint32, next packageContext) {
@@ -258,6 +285,11 @@ func packageFromOpenedPath(pidRoot string, eventType model.EventType, path strin
 		}
 		if ir, _, _, ok := splitSitePackages(path); ok && ir != "" {
 			return ir, "", true
+		}
+	}
+	if strings.Contains(path, "/skills/") {
+		if p, v, ok := PathToOpenClawSkill(pidRoot, path); ok {
+			return p, v, true
 		}
 	}
 	return "", "", false
@@ -308,14 +340,13 @@ func appVersion(pidRoot, srcPath string) string {
 // the HOSTNAME env var when running under a kubepods cgroup, else the
 // process's working directory basename (local dev).
 func detectService(procRoot string, pid int) string {
+	if service := processEnvValue(procRoot, pid, "GOODMAN_SERVICE"); service != "" {
+		return service
+	}
 	cg, _ := os.ReadFile(fmt.Sprintf("%s/%d/cgroup", procRoot, pid))
 	if strings.Contains(string(cg), "kubepods") {
-		if env, err := os.ReadFile(fmt.Sprintf("%s/%d/environ", procRoot, pid)); err == nil {
-			for _, kv := range strings.Split(string(env), "\x00") {
-				if v, ok := strings.CutPrefix(kv, "HOSTNAME="); ok && v != "" {
-					return v
-				}
-			}
+		if hostname := processEnvValue(procRoot, pid, "HOSTNAME"); hostname != "" {
+			return hostname
 		}
 	}
 	if cwd, err := os.Readlink(fmt.Sprintf("%s/%d/cwd", procRoot, pid)); err == nil {
@@ -324,4 +355,18 @@ func detectService(procRoot string, pid int) string {
 		}
 	}
 	return fmt.Sprintf("pid-%d", pid)
+}
+
+func processEnvValue(procRoot string, pid int, key string) string {
+	env, err := os.ReadFile(fmt.Sprintf("%s/%d/environ", procRoot, pid))
+	if err != nil {
+		return ""
+	}
+	prefix := key + "="
+	for _, entry := range strings.Split(string(env), "\x00") {
+		if value, ok := strings.CutPrefix(entry, prefix); ok {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }

@@ -9,22 +9,10 @@ import (
 	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
-// Canonicalize maps a raw syscall argument to a stable behavior string so
-// the same logical behavior always produces the same fingerprint entry.
-//
-//	FILE_OPEN  -> "READ /app/src/routes/**"      (dir-collapsed)
-//	           -> "READ /var/run/secrets/k8s.io/token"  (sensitive: verbatim)
-//	NET_CONNECT-> "CONNECT 1.2.3.4:443"
-//	PROC_EXEC  -> "EXEC /usr/bin/curl"
-func Canonicalize(t model.EventType, arg string) string {
-	return CanonicalizeWith(t, arg, 0)
-}
-
-// CanonicalizeWith is Canonicalize with optional public-IP aggregation for
-// CONNECT behaviors. connectCIDRBits > 0 collapses public destination IPs to
-// that IPv4 prefix (e.g. 16 -> "CONNECT 52.84.0.0/16:443") so CDN and DNS
-// rotation across an address range does not explode the behavior set. Private,
-// loopback, link-local, and cloud-metadata addresses always stay verbatim.
+// CanonicalizeWith maps a raw syscall argument to a stable behavior string.
+// connectCIDRBits > 0 collapses public destination IPs to that IPv4 prefix
+// (for example, 16 -> "CONNECT 52.84.0.0/16:443"). Private, loopback,
+// link-local, and cloud-metadata addresses always stay verbatim.
 func CanonicalizeWith(t model.EventType, arg string, connectCIDRBits int) string {
 	switch t {
 	case model.EventFileOpen:

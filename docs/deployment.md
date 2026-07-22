@@ -5,7 +5,7 @@ Goodman deploys as a privileged **DaemonSet** (the sensor, one per node) plus a
 
 ## Prerequisites
 
-- A Kubernetes cluster whose nodes run **Linux x86-64, kernel ≥ 5.8 with BTF**.
+- A Kubernetes cluster whose nodes run **Linux x86-64 or arm64, kernel ≥ 5.8 with BTF**.
 - Nodes must allow privileged pods (the sensor loads eBPF).
 - `helm` ≥ 3.
 
@@ -80,7 +80,8 @@ Patch every Deployment in a namespace:
 scripts/enable-node-attribution.sh --namespace checkout --all
 ```
 
-The Helm install NOTES also print the raw `kubectl set env` commands (toggle
+The helper merges literal `NODE_OPTIONS` values and rejects `valueFrom` instead
+of overwriting it. Helm install notes point to the same safe commands (toggle
 with `attribution.requireNodeOptions`). Tier-2 in-kernel V8 unwinding will
 remove the flag entirely.
 

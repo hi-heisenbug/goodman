@@ -102,6 +102,207 @@ func TestListAlertsSupportsPagination(t *testing.T) {
 	}
 }
 
+func TestSnapshotReturnsOpenAlertsAndFingerprints(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "snapshot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	for _, fp := range []*model.Fingerprint{
+		{
+			Service: "openclaw", Package: "@goodman-demo/calendar-sync", Version: "1.2.2",
+			Behaviors:  map[string]model.BehaviorStat{"READ /skill/SKILL.md": {Count: 4}},
+			IsBaseline: true,
+		},
+		{
+			Service: "openclaw", Package: "@goodman-demo/calendar-sync", Version: "1.2.3",
+			Behaviors: map[string]model.BehaviorStat{"READ /home/openclaw/.openclaw/credentials.json": {Count: 1}},
+		},
+	} {
+		if err := st.UpsertFingerprint(ctx, fp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, alert := range []*model.Alert{
+		{
+			ID: "open-alert", Service: "openclaw", Package: "@goodman-demo/calendar-sync",
+			OldVersion: "1.2.2", NewVersion: "1.2.3", Severity: model.SeverityCritical,
+			NewBehaviors: []string{"READ /home/openclaw/.openclaw/credentials.json"},
+			DetectedAt:   2, Status: model.AlertOpen,
+		},
+		{
+			ID: "resolved-alert", Service: "web", Package: "old-pkg", NewVersion: "2.0.0",
+			Severity: model.SeverityWarn, NewBehaviors: []string{"CONNECT 203.0.113.1:443"},
+			DetectedAt: 1, Status: model.AlertResolved,
+		},
+	} {
+		if _, err := st.UpsertAlert(ctx, alert); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/v1/snapshot", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var snapshot struct {
+		Schema       string              `json:"schema"`
+		GeneratedAt  uint64              `json:"generated_at"`
+		Alerts       []model.Alert       `json:"alerts"`
+		Fingerprints []model.Fingerprint `json:"fingerprints"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.Schema != "goodman.snapshot/v1" || snapshot.GeneratedAt == 0 {
+		t.Fatalf("bad snapshot envelope: %+v", snapshot)
+	}
+	if len(snapshot.Alerts) != 1 || snapshot.Alerts[0].ID != "open-alert" {
+		t.Fatalf("alerts = %+v, want only open-alert", snapshot.Alerts)
+	}
+	if !sameStrings(snapshot.Alerts[0].BaselineBehaviors, []string{"READ /skill/SKILL.md"}) {
+		t.Fatalf("snapshot alert baseline = %v", snapshot.Alerts[0].BaselineBehaviors)
+	}
+	if len(snapshot.Fingerprints) != 2 {
+		t.Fatalf("fingerprints = %d, want 2", len(snapshot.Fingerprints))
+	}
+}
+
+func TestSnapshotUsesEmptyArrays(t *testing.T) {
+	st, err := store.Open(filepath.Join(t.TempDir(), "empty-snapshot.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/v1/snapshot", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	if body := rec.Body.String(); !strings.Contains(body, `"alerts":[]`) || !strings.Contains(body, `"fingerprints":[]`) {
+		t.Fatalf("snapshot must use empty arrays: %s", body)
+	}
+}
+
+func TestExportReturnsAllPersistedState(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "export-all.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	if err := st.UpsertFingerprint(ctx, &model.Fingerprint{
+		Service: "openclaw", Package: "@goodman-demo/calendar-sync", Version: "1.2.3",
+		Behaviors: map[string]model.BehaviorStat{"READ /workspace/credentials": {Count: 1}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, alert := range []*model.Alert{
+		{ID: "open", Service: "openclaw", Package: "skill", Severity: model.SeverityCritical, DetectedAt: 2, Status: model.AlertOpen},
+		{ID: "resolved", Service: "openclaw", Package: "skill", Severity: model.SeverityWarn, DetectedAt: 1, Status: model.AlertResolved},
+	} {
+		if _, err := st.UpsertAlert(ctx, alert); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := st.SaveReport(ctx, "openclaw", `{"service":"openclaw","declared_count":1,"executed_count":1}`, false, 3); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/v1/export", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var exported struct {
+		Schema       string              `json:"schema"`
+		GeneratedAt  uint64              `json:"generated_at"`
+		Alerts       []model.Alert       `json:"alerts"`
+		Fingerprints []model.Fingerprint `json:"fingerprints"`
+		Reachability []struct {
+			Service string `json:"service"`
+		} `json:"reachability"`
+		Coverage    json.RawMessage `json:"coverage"`
+		Enforcement json.RawMessage `json:"enforcement"`
+		Live        struct {
+			EventsPersisted bool   `json:"events_persisted"`
+			Stream          string `json:"stream"`
+			Delivery        string `json:"delivery"`
+		} `json:"live"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &exported); err != nil {
+		t.Fatal(err)
+	}
+	if exported.Schema != "goodman.export/v1" || exported.GeneratedAt == 0 {
+		t.Fatalf("bad export envelope: %+v", exported)
+	}
+	if len(exported.Alerts) != 2 || len(exported.Fingerprints) != 1 {
+		t.Fatalf("export counts: alerts=%d fingerprints=%d", len(exported.Alerts), len(exported.Fingerprints))
+	}
+	if len(exported.Reachability) != 1 || exported.Reachability[0].Service != "openclaw" {
+		t.Fatalf("reachability = %+v", exported.Reachability)
+	}
+	if len(exported.Coverage) == 0 || len(exported.Enforcement) == 0 {
+		t.Fatalf("missing coverage/enforcement: coverage=%s enforcement=%s", exported.Coverage, exported.Enforcement)
+	}
+	if exported.Live.EventsPersisted || exported.Live.Stream != "/v1/stream" || exported.Live.Delivery == "" {
+		t.Fatalf("live contract = %+v", exported.Live)
+	}
+}
+
+func TestExportIsNotCappedAtAlertListPageSize(t *testing.T) {
+	ctx := context.Background()
+	st, err := store.Open(filepath.Join(t.TempDir(), "export-pages.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+
+	for i := 0; i < 501; i++ {
+		status := model.AlertOpen
+		if i%2 == 0 {
+			status = model.AlertResolved
+		}
+		if _, err := st.UpsertAlert(ctx, &model.Alert{
+			ID: fmt.Sprintf("alert-%03d", i), Service: "svc", Package: "pkg",
+			Severity: model.SeverityWarn, DetectedAt: 1, Status: status,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	rec := httptest.NewRecorder()
+	NewServer(st, nil, nil).Router(nil).ServeHTTP(rec,
+		httptest.NewRequest(http.MethodGet, "/v1/export", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body.String())
+	}
+	var exported struct {
+		Alerts []model.Alert `json:"alerts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &exported); err != nil {
+		t.Fatal(err)
+	}
+	if len(exported.Alerts) != 501 {
+		t.Fatalf("alerts = %d, want 501 across multiple pages", len(exported.Alerts))
+	}
+	seen := make(map[string]bool, len(exported.Alerts))
+	for _, alert := range exported.Alerts {
+		seen[alert.ID] = true
+	}
+	if len(seen) != 501 {
+		t.Fatalf("unique alerts = %d, want 501", len(seen))
+	}
+}
+
 func TestInternalErrorsDoNotLeakDatabaseDetails(t *testing.T) {
 	st, err := store.Open(filepath.Join(t.TempDir(), "closed.db"))
 	if err != nil {

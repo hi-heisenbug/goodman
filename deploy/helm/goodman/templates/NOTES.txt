@@ -45,13 +45,15 @@ attributed - one env var, no code change:
     - name: NODE_OPTIONS
       value: "--perf-basic-prof-only-functions --interpreted-frames-native-stack"
 
-Patch a whole namespace:
-  kubectl -n <app-namespace> set env deployment --all NODE_OPTIONS="--perf-basic-prof-only-functions --interpreted-frames-native-stack"
+From a Goodman checkout, safely patch a whole namespace without replacing an
+existing NODE_OPTIONS value:
+  scripts/enable-node-attribution.sh --namespace <app-namespace> --all
 
 Or patch selected deployments:
-  kubectl -n <app-namespace> set env deployment -l app=<app-label> NODE_OPTIONS="--perf-basic-prof-only-functions --interpreted-frames-native-stack"
+  scripts/enable-node-attribution.sh --namespace <app-namespace> --selector app=<app-label>
 
-(Tip: set webhook.enabled=true to inject this automatically per namespace.)
+(The helper refuses to overwrite NODE_OPTIONS from valueFrom. Set
+webhook.enabled=true to inject safely and automatically per namespace.)
 {{- end }}
 
 Datastore: {{ if .Values.postgres.dsn }}PostgreSQL{{ else }}embedded SQLite at {{ .Values.postgres.sqlitePath }} (pilot mode){{ end }}

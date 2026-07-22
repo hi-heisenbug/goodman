@@ -1,43 +1,27 @@
-// Package loader loads the Goodman eBPF object, attaches its tracepoints,
-// manages the watched-pid map, and streams ring-buffer events.
+// Package loader loads and owns the Goodman eBPF collections and links.
 package loader
 
 import (
 	"bytes"
 	_ "embed"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"log"
-	"net"
 	"os"
-	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
-	"time"
-	"unsafe"
 
 	"github.com/cilium/ebpf"
-	"github.com/cilium/ebpf/features"
 	"github.com/cilium/ebpf/link"
 	"github.com/cilium/ebpf/ringbuf"
 	"github.com/cilium/ebpf/rlimit"
-	"golang.org/x/sys/unix"
-
-	"github.com/hi-heisenbug/goodman/internal/enforce"
-	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 //go:embed goodman.bpf.o
 var bpfObject []byte
 
 // WatchedComms are the runtime process names Goodman attaches to by default.
-var WatchedComms = map[string]bool{
-	"node": true, "nodejs": true, "MainThread": true,
-	"python3": true, "python": true,
-	"python3.12": true, "python3.13": true,
-	"gunicorn": true, "celery": true, "uwsgi": true, "uvicorn": true,
-}
 
 type Options struct {
 	ProcRoot string
@@ -57,6 +41,7 @@ type Loader struct {
 	enforceActive    bool
 	enforceReason    string
 	discarded        atomic.Uint64
+	closeOnce        sync.Once
 }
 
 // New loads the embedded BPF object and attaches tracepoints.
@@ -136,501 +121,24 @@ func NewWithOptions(opt Options) (*Loader, error) {
 	return l, nil
 }
 
-func deleteEnforcementPrograms(spec *ebpf.CollectionSpec) {
-	delete(spec.Programs, "enforce_file_open")
-	delete(spec.Programs, "enforce_socket_connect")
-	delete(spec.Programs, "enforce_bprm_check")
-}
-
-func keepEnforcementPrograms(spec *ebpf.CollectionSpec) {
-	for name := range spec.Programs {
-		switch name {
-		case "enforce_file_open", "enforce_socket_connect", "enforce_bprm_check":
-		default:
-			delete(spec.Programs, name)
-		}
-	}
-}
-
-func (l *Loader) tryAttachLSM(baseSpec *ebpf.CollectionSpec) {
-	reason := lsmSupportReason()
-	if reason != "" {
-		l.enforceReason = reason
-		log.Printf("loader: LSM enforcement unavailable (%s); detection-only", reason)
-		return
-	}
-
-	enforcementSpec := baseSpec.Copy()
-	keepEnforcementPrograms(enforcementSpec)
-	coll, err := ebpf.NewCollectionWithOptions(enforcementSpec, ebpf.CollectionOptions{
-		MapReplacements: l.coll.Maps,
-	})
-	if err != nil {
-		l.enforceReason = fmt.Sprintf("load LSM programs: %v", err)
-		log.Printf("loader: LSM enforcement unavailable (%s); detection-only", l.enforceReason)
-		return
-	}
-	l.enforceColl = coll
-	var lsmLinks []link.Link
-	for _, name := range []string{"enforce_file_open", "enforce_socket_connect", "enforce_bprm_check"} {
-		prog := coll.Programs[name]
-		if prog == nil {
-			l.enforceReason = "LSM program missing from collection"
-			coll.Close()
-			l.enforceColl = nil
-			return
-		}
-		lnk, err := link.AttachLSM(link.LSMOptions{Program: prog})
-		if err != nil {
-			l.enforceReason = fmt.Sprintf("attach %s: %v", name, err)
-			for _, existing := range lsmLinks {
-				if existing != nil {
-					_ = existing.Close()
-				}
-			}
-			coll.Close()
-			l.enforceColl = nil
-			log.Printf("loader: LSM attach failed (%s); detection-only", l.enforceReason)
-			return
-		}
-		lsmLinks = append(lsmLinks, lnk)
-	}
-	l.links = append(l.links, lsmLinks...)
-	l.enforceActive = true
-	l.enforceReason = "active"
-	log.Printf("loader: LSM enforcement programs attached")
-}
-
-func lsmSupportReason() string {
-	if err := features.HaveProgramType(ebpf.LSM); err != nil {
-		return err.Error()
-	}
-	b, err := os.ReadFile("/sys/kernel/security/lsm")
-	if err != nil {
-		return "cannot read /sys/kernel/security/lsm"
-	}
-	if !strings.Contains(string(b), "bpf") {
-		return `active lsm= list does not include "bpf"`
-	}
-	return ""
-}
-
-func (l *Loader) EnforcementActive() bool { return l.enforceActive }
-func (l *Loader) EnforcementReason() string {
-	if l.enforceReason == "" {
-		if l.enforceRequested {
-			return "not probed"
-		}
-		return "disabled"
-	}
-	return l.enforceReason
-}
-
 func kernelRelease() string {
 	b, _ := os.ReadFile("/proc/sys/kernel/osrelease")
 	return strings.TrimSpace(string(b))
 }
 
 func (l *Loader) Close() {
-	if l.reader != nil {
-		l.reader.Close()
-	}
-	for _, lnk := range l.links {
-		lnk.Close()
-	}
-	if l.coll != nil {
-		l.coll.Close()
-	}
-	if l.enforceColl != nil {
-		l.enforceColl.Close()
-	}
-}
-
-// Watch adds a pid to the in-kernel filter.
-func (l *Loader) Watch(pid uint32) error {
-	one := uint8(1)
-	if err := l.coll.Maps["watched_pids"].Put(pid, one); err != nil {
-		return err
-	}
-	l.watched[pid] = true
-	return nil
-}
-
-func (l *Loader) Unwatch(pid uint32) {
-	_ = l.coll.Maps["watched_pids"].Delete(pid)
-	delete(l.watched, pid)
-}
-
-// Watched returns a snapshot of currently watched pids.
-func (l *Loader) Watched() []uint32 {
-	out := make([]uint32, 0, len(l.watched))
-	for p := range l.watched {
-		out = append(out, p)
-	}
-	return out
-}
-
-// Drops returns the kernel-side dropped-event count (ring buffer full).
-func (l *Loader) Drops() (uint64, error) {
-	return perCPUMapSum(l.coll.Maps["drops"])
-}
-
-func (l *Loader) DenyEventDrops() (uint64, error) {
-	if l.coll.Maps["deny_event_drops"] == nil {
-		return 0, nil
-	}
-	return perCPUMapSum(l.coll.Maps["deny_event_drops"])
-}
-
-func perCPUMapSum(m *ebpf.Map) (uint64, error) {
-	var perCPU []uint64
-	if err := m.Lookup(uint32(0), &perCPU); err != nil {
-		return 0, err
-	}
-	var total uint64
-	for _, v := range perCPU {
-		total += v
-	}
-	return total, nil
-}
-
-// Discards returns user-space ring-buffer records rejected because they were
-// undersized or could not be decoded. Kernel ring-buffer-full drops are
-// reported separately by Drops.
-func (l *Loader) Discards() uint64 { return l.discarded.Load() }
-
-// SetEnforceDeadline writes the enforcement kill-switch deadline (CLOCK_MONOTONIC ns).
-// Zero disables enforcement immediately.
-func (l *Loader) SetEnforceDeadline(ns uint64) error {
-	if l.coll.Maps["enforce_deadline"] == nil {
-		return nil
-	}
-	return l.coll.Maps["enforce_deadline"].Put(uint32(0), ns)
-}
-
-// ReconcileEnforcement atomically-from-the-policy-perspective replaces the
-// service-scoped deny maps. Cgroups are disarmed before any key changes and
-// re-armed only after all maps reconcile successfully, so partial updates fail
-// open instead of applying another service's verdicts.
-func (l *Loader) ReconcileEnforcement(scopes map[uint64]string, services enforce.ServiceVerdicts) error {
-	if err := l.reconcileEnforcedCgroups(nil); err != nil {
-		return err
-	}
-	verdicts := expandScopedVerdicts(scopes, services)
-	if err := l.reconcileDenyOpen(verdicts.Open); err != nil {
-		return err
-	}
-	if err := l.reconcileDenyConnect(verdicts.Connect); err != nil {
-		return err
-	}
-	if err := l.reconcileDenyExec(verdicts.Exec); err != nil {
-		return err
-	}
-	return l.reconcileEnforcedCgroups(scopes)
-}
-
-func (l *Loader) reconcileEnforcedCgroups(scopes map[uint64]string) error {
-	m := l.coll.Maps["enforced_cgroups"]
-	if m == nil {
-		return nil
-	}
-	var existing []uint64
-	iter := m.Iterate()
-	var k uint64
-	var v uint8
-	for iter.Next(&k, &v) {
-		existing = append(existing, k)
-	}
-	one := uint8(1)
-	for id := range scopes {
-		if err := m.Put(id, one); err != nil {
-			return err
+	l.closeOnce.Do(func() {
+		if l.reader != nil {
+			l.reader.Close()
 		}
-	}
-	for _, id := range existing {
-		if _, ok := scopes[id]; !ok {
-			_ = m.Delete(id)
+		for _, lnk := range l.links {
+			lnk.Close()
 		}
-	}
-	return nil
-}
-
-type scopedPathVerdict struct {
-	CgroupID uint64
-	Path     string
-}
-
-type scopedConnectVerdict struct {
-	CgroupID uint64
-	Verdict  enforce.ConnectVerdict
-}
-
-type scopedVerdicts struct {
-	Open    []scopedPathVerdict
-	Connect []scopedConnectVerdict
-	Exec    []scopedPathVerdict
-}
-
-func expandScopedVerdicts(scopes map[uint64]string, services enforce.ServiceVerdicts) scopedVerdicts {
-	var out scopedVerdicts
-	for cgroupID, service := range scopes {
-		verdicts, ok := services[service]
-		if !ok {
-			continue
+		if l.coll != nil {
+			l.coll.Close()
 		}
-		for _, path := range verdicts.Open {
-			out.Open = append(out.Open, scopedPathVerdict{CgroupID: cgroupID, Path: path})
+		if l.enforceColl != nil {
+			l.enforceColl.Close()
 		}
-		for _, verdict := range verdicts.Connect {
-			out.Connect = append(out.Connect, scopedConnectVerdict{CgroupID: cgroupID, Verdict: verdict})
-		}
-		for _, path := range verdicts.Exec {
-			out.Exec = append(out.Exec, scopedPathVerdict{CgroupID: cgroupID, Path: path})
-		}
-	}
-	return out
-}
-
-func (l *Loader) reconcileDenyOpen(verdicts []scopedPathVerdict) error {
-	m := l.coll.Maps["deny_open"]
-	if m == nil {
-		return nil
-	}
-	want := map[string]bool{}
-	one := uint8(1)
-	for _, verdict := range verdicts {
-		key := makeDenyPathKey(verdict.CgroupID, verdict.Path)
-		want[denyPathKeyString(key)] = true
-		if err := m.Put(key, one); err != nil {
-			return err
-		}
-	}
-	return deleteMissingDenyPath(m, want)
-}
-
-func (l *Loader) reconcileDenyExec(verdicts []scopedPathVerdict) error {
-	m := l.coll.Maps["deny_exec"]
-	if m == nil {
-		return nil
-	}
-	want := map[string]bool{}
-	one := uint8(1)
-	for _, verdict := range verdicts {
-		key := makeDenyPathKey(verdict.CgroupID, verdict.Path)
-		want[denyPathKeyString(key)] = true
-		if err := m.Put(key, one); err != nil {
-			return err
-		}
-	}
-	return deleteMissingDenyPath(m, want)
-}
-
-type denyPathKey struct {
-	CgroupID uint64
-	Path     [model.PathMaxLen]byte
-}
-
-func makeDenyPathKey(cgroupID uint64, path string) denyPathKey {
-	k := denyPathKey{CgroupID: cgroupID}
-	copy(k.Path[:], path)
-	return k
-}
-
-func denyPathKeyString(k denyPathKey) string {
-	return fmt.Sprintf("%d:%s", k.CgroupID, string(k.Path[:]))
-}
-
-func deleteMissingDenyPath(m *ebpf.Map, want map[string]bool) error {
-	var existing []denyPathKey
-	iter := m.Iterate()
-	var k denyPathKey
-	var v uint8
-	for iter.Next(&k, &v) {
-		existing = append(existing, k)
-	}
-	for _, k := range existing {
-		if !want[denyPathKeyString(k)] {
-			_ = m.Delete(k)
-		}
-	}
-	return nil
-}
-
-type denyAddrKey struct {
-	CgroupID uint64
-	Family   uint8
-	Pad      uint8
-	Port     uint16
-	Addr     [16]byte
-}
-
-func (l *Loader) reconcileDenyConnect(entries []scopedConnectVerdict) error {
-	m := l.coll.Maps["deny_connect"]
-	if m == nil {
-		return nil
-	}
-	want := map[string]bool{}
-	one := uint8(1)
-	for _, e := range entries {
-		key, err := denyAddrKeyFromVerdict(e.CgroupID, e.Verdict)
-		if err != nil {
-			continue
-		}
-		want[denyAddrKeyString(key)] = true
-		if err := m.Put(key, one); err != nil {
-			return err
-		}
-	}
-	var existing []denyAddrKey
-	iter := m.Iterate()
-	var k denyAddrKey
-	var v uint8
-	for iter.Next(&k, &v) {
-		existing = append(existing, k)
-	}
-	for _, k := range existing {
-		if !want[denyAddrKeyString(k)] {
-			_ = m.Delete(k)
-		}
-	}
-	return nil
-}
-
-func denyAddrKeyFromVerdict(cgroupID uint64, v enforce.ConnectVerdict) (denyAddrKey, error) {
-	ip := net.ParseIP(v.Addr)
-	if ip == nil {
-		return denyAddrKey{}, fmt.Errorf("bad ip")
-	}
-	k := denyAddrKey{CgroupID: cgroupID}
-	k.Port = v.Port
-	if v4 := ip.To4(); v4 != nil {
-		k.Family = 2 // AF_INET
-		copy(k.Addr[:4], v4)
-		return k, nil
-	}
-	k.Family = 10 // AF_INET6
-	copy(k.Addr[:], ip.To16())
-	return k, nil
-}
-
-func denyAddrKeyString(k denyAddrKey) string {
-	return fmt.Sprintf("%d:%d:%d:%x", k.CgroupID, k.Family, k.Port, k.Addr)
-}
-
-// RefreshWatched scans procRoot for runtime processes and syncs the kernel pid
-// filter. onExit is called for pids that disappeared.
-func (l *Loader) RefreshWatched(extraComms []string, onNew, onExit func(pid uint32)) error {
-	comms := map[string]bool{}
-	for c := range WatchedComms {
-		comms[c] = true
-	}
-	for _, c := range extraComms {
-		if c != "" {
-			comms[c] = true
-		}
-	}
-	entries, err := os.ReadDir(l.procRoot)
-	if err != nil {
-		return err
-	}
-	self := uint32(os.Getpid())
-	alive := map[uint32]bool{}
-	for _, ent := range entries {
-		pid64, err := strconv.ParseUint(ent.Name(), 10, 32)
-		if err != nil {
-			continue
-		}
-		pid := uint32(pid64)
-		if pid == self {
-			continue
-		}
-		commB, err := os.ReadFile(fmt.Sprintf("%s/%d/comm", l.procRoot, pid))
-		if err != nil {
-			continue
-		}
-		if !comms[strings.TrimSpace(string(commB))] {
-			continue
-		}
-		alive[pid] = true
-		if !l.watched[pid] {
-			if err := l.Watch(pid); err != nil {
-				log.Printf("loader: watch pid %d: %v", pid, err)
-				continue
-			}
-			if onNew != nil {
-				onNew(pid)
-			}
-		}
-	}
-	for pid := range l.watched {
-		if !alive[pid] {
-			l.Unwatch(pid)
-			if onExit != nil {
-				onExit(pid)
-			}
-		}
-	}
-	return nil
-}
-
-// Read blocks for the next raw event from the kernel.
-func (l *Loader) Read() (*model.RawEvent, error) {
-	for {
-		rec, err := l.reader.Read()
-		if err != nil {
-			return nil, err
-		}
-		ev, err := decodeRawEvent(rec.RawSample)
-		if err != nil {
-			l.discarded.Add(1)
-			continue
-		}
-		return ev, nil
-	}
-}
-
-func decodeRawEvent(sample []byte) (*model.RawEvent, error) {
-	if len(sample) < model.RawEventSize {
-		return nil, fmt.Errorf("short ring-buffer record: %d < %d", len(sample), model.RawEventSize)
-	}
-	var ev model.RawEvent
-	if err := binary.Read(bytes.NewReader(sample[:model.RawEventSize]), binary.LittleEndian, &ev); err != nil {
-		return nil, fmt.Errorf("decode ring-buffer record: %w", err)
-	}
-	return &ev, nil
-}
-
-// BootToUnixNs returns the offset that converts bpf_ktime_get_ns()
-// (CLOCK_MONOTONIC since boot) into unix nanoseconds.
-func BootToUnixNs() uint64 {
-	var mono int64
-	f, err := os.ReadFile("/proc/uptime")
-	if err == nil {
-		fields := strings.Fields(string(f))
-		if len(fields) > 0 {
-			if up, err := strconv.ParseFloat(fields[0], 64); err == nil {
-				mono = int64(up * 1e9)
-			}
-		}
-	}
-	return uint64(time.Now().UnixNano() - mono)
-}
-
-// MonotonicNowNs returns CLOCK_MONOTONIC nanoseconds (matches bpf_ktime_get_ns).
-func MonotonicNowNs() uint64 {
-	var ts unix.Timespec
-	if err := unix.ClockGettime(unix.CLOCK_MONOTONIC, &ts); err != nil {
-		return uint64(time.Now().UnixNano())
-	}
-	return uint64(ts.Sec)*1e9 + uint64(ts.Nsec)
-}
-
-func init() {
-	// Ensure deny key sizes match BPF expectations.
-	if unsafe.Sizeof(denyPathKey{}) != 8+model.PathMaxLen {
-		panic("denyPathKey size mismatch")
-	}
-	if unsafe.Sizeof(denyAddrKey{}) != 32 {
-		panic("denyAddrKey size mismatch")
-	}
+	})
 }

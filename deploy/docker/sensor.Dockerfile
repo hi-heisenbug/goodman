@@ -1,6 +1,7 @@
 # Sensor image: builds the eBPF object + the Go loader, ships a minimal image.
 # Runs privileged as a DaemonSet.
-FROM golang:1.23-bookworm AS build
+FROM golang:1.25-bookworm AS build
+ARG TARGETARCH
 RUN apt-get update && apt-get install -y --no-install-recommends \
       clang llvm libbpf-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
@@ -9,7 +10,12 @@ RUN go mod download
 COPY . .
 # The eBPF object is prebuilt and committed (bpf/goodman.bpf.o, copied to the
 # loader package). Rebuild it here so the image is reproducible from source.
-RUN clang -O2 -g -target bpf -D__TARGET_ARCH_x86 -I bpf -I bpf/include \
+RUN case "$TARGETARCH" in \
+      amd64) BPF_ARCH=x86 ;; \
+      arm64) BPF_ARCH=arm64 ;; \
+      *) echo "unsupported sensor image architecture: $TARGETARCH" >&2; exit 1 ;; \
+    esac && \
+    clang -O2 -g -target bpf -D__TARGET_ARCH_${BPF_ARCH} -I bpf -I bpf/include \
       -c bpf/goodman.bpf.c -o internal/loader/goodman.bpf.o
 RUN CGO_ENABLED=0 go build -ldflags="-s -w" -o /out/sensor ./cmd/sensor
 

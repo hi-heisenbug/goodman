@@ -1,22 +1,27 @@
 # Getting started
 
-This guide takes you from a fresh Linux host to your first drift alert in about
-ten minutes. No Kubernetes required — everything runs locally.
+This guide takes you from a fresh checkout to the portable demo on any Docker
+or Go host, then to a real eBPF alert on Linux. No Kubernetes is required.
 
 For the complete local, dashboard, CLI, Kubernetes, and coding-agent workflow,
 see [Setup and usage](setup-and-usage.md).
 
 ## 1. Prerequisites
 
-You need an **x86-64 Linux host** (bare metal, VM, or WSL2) with:
+The portable demo needs either Go 1.25+ or Docker and runs on Linux, macOS, and
+Windows. The live sensor needs an **x86-64 or arm64 Linux host** (bare metal,
+VM, or WSL2) with:
 
 - kernel **≥ 5.8** with BTF at `/sys/kernel/btf/vmlinux` (most distros since 2020)
-- `go` ≥ 1.23, `clang`, `llvm`, `bpftool`
+- `go` ≥ 1.25, `clang`, `llvm`, `bpftool`
 - `node` ≥ 20.19 (only to rebuild the dashboard — the built UI ships in the repo)
 
-> **Not on Linux?** The sensor needs a real kernel. On macOS/Windows, spin up a
-> Linux VM (multipass, UTM, Lima, or any cloud instance) and work there. Docker
-> Desktop's LinuxKit VM lacks the kernel headers/BTF and will not work.
+The full setup command with `--install-openclaw` installs Node 22.22.3 when the
+host's current Node runtime does not satisfy OpenClaw's engine requirement.
+
+> **Not on Linux?** The portable demo works through Docker Desktop. The live
+> sensor still needs a real Linux kernel; use a Linux VM or host for the eBPF
+> sections below.
 
 The fastest path on Debian/Ubuntu:
 
@@ -65,20 +70,22 @@ new secret read and metadata connect — and that no baseline behavior leaked in
 it. If it prints `SMOKE TEST PASSED`, your backend, store, fingerprint engine,
 diff engine, and API all work.
 
-## 4. Five-minute product wow (`make demo`)
+## 4. Five-minute product wow on any device
 
 For a no-root product walkthrough — the command used on every discovery call —
-start the collector with seeded alerts, a preloaded reachability report, and a
-live Mini-Shai-Hulud attack replay:
+start the collector with seeded alerts, a preloaded reachability report, an
+OpenClaw skill drift, and a live Mini-Shai-Hulud attack replay:
 
 ```bash
-make demo
-# or: goodmanctl demo
+bash scripts/setup-everything.sh demo
+# force Docker: bash scripts/setup-everything.sh demo --backend docker
 ```
 
 Open **http://127.0.0.1:8844**. On first load:
 
 - **Alerts** already shows CRITICAL drifts with rule chips
+- the initial alert list includes the fictional OpenClaw skill
+  `@goodman-demo/calendar-sync@1.2.3`
 - **Reachability** shows **1,400 declared / 240 executed** (no lockfile upload)
 - ~12 seconds later, the 2026 Mini-Shai-Hulud behavior profile appears live as
   a new CRITICAL row (`secret-read`, `cloud-metadata`,
@@ -91,14 +98,13 @@ you press `Ctrl-C`. It uses a local SQLite database at
 If port `8844` is already in use:
 
 ```bash
-GOODMAN_DEMO_PORT=8855 make demo
-# or: goodmanctl demo -port 8855
+bash scripts/setup-everything.sh demo --port 8855
 ```
 
 Non-interactive verification (no browser):
 
 ```bash
-make demo-check
+bash scripts/setup-everything.sh demo --check
 ```
 
 ## 5. The full live demo with real eBPF (`sudo make e2e`)
@@ -108,6 +114,21 @@ Node app and attributes them to the package that made them.
 
 ```bash
 sudo make e2e
+sudo make e2e-openclaw
+```
+
+To install missing Debian/Ubuntu prerequisites, optionally install OpenClaw,
+and run the portable plus both live proofs in one command:
+
+```bash
+bash scripts/setup-everything.sh all --install --install-openclaw
+```
+
+To leave the host toolchain and OpenClaw installation untouched, use rootful
+Docker on Linux. This still runs the real eBPF programs against the host kernel:
+
+```bash
+bash scripts/setup-everything.sh all --live-backend docker
 ```
 
 What it does (all benign — no real malware, no real exfiltration):
@@ -123,7 +144,8 @@ What it does (all benign — no real malware, no real exfiltration):
 
 > **Why sudo?** Loading eBPF programs requires `CAP_BPF`/root. If your host has
 > `unprivileged_bpf_disabled` set (check `make doctor`), the sensor must run as
-> root. `make smoke` is the no-root alternative for the backend.
+> root. `make docker-e2e` is the disposable rootful-Docker alternative;
+> `make smoke` is the no-root backend alternative.
 
 ## 6. Run the stack yourself and open the dashboard
 

@@ -91,8 +91,9 @@ the dashboard. The same webhook also receives the weekly digest when
 | `-raw` | — | `false` | With `-stdout`: also print raw events including stack depth. |
 | `NODE_NAME` | — | hostname | Sensor identity in event batches (set to the k8s node name in the DaemonSet). |
 
-Built-in watched comm names (`internal/loader/loader.go` `WatchedComms`): Node
-`node`, `nodejs`, `MainThread`; Python `python`, `python3`, `python3.12`,
+Built-in watched comm names (`internal/loader/watch.go` `WatchedComms`): Node
+`node`, `nodejs`, `MainThread`; current OpenClaw Gateway `openclaw-gatewa`;
+Python `python`, `python3`, `python3.12`,
 `python3.13`; and `gunicorn`, `celery`, `uwsgi`, `uvicorn`. The sensor only
 attaches to processes whose `/proc/<pid>/comm` matches one of these (plus
 `-comms` extras).
@@ -100,6 +101,12 @@ attaches to processes whose `/proc/<pid>/comm` matches one of these (plus
 `-comms` / `GOODMAN_EXTRA_COMMS` adds comma-separated comm names beyond that
 list. Use this when a Python (or Node) process renames itself — e.g. Gunicorn or
 Celery workers after `setproctitle` — so Goodman still watches the worker pid.
+
+Watched workloads may set `GOODMAN_SERVICE` in their own process environment to
+override service detection. Goodman otherwise uses the Kubernetes pod hostname,
+the local working-directory basename, or `pid-<pid>`. The OpenClaw integration
+sets this workload variable to keep local Gateway events under one stable
+service name.
 
 ## High-risk rules
 

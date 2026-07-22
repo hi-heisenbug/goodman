@@ -4,14 +4,17 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"syscall"
+	"strings"
 	"time"
+
+	"github.com/hi-heisenbug/goodman/internal/model"
 )
 
 // Options controls the interactive (or -check) demo run.
@@ -41,7 +44,15 @@ func DefaultOptions() Options {
 
 // URL returns the dashboard base URL.
 func (o Options) URL() string {
-	return fmt.Sprintf("http://%s:%s", o.Host, o.Port)
+	host := strings.TrimSpace(o.Host)
+	host = strings.TrimPrefix(strings.TrimSuffix(host, "]"), "[")
+	switch host {
+	case "", "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
+	}
+	return "http://" + net.JoinHostPort(host, o.Port)
 }
 
 // GuidedScript is the 60-second talk track printed after the collector is ready.
@@ -55,8 +66,9 @@ Coverage:       %s/#coverage
 
 ── 60-second guided script ──────────────────────────────────
  0–10s  Open the Alerts tab. You already have CRITICAL drifts
-        from compromised package versions (good-pkg, axios, …)
-        with rule chips (secret-read, cloud-metadata, new-exec).
+        from compromised package versions. Find service=openclaw:
+        @goodman-demo/calendar-sync@1.2.3 read OpenClaw creds
+        and contacted a new endpoint. The package is fictional.
 
 10–25s  Switch to Reachability. Headline: 1,400 declared
         dependencies, 240 actually executed at runtime — the
@@ -79,6 +91,39 @@ Press Ctrl-C to stop.
 // live attack after AttackDelay, and blocks until the collector exits
 // (interactive) or returns after verification (-check).
 func Run(ctx context.Context, opt Options) error {
+	opt = normalizeOptions(opt)
+	absBin, db, err := prepareDemoFiles(opt)
+	if err != nil {
+		return err
+	}
+	osvEndpoint, stopOSV, err := startDemoOSVServer()
+	if err != nil {
+		return fmt.Errorf("start demo OSV stub: %w", err)
+	}
+	defer stopOSV()
+
+	collector, err := startDemoCollector(ctx, opt, absBin, db, osvEndpoint)
+	if err != nil {
+		return err
+	}
+	defer collector.stop()
+
+	c := NewClient(opt.URL())
+	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := c.WaitHealthy(waitCtx); err != nil {
+		return err
+	}
+	if err := seedDemoState(ctx, c, opt.Stdout); err != nil {
+		return err
+	}
+	if opt.Check {
+		return runCheck(ctx, c, opt)
+	}
+	return runInteractiveDemo(ctx, c, opt, collector)
+}
+
+func normalizeOptions(opt Options) Options {
 	if opt.Stdout == nil {
 		opt.Stdout = os.Stdout
 	}
@@ -91,17 +136,20 @@ func Run(ctx context.Context, opt Options) error {
 	if opt.Check {
 		opt.AttackDelay = 0
 	}
+	return opt
+}
 
+func prepareDemoFiles(opt Options) (string, string, error) {
 	bin := opt.CollectorBin
 	if bin == "" {
 		bin = "bin/collector"
 	}
 	absBin, err := filepath.Abs(bin)
 	if err != nil {
-		return err
+		return "", "", err
 	}
 	if _, err := os.Stat(absBin); err != nil {
-		return fmt.Errorf("collector binary not found at %s (run: make build): %w", absBin, err)
+		return "", "", fmt.Errorf("collector binary not found at %s (run: make build): %w", absBin, err)
 	}
 
 	db := opt.DB
@@ -109,17 +157,21 @@ func Run(ctx context.Context, opt Options) error {
 		db = "demo_build/goodman_demo.db"
 	}
 	if err := os.MkdirAll(filepath.Dir(db), 0o755); err != nil {
-		return err
+		return "", "", err
 	}
 	for _, suffix := range []string{"", "-shm", "-wal"} {
 		_ = os.Remove(db + suffix)
 	}
-	osvEndpoint, stopOSV, err := startDemoOSVServer()
-	if err != nil {
-		return fmt.Errorf("start demo OSV stub: %w", err)
-	}
-	defer stopOSV()
+	return absBin, db, nil
+}
 
+type demoCollector struct {
+	cmd    *exec.Cmd
+	waitCh chan error
+	exited bool
+}
+
+func startDemoCollector(ctx context.Context, opt Options, absBin, db, osvEndpoint string) (*demoCollector, error) {
 	listen := opt.Host + ":" + opt.Port
 	cmd := exec.CommandContext(ctx, absBin, "-listen", listen)
 	cmd.Env = append(os.Environ(),
@@ -130,33 +182,46 @@ func Run(ctx context.Context, opt Options) error {
 	)
 	cmd.Stdout = opt.Stderr
 	cmd.Stderr = opt.Stderr
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	configureCollectorProcess(cmd)
 	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("start collector: %w", err)
+		return nil, fmt.Errorf("start collector: %w", err)
 	}
-	defer func() {
-		if cmd.Process != nil {
-			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
-			_, _ = cmd.Process.Wait()
-		}
-	}()
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+	return &demoCollector{cmd: cmd, waitCh: waitCh}, nil
+}
 
-	c := NewClient(opt.URL())
-	waitCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	if err := c.WaitHealthy(waitCtx); err != nil {
-		return err
+func (c *demoCollector) stop() {
+	if c.exited || c.cmd.Process == nil {
+		return
 	}
+	terminateCollectorProcess(c.cmd)
+	select {
+	case <-c.waitCh:
+	case <-time.After(5 * time.Second):
+		_ = c.cmd.Process.Kill()
+		<-c.waitCh
+	}
+	c.exited = true
+}
 
-	fmt.Fprintln(opt.Stdout, "Seeding product fingerprints and alerts…")
+func seedDemoState(ctx context.Context, c *Client, stdout io.Writer) error {
+	fmt.Fprintln(stdout, "Seeding product fingerprints and alerts…")
 	if err := SeedProduct(ctx, c); err != nil {
 		return err
 	}
-	fmt.Fprintln(opt.Stdout, "Seeding Mini-Shai-Hulud baseline (mini-shai-hulud-loader@1.0.0)…")
+	fmt.Fprintln(stdout, "Seeding Mini-Shai-Hulud baseline (mini-shai-hulud-loader@1.0.0)…")
 	if err := SeedMiniShaiHuludBaseline(ctx, c); err != nil {
 		return err
 	}
-	fmt.Fprintln(opt.Stdout, "Preloading reachability report (1,400 / 240)…")
+	fmt.Fprintln(stdout, "Replaying OpenClaw skill drift (@goodman-demo/calendar-sync@1.2.3)…")
+	if err := SeedOpenClawSkillBaseline(ctx, c); err != nil {
+		return err
+	}
+	if err := FireOpenClawSkillAttack(ctx, c); err != nil {
+		return err
+	}
+	fmt.Fprintln(stdout, "Preloading reachability report (1,400 / 240)…")
 	rep, err := SeedReachability(ctx, c)
 	if err != nil {
 		return err
@@ -165,14 +230,14 @@ func Run(ctx context.Context, opt Options) error {
 		return fmt.Errorf("reachability seed counts: declared=%d executed=%d (want %d/%d)",
 			rep.DeclaredCount, rep.ExecutedCount, DeclaredCount, ExecutedCount)
 	}
-	fmt.Fprintln(opt.Stdout, "Seeding coverage panel (incl. unlabeled staging gap)…")
+	fmt.Fprintln(stdout, "Seeding coverage panel (incl. unlabeled staging gap)…")
 	if err := SeedCoverage(ctx, c); err != nil {
 		return err
 	}
+	return nil
+}
 
-	if opt.Check {
-		return runCheck(ctx, c, opt)
-	}
+func runInteractiveDemo(ctx context.Context, c *Client, opt Options, collector *demoCollector) error {
 	go demoHeartbeatLoop(ctx, c)
 
 	fmt.Fprint(opt.Stdout, GuidedScript(opt.URL(), opt.AttackDelay))
@@ -191,12 +256,11 @@ func Run(ctx context.Context, opt Options) error {
 	}
 	fmt.Fprintln(opt.Stdout, "Attack injected. Watch the Alerts tab for the new CRITICAL row.")
 
-	errCh := make(chan error, 1)
-	go func() { errCh <- cmd.Wait() }()
 	select {
 	case <-ctx.Done():
 		return nil
-	case err := <-errCh:
+	case err := <-collector.waitCh:
+		collector.exited = true
 		return err
 	}
 }
@@ -272,12 +336,37 @@ func startDemoOSVServer() (string, func(), error) {
 }
 
 func runCheck(ctx context.Context, c *Client, opt Options) error {
+	if err := verifyDashboard(ctx, c); err != nil {
+		return err
+	}
+	declared, executed, err := verifyReachability(ctx, c)
+	if err != nil {
+		return err
+	}
+	if err := verifyCoverage(ctx, c); err != nil {
+		return err
+	}
+	snapshotSchema, exportSchema, openClaw, err := verifyOpenClawState(ctx, c)
+	if err != nil {
+		return err
+	}
+	attack, err := fireAndWaitForMiniShaiHulud(ctx, c)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(opt.Stdout, "demo check OK: dashboard, snapshot %s, export %s, reachability %d/%d, CRITICAL OpenClaw %s@%s and %s@%s→%s\n",
+		snapshotSchema, exportSchema, declared, executed, openClaw.Package, openClaw.Malicious.Version,
+		attack.Package, attack.OldVersion, attack.NewVersion)
+	return nil
+}
+
+func verifyReachability(ctx context.Context, c *Client) (int, int, error) {
 	stored, err := c.GetReport(ctx)
 	if err != nil {
-		return fmt.Errorf("check stored report: %w", err)
+		return 0, 0, fmt.Errorf("check stored report: %w", err)
 	}
 	if stored.DeclaredCount != DeclaredCount || stored.ExecutedCount != ExecutedCount {
-		return fmt.Errorf("stored report: declared=%d executed=%d (want %d/%d)",
+		return 0, 0, fmt.Errorf("stored report: declared=%d executed=%d (want %d/%d)",
 			stored.DeclaredCount, stored.ExecutedCount, DeclaredCount, ExecutedCount)
 	}
 	reachableVulns := 0
@@ -287,9 +376,12 @@ func runCheck(ctx context.Context, c *Client, opt Options) error {
 		}
 	}
 	if reachableVulns < 3 {
-		return fmt.Errorf("stored report: reachable vulnerabilities=%d, want at least 3", reachableVulns)
+		return 0, 0, fmt.Errorf("stored report: reachable vulnerabilities=%d, want at least 3", reachableVulns)
 	}
+	return stored.DeclaredCount, stored.ExecutedCount, nil
+}
 
+func verifyCoverage(ctx context.Context, c *Client) error {
 	covReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/v1/coverage", nil)
 	if err != nil {
 		return err
@@ -328,9 +420,50 @@ func runCheck(ctx context.Context, c *Client, opt Options) error {
 	if len(cov.Sensors) == 0 {
 		return fmt.Errorf("check: expected demo sensor in coverage")
 	}
+	return nil
+}
 
+func verifyOpenClawState(ctx context.Context, c *Client) (string, string, Scenario, error) {
+	openClaw := OpenClawSkillScenario()
+	alerts, err := c.GetAlerts(ctx)
+	if err != nil {
+		return "", "", Scenario{}, err
+	}
+	if !hasCriticalScenarioAlert(alerts, openClaw) {
+		return "", "", Scenario{}, fmt.Errorf("check: no CRITICAL OpenClaw skill alert for %s@%s (%d alerts total)",
+			openClaw.Package, openClaw.Malicious.Version, len(alerts))
+	}
+	snapshot, err := c.GetSnapshot(ctx)
+	if err != nil {
+		return "", "", Scenario{}, fmt.Errorf("check snapshot: %w", err)
+	}
+	if snapshot.Schema != "goodman.snapshot/v1" || snapshot.GeneratedAt == 0 {
+		return "", "", Scenario{}, fmt.Errorf("check: bad snapshot envelope: schema=%q generated_at=%d",
+			snapshot.Schema, snapshot.GeneratedAt)
+	}
+	if !hasCriticalScenarioAlert(snapshot.Alerts, openClaw) || !hasScenarioFingerprint(snapshot.Fingerprints, openClaw) {
+		return "", "", Scenario{}, fmt.Errorf("check: snapshot missing OpenClaw alert/fingerprint: alerts=%d fingerprints=%d",
+			len(snapshot.Alerts), len(snapshot.Fingerprints))
+	}
+	exported, err := c.GetExport(ctx)
+	if err != nil {
+		return "", "", Scenario{}, fmt.Errorf("check export: %w", err)
+	}
+	if exported.Schema != "goodman.export/v1" || exported.GeneratedAt == 0 {
+		return "", "", Scenario{}, fmt.Errorf("check: bad export envelope: schema=%q generated_at=%d",
+			exported.Schema, exported.GeneratedAt)
+	}
+	if !hasCriticalScenarioAlert(exported.Alerts, openClaw) || !hasScenarioFingerprint(exported.Fingerprints, openClaw) ||
+		len(exported.Reachability) == 0 {
+		return "", "", Scenario{}, fmt.Errorf("check: export missing OpenClaw state: alerts=%d fingerprints=%d reachability=%d",
+			len(exported.Alerts), len(exported.Fingerprints), len(exported.Reachability))
+	}
+	return snapshot.Schema, exported.Schema, openClaw, nil
+}
+
+func fireAndWaitForMiniShaiHulud(ctx context.Context, c *Client) (*model.Alert, error) {
 	if err := FireMiniShaiHuludAttack(ctx, c); err != nil {
-		return err
+		return nil, err
 	}
 	// Give the collector a beat to persist the alert.
 	deadline := time.Now().Add(3 * time.Second)
@@ -338,26 +471,70 @@ func runCheck(ctx context.Context, c *Client, opt Options) error {
 	for {
 		alerts, err := c.GetAlerts(ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		for _, a := range alerts {
 			if a.Package == "jsonwebtoken" && a.OldVersion == "" {
-				return fmt.Errorf("check: jsonwebtoken package name triggered a false secret-read alert: %+v", a)
+				return nil, fmt.Errorf("check: jsonwebtoken package name triggered a false secret-read alert: %+v", a)
 			}
 			if a.Package == s.Package && a.NewVersion == s.Malicious.Version && a.Severity == "CRITICAL" {
-				fmt.Fprintf(opt.Stdout, "demo check OK: reachability %d/%d, CRITICAL %s@%s→%s\n",
-					stored.DeclaredCount, stored.ExecutedCount, a.Package, a.OldVersion, a.NewVersion)
-				return nil
+				return &a, nil
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("check: no CRITICAL alert for %s@%s within timeout (%d alerts total)",
+			return nil, fmt.Errorf("check: no CRITICAL alert for %s@%s within timeout (%d alerts total)",
 				s.Package, s.Malicious.Version, len(alerts))
 		}
 		select {
 		case <-ctx.Done():
-			return ctx.Err()
+			return nil, ctx.Err()
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func verifyDashboard(ctx context.Context, c *Client) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.BaseURL+"/", nil)
+	if err != nil {
+		return err
+	}
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return fmt.Errorf("check dashboard: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("check dashboard: GET /: %s", resp.Status)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
+	if err != nil {
+		return fmt.Errorf("check dashboard: read application shell: %w", err)
+	}
+	html := string(body)
+	for _, marker := range []string{"<title>Goodman", `id="root"`, "/assets/"} {
+		if !strings.Contains(html, marker) {
+			return fmt.Errorf("check dashboard: built application shell missing %q", marker)
+		}
+	}
+	return nil
+}
+
+func hasCriticalScenarioAlert(alerts []model.Alert, s Scenario) bool {
+	for _, alert := range alerts {
+		if alert.Service == s.Service && alert.Package == s.Package &&
+			alert.OldVersion == s.Baseline.Version && alert.NewVersion == s.Malicious.Version &&
+			alert.Severity == "CRITICAL" {
+			return true
+		}
+	}
+	return false
+}
+
+func hasScenarioFingerprint(fingerprints []model.Fingerprint, s Scenario) bool {
+	for _, fp := range fingerprints {
+		if fp.Service == s.Service && fp.Package == s.Package && fp.Version == s.Malicious.Version {
+			return true
+		}
+	}
+	return false
 }

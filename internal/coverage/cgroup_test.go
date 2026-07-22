@@ -27,18 +27,6 @@ func TestCgroupIDsForPodUID(t *testing.T) {
 	}
 }
 
-func TestResolveCgroupPaths(t *testing.T) {
-	root := t.TempDir()
-	sub := filepath.Join(root, "child")
-	if err := os.MkdirAll(sub, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	m := ResolveCgroupPaths([]string{root})
-	if len(m) < 2 {
-		t.Fatalf("want parent+child ids, got %v", m)
-	}
-}
-
 func TestBuildEnforcedCgroupScopesMapsPodNameToEveryCgroup(t *testing.T) {
 	scopes := buildEnforcedCgroupScopes(
 		map[string]bool{"prod": true, "dev": false},

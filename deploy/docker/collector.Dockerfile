@@ -2,11 +2,11 @@
 FROM node:22-bookworm AS ui
 WORKDIR /ui
 COPY dashboard/package.json dashboard/package-lock.json* ./
-RUN npm install --no-audit --no-fund
+RUN npm ci --no-audit --no-fund
 COPY dashboard/ ./
 RUN npm run build
 
-FROM golang:1.23-bookworm AS build
+FROM golang:1.25-bookworm AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

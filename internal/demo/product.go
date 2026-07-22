@@ -105,64 +105,6 @@ type VersionState struct {
 	Behaviors []string
 }
 
-// EventStreamScenario returns the flatmap-stream / event-stream reproduction.
-// Kept in lockstep with test/replay/scenarios/event-stream.json (enforced by test).
-func EventStreamScenario() Scenario {
-	return Scenario{
-		Service: "payments",
-		Package: "flatmap-stream",
-		Baseline: VersionState{
-			Version: "0.1.0",
-			Behaviors: []string{
-				"READ /app/node_modules/flatmap-stream/**",
-				"READ /app/node_modules/event-stream/**",
-			},
-		},
-		Malicious: VersionState{
-			Version: "0.1.1",
-			Behaviors: []string{
-				"READ /app/node_modules/flatmap-stream/**",
-				"READ /home/app/.config/Copay/wallet.dat",
-				"CONNECT 104.245.39.112:443",
-			},
-		},
-		ExpectRules: []string{"new-outbound-connect", "secret-read"},
-	}
-}
-
-// SeedEventStreamBaseline learns flatmap-stream@0.1.0 so the later attack
-// diffs as a version bump. Timestamps span >1s for MinAge promotion.
-func SeedEventStreamBaseline(ctx context.Context, c *Client) error {
-	s := EventStreamScenario()
-	base := uint64(time.Now().UnixNano())
-	for i := 0; i < 4; i++ {
-		var batch []model.Attributed
-		for j, b := range s.Baseline.Behaviors {
-			batch = append(batch, attr(s.Service, s.Package, s.Baseline.Version, b,
-				base+uint64(i)*400_000_000+uint64(j)*1_000_000))
-		}
-		if err := c.PostEvents(ctx, batch); err != nil {
-			return fmt.Errorf("event-stream baseline: %w", err)
-		}
-	}
-	return nil
-}
-
-// FireEventStreamAttack posts the malicious flatmap-stream@0.1.1 behaviors.
-func FireEventStreamAttack(ctx context.Context, c *Client) error {
-	s := EventStreamScenario()
-	base := uint64(time.Now().UnixNano())
-	var batch []model.Attributed
-	for i, b := range s.Malicious.Behaviors {
-		batch = append(batch, attr(s.Service, s.Package, s.Malicious.Version, b,
-			base+uint64(i)*1_000_000))
-	}
-	if err := c.PostEvents(ctx, batch); err != nil {
-		return fmt.Errorf("event-stream attack: %w", err)
-	}
-	return nil
-}
-
 // MiniShaiHuludScenario is the 2026 flagship replay. It stays in lockstep with
 // test/replay/scenarios/mini-shai-hulud.json.
 func MiniShaiHuludScenario() Scenario {
@@ -188,7 +130,50 @@ func MiniShaiHuludScenario() Scenario {
 }
 
 func SeedMiniShaiHuludBaseline(ctx context.Context, c *Client) error {
-	s := MiniShaiHuludScenario()
+	return seedScenarioBaseline(ctx, c, "mini-shai-hulud", MiniShaiHuludScenario())
+}
+
+func FireMiniShaiHuludAttack(ctx context.Context, c *Client) error {
+	return fireScenarioAttack(ctx, c, "mini-shai-hulud", MiniShaiHuludScenario())
+}
+
+// OpenClawSkillScenario is a fictional ClawHub skill version change used by
+// the no-root product demo. It proves the OpenClaw service and skill-level
+// alert shape without installing OpenClaw in CI.
+func OpenClawSkillScenario() Scenario {
+	return Scenario{
+		Service: "openclaw",
+		Package: "@goodman-demo/calendar-sync",
+		Baseline: VersionState{
+			Version: "1.2.2",
+			Behaviors: []string{
+				"READ /home/openclaw/.openclaw/workspace/skills/calendar-sync/SKILL.md",
+			},
+		},
+		Malicious: VersionState{
+			Version: "1.2.3",
+			Behaviors: []string{
+				"READ /home/openclaw/.openclaw/workspace/skills/calendar-sync/SKILL.md",
+				"READ /home/openclaw/.openclaw/credentials.json",
+				"CONNECT 203.0.113.77:443",
+			},
+		},
+		ExpectRules: []string{"new-outbound-connect", "secret-read"},
+	}
+}
+
+// SeedOpenClawSkillBaseline learns the fictional skill's normal behavior.
+func SeedOpenClawSkillBaseline(ctx context.Context, c *Client) error {
+	return seedScenarioBaseline(ctx, c, "OpenClaw skill", OpenClawSkillScenario())
+}
+
+// FireOpenClawSkillAttack posts the fictional skill's credential read and new
+// outbound connection so the dashboard has an OpenClaw-shaped CRITICAL alert.
+func FireOpenClawSkillAttack(ctx context.Context, c *Client) error {
+	return fireScenarioAttack(ctx, c, "OpenClaw skill", OpenClawSkillScenario())
+}
+
+func seedScenarioBaseline(ctx context.Context, c *Client, label string, s Scenario) error {
 	base := uint64(time.Now().UnixNano())
 	for i := 0; i < 4; i++ {
 		var batch []model.Attributed
@@ -197,14 +182,13 @@ func SeedMiniShaiHuludBaseline(ctx context.Context, c *Client) error {
 				base+uint64(i)*400_000_000+uint64(j)*1_000_000))
 		}
 		if err := c.PostEvents(ctx, batch); err != nil {
-			return fmt.Errorf("mini-shai-hulud baseline: %w", err)
+			return fmt.Errorf("%s baseline: %w", label, err)
 		}
 	}
 	return nil
 }
 
-func FireMiniShaiHuludAttack(ctx context.Context, c *Client) error {
-	s := MiniShaiHuludScenario()
+func fireScenarioAttack(ctx context.Context, c *Client, label string, s Scenario) error {
 	base := uint64(time.Now().UnixNano())
 	batch := make([]model.Attributed, 0, len(s.Malicious.Behaviors))
 	for i, behavior := range s.Malicious.Behaviors {
@@ -212,7 +196,7 @@ func FireMiniShaiHuludAttack(ctx context.Context, c *Client) error {
 			base+uint64(i)*1_000_000))
 	}
 	if err := c.PostEvents(ctx, batch); err != nil {
-		return fmt.Errorf("mini-shai-hulud attack: %w", err)
+		return fmt.Errorf("%s attack: %w", label, err)
 	}
 	return nil
 }

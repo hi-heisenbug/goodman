@@ -52,14 +52,8 @@ scene.
   remote render dependency.
 - `tests/` — protects scene order, timing math, interaction choreography,
   duration, and required proof assets.
-- `screenshots/` and `capture_screens.py` — preserved static-capture workflow
-  for the legacy renderer and release comparison; they are no longer used by
-  the canonical Remotion composition.
-- `assemble.py` — preserved legacy Pillow/FFmpeg slideshow assembler. It is not
-  the canonical renderer, but remains available for comparison and fallback.
-
-Generated scratch data (`node_modules/`, `public/`, Python bytecode, and legacy
-`frames/`) is intentionally ignored. The final MP4 stays tracked.
+Generated scratch data (`node_modules/`, `public/`, and Python bytecode) is
+intentionally ignored. The final MP4 stays tracked.
 
 The tiny nested `go.mod` is intentional: it prevents the repository root's
 `go test ./...` from walking into npm packages that happen to ship Go sources.
@@ -165,17 +159,6 @@ make demo-check
 The live demo starts a local collector and dashboard, seeds package fingerprints
 and CRITICAL alerts, persists the 1,400/240 reachability snapshot, and replays the
 Mini-Shai-Hulud behavior profile after the configured delay.
-
-## Legacy renderer
-
-The original static assembler is preserved unchanged:
-
-```bash
-python3 demo_build/assemble.py
-```
-
-It writes the same `goodman_demo.mp4` path, so running it replaces the Remotion
-render. Run `npm run render` afterward to restore the canonical video.
 
 Remotion is free for eligible small teams; organizations outside its free terms
 should review the current license at <https://www.remotion.dev/license>.

@@ -17,7 +17,7 @@ Authorization: Bearer <token>
 | Endpoints | Token | 
 |---|---|
 | `POST /v1/events` | ingest token (`GOODMAN_INGEST_TOKEN`) |
-| `/v1/alerts*`, `/v1/fingerprints`, `/v1/stream`, `/metrics` | API token (`GOODMAN_API_TOKEN`) |
+| `/v1/alerts*`, `/v1/fingerprints*`, `/v1/snapshot`, `/v1/export`, `/v1/stream`, `/metrics` | API token (`GOODMAN_API_TOKEN`) |
 | `/v1/healthz`, `/v1/readyz`, dashboard assets | none |
 
 Browser `EventSource` clients mirror the API token into a SameSite cookie scoped
@@ -139,6 +139,106 @@ List learned fingerprints, optionally filtered. Both params optional.
   }
 ]
 ```
+
+### `GET /v1/snapshot`
+
+Return a compact versioned JSON document for consumers that need only current
+open alerts and fingerprints. Requires the API token.
+
+The endpoint includes the newest 500 open alerts and all fingerprints, both
+learning and promoted. Alerts include `baseline_behaviors` when a prior
+baseline exists. Empty collections are encoded as `[]`.
+
+```json
+{
+  "schema": "goodman.snapshot/v1",
+  "generated_at": 1784678400000000000,
+  "alerts": [
+    {
+      "id": "3fa05cdd5cb4bfd1dce898f6",
+      "service": "openclaw",
+      "package": "@goodman-demo/calendar-sync",
+      "old_version": "1.2.2",
+      "new_version": "1.2.3",
+      "severity": "CRITICAL",
+      "new_behaviors": ["READ /home/openclaw/.openclaw/credentials.json"],
+      "detected_at": 1784678399000000000,
+      "status": "open"
+    }
+  ],
+  "fingerprints": [
+    {
+      "service": "openclaw",
+      "package": "@goodman-demo/calendar-sync",
+      "version": "1.2.3",
+      "behaviors": {},
+      "first_seen": 1784678399000000000,
+      "last_seen": 1784678400000000000,
+      "obs_count": 3,
+      "is_baseline": false,
+      "origin": "local"
+    }
+  ]
+}
+```
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $GOODMAN_API_TOKEN" \
+  "$GOODMAN_COLLECTOR_URL/v1/snapshot" > goodman-snapshot.json
+
+goodmanctl snapshot -o goodman-snapshot.json
+```
+
+### `GET /v1/export`
+
+Return the complete dashboard-independent collector state for SIEMs, OpenClaw,
+and other integrations. Requires the API token. The response contains every
+alert state, all learning and baseline fingerprints, every latest persisted
+reachability report (with its week-over-week comparison when available), the
+current coverage snapshot, and enforcement status. Empty collections are `[]`.
+
+```json
+{
+  "schema": "goodman.export/v1",
+  "generated_at": 1784678400000000000,
+  "alerts": [],
+  "fingerprints": [],
+  "reachability": [
+    {
+      "service": "openclaw",
+      "computed_at": 1784678399000000000,
+      "osv": false,
+      "report": { "service": "openclaw", "declared_count": 1400, "executed_count": 240 }
+    }
+  ],
+  "coverage": {
+    "sensors": [],
+    "attribution": { "package": 0, "app": 0, "unknown": 0, "success_rate": 0, "top_unknown": [] },
+    "namespaces": [],
+    "alert_budget": { "target_per_day": 10, "alerts_last_24h": 0, "would_block_last_24h": 0 }
+  },
+  "enforcement": { "master_gate": false, "enabled": false },
+  "live": {
+    "events_persisted": false,
+    "stream": "/v1/stream",
+    "delivery": "best-effort SSE; use alert webhooks for retrying push delivery"
+  }
+}
+```
+
+```bash
+curl -fsS \
+  -H "Authorization: Bearer $GOODMAN_API_TOKEN" \
+  "$GOODMAN_COLLECTOR_URL/v1/export" > goodman-export.json
+
+goodmanctl export -o goodman-export.json
+```
+
+Raw attributed events are not persisted. Consumers that need the event stream
+must connect to `/v1/stream`; consumers that require retrying push delivery
+should configure alert webhooks. This limitation is explicit in `live` so an
+integration cannot mistake the export for an event archive.
 
 ### `GET /v1/fingerprints/export`
 
@@ -381,6 +481,8 @@ being shed under load — investigate before trusting completeness.
 | `goodmanctl fingerprints [-service S] [-package P] [-json]` | `GET /v1/fingerprints` |
 | `goodmanctl fingerprints export` | `GET /v1/fingerprints/export` |
 | `goodmanctl fingerprints import <file>` | `POST /v1/fingerprints/import` |
+| `goodmanctl snapshot [-o FILE]` | `GET /v1/snapshot` |
+| `goodmanctl export [-o FILE]` | `GET /v1/export` |
 | `goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]` | `GET /v1/fingerprints` + OSV.dev (the dashboard Reachability tab uses `POST /v1/report`) |
 | `goodmanctl attribute -pid N [-stacks]` | loads eBPF directly (needs root) |
 

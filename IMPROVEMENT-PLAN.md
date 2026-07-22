@@ -1,5 +1,11 @@
 # Goodman Improvement Plan (2026-07-14)
 
+> **Historical audit snapshot.** The repository has since implemented and
+> verified the plan across detection, enforcement, attribution, API, demo, and
+> setup paths. Line references and present-tense failure descriptions below
+> describe the pre-implementation checkout; use `AGENTS.md` and the current
+> subsystem docs for maintainer guidance.
+
 Consolidated output of a six-track audit: build/test verification, Go backend
 review, eBPF layer review, dashboard review, live demo audit, and market/web
 research. **No code was changed** — this file is the plan. Every finding below
@@ -277,7 +283,7 @@ Tips: reload the tab once after "Goodman demo is ready" before hitting
 record (first paint shows zeros for <1s). The attack replay is one-shot — to
 re-fire, restart the demo.
 
-### Polish gaps before re-recording (ordered)
+### Original polish gaps before re-recording (historical)
 
 1. `demo_build/goodman_demo.mp4` is from Jul 8 (54s, 720p) and predates LSM
    enforcement, HA, and v0.2 docs — re-record.
@@ -293,10 +299,9 @@ re-fire, restart the demo.
    the synthetic names also show if search is opened.
 6. SSE 60s timeout (P0.5) can flicker the "Live" indicator during a >60s
    take (UI auto-recovers; fix P0.5 to eliminate).
-7. Screenshot tooling: one-shot `chrome --headless --screenshot` captures the
-   pre-fetch empty state — `demo_build/capture_screens.py` should be
-   re-checked before regenerating the video; use CDP/interactive capture.
-   (System playwright install is broken; raw CDP works.)
+7. The retired static screenshot pipeline captured pre-fetch empty state. The
+   canonical workflow now uses `demo_build/capture_walkthrough.py` with CDP
+   state verification and a real interactive dashboard recording.
 
 ### What makes the recording land (research-backed)
 - Name the malware: frame the replay as "this is what Mini-Shai-Hulud /

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 )
@@ -35,6 +36,197 @@ func PathToPackage(pidRoot, path string) (pkg, version string, ok bool) {
 	pkgJSON := filepath.Join(pidRoot, path[:idx], "node_modules", pkg, "package.json")
 	version = readVersionField(pkgJSON)
 	return pkg, version, version != ""
+}
+
+var (
+	clawHubSlugPattern  = regexp.MustCompile(`^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$`)
+	clawHubOwnerPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9._-]{0,38}[a-z0-9])?$`)
+)
+
+type clawHubOrigin struct {
+	Version          int               `json:"version"`
+	Registry         string            `json:"registry"`
+	Slug             string            `json:"slug"`
+	OwnerHandle      string            `json:"ownerHandle"`
+	InstalledVersion string            `json:"installedVersion"`
+	InstalledAt      int64             `json:"installedAt"`
+	SourceURL        string            `json:"sourceUrl"`
+	Artifact         *clawHubArtifact  `json:"artifact"`
+	SkillFile        *clawHubSkillFile `json:"skillFile"`
+}
+
+type clawHubArtifact struct {
+	Kind      string `json:"kind"`
+	SHA256    string `json:"sha256"`
+	Integrity string `json:"integrity"`
+}
+
+type clawHubSkillFile struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+}
+
+type clawHubLockfile struct {
+	Version int                             `json:"version"`
+	Skills  map[string]clawHubLockfileEntry `json:"skills"`
+}
+
+type clawHubLockfileEntry struct {
+	Version     string            `json:"version"`
+	InstalledAt int64             `json:"installedAt"`
+	Registry    string            `json:"registry"`
+	OwnerHandle string            `json:"ownerHandle"`
+	SourceURL   string            `json:"sourceUrl"`
+	Artifact    *clawHubArtifact  `json:"artifact"`
+	SkillFile   *clawHubSkillFile `json:"skillFile"`
+}
+
+type cachedSkillIdentity struct {
+	pkg     string
+	version string
+	ok      bool
+}
+
+// PathToOpenClawSkill resolves Node-executed code inside a ClawHub skill from
+// the install metadata OpenClaw writes beside SKILL.md. Local/unversioned skill
+// folders return ok=false; Goodman will not invent a version or skill identity.
+func PathToOpenClawSkill(pidRoot, path string) (pkg, version string, ok bool) {
+	cacheKey := pidRoot + "\x00" + path
+	skillPathCacheMu.Lock()
+	if cached, hit := skillPathCache[cacheKey]; hit {
+		skillPathCacheMu.Unlock()
+		return cached.pkg, cached.version, cached.ok
+	}
+	skillPathCacheMu.Unlock()
+
+	dir := filepath.Dir(filepath.Clean(path))
+	for i := 0; i < 16 && dir != "/" && dir != "."; i++ {
+		hostDir := filepath.Join(pidRoot, dir)
+		if hasSkillCard(hostDir) {
+			if origin, found := readClawHubOrigin(hostDir); found {
+				if workspace, valid := clawHubWorkspace(dir, origin.Slug); valid {
+					if lock, ok := readClawHubLock(filepath.Join(pidRoot, workspace)); ok &&
+						clawHubInstallMatches(origin, lock.Skills[origin.Slug]) {
+						pkg = origin.Slug
+						if origin.OwnerHandle != "" {
+							pkg = "@" + origin.OwnerHandle + "/" + origin.Slug
+						}
+						version, ok = origin.InstalledVersion, true
+						cacheSkillIdentity(cacheKey, cachedSkillIdentity{pkg: pkg, version: version, ok: true})
+						return pkg, version, true
+					}
+				}
+			}
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			break
+		}
+		dir = parent
+	}
+	cacheSkillIdentity(cacheKey, cachedSkillIdentity{})
+	return "", "", false
+}
+
+func hasSkillCard(skillDir string) bool {
+	for _, name := range []string{"SKILL.md", "skill.md", "skills.md", "SKILL.MD"} {
+		info, err := os.Stat(filepath.Join(skillDir, name))
+		if err == nil && info.Mode().IsRegular() {
+			return true
+		}
+	}
+	return false
+}
+
+func clawHubWorkspace(skillDir, slug string) (string, bool) {
+	if filepath.Base(skillDir) != slug {
+		return "", false
+	}
+	skillsDir := filepath.Dir(skillDir)
+	if filepath.Base(skillsDir) != "skills" {
+		return "", false
+	}
+	workspace := filepath.Dir(skillsDir)
+	if workspace == "." || workspace == "/" {
+		return "", false
+	}
+	return workspace, true
+}
+
+func readClawHubLock(workspaceDir string) (clawHubLockfile, bool) {
+	for _, dotDir := range []string{".clawhub", ".clawdhub"} {
+		data, err := os.ReadFile(filepath.Join(workspaceDir, dotDir, "lock.json"))
+		if err != nil {
+			continue
+		}
+		var lock clawHubLockfile
+		if json.Unmarshal(data, &lock) != nil || lock.Version != 1 || lock.Skills == nil {
+			continue
+		}
+		return lock, true
+	}
+	return clawHubLockfile{}, false
+}
+
+func clawHubInstallMatches(origin clawHubOrigin, locked clawHubLockfileEntry) bool {
+	if locked.Version == "" || locked.Version != origin.InstalledVersion ||
+		locked.InstalledAt != origin.InstalledAt || locked.OwnerHandle != origin.OwnerHandle {
+		return false
+	}
+	lockedRegistry := locked.Registry
+	if strings.TrimSpace(lockedRegistry) == "" {
+		lockedRegistry = origin.Registry
+	}
+	if normalizeClawHubRegistry(lockedRegistry) != normalizeClawHubRegistry(origin.Registry) ||
+		strings.TrimSpace(locked.SourceURL) != strings.TrimSpace(origin.SourceURL) {
+		return false
+	}
+	return sameClawHubArtifact(locked.Artifact, origin.Artifact) &&
+		sameClawHubSkillFile(locked.SkillFile, origin.SkillFile)
+}
+
+func normalizeClawHubRegistry(value string) string {
+	return strings.TrimRight(strings.TrimSpace(value), "/")
+}
+
+func sameClawHubArtifact(a, b *clawHubArtifact) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func sameClawHubSkillFile(a, b *clawHubSkillFile) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func readClawHubOrigin(skillDir string) (clawHubOrigin, bool) {
+	for _, dotDir := range []string{".clawhub", ".clawdhub"} {
+		data, err := os.ReadFile(filepath.Join(skillDir, dotDir, "origin.json"))
+		if err != nil {
+			continue
+		}
+		var origin clawHubOrigin
+		if json.Unmarshal(data, &origin) != nil || origin.Version != 1 || origin.InstalledAt <= 0 ||
+			strings.TrimSpace(origin.Registry) == "" || strings.TrimSpace(origin.InstalledVersion) == "" ||
+			!clawHubSlugPattern.MatchString(origin.Slug) {
+			continue
+		}
+		if origin.OwnerHandle != "" && !clawHubOwnerPattern.MatchString(origin.OwnerHandle) {
+			continue
+		}
+		return origin, true
+	}
+	return clawHubOrigin{}, false
+}
+
+func cacheSkillIdentity(key string, identity cachedSkillIdentity) {
+	skillPathCacheMu.Lock()
+	skillPathCache[key] = identity
+	skillPathCacheMu.Unlock()
 }
 
 // PathToPyPackage turns ".../site-packages/requests/adapters.py" into
@@ -98,6 +290,9 @@ type distInfoEntry struct {
 var (
 	versionCacheMu sync.Mutex
 	versionCache   = map[string]string{} // package.json path -> version
+
+	skillPathCacheMu sync.Mutex
+	skillPathCache   = map[string]cachedSkillIdentity{} // pidRoot + source path -> ClawHub identity
 
 	distInfoMu    sync.Mutex
 	distInfoCache = map[string][]distInfoEntry{} // siteDir -> entries
@@ -271,6 +466,9 @@ func FlushVersionCache() {
 	versionCacheMu.Lock()
 	versionCache = map[string]string{}
 	versionCacheMu.Unlock()
+	skillPathCacheMu.Lock()
+	skillPathCache = map[string]cachedSkillIdentity{}
+	skillPathCacheMu.Unlock()
 	distInfoMu.Lock()
 	distInfoCache = map[string][]distInfoEntry{}
 	distInfoMu.Unlock()

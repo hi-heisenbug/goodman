@@ -6,12 +6,31 @@
 set -euo pipefail
 cd "$(dirname "$0")/../.."
 
-DB="$(mktemp -u /tmp/goodman-smoke-XXXX.db)"
-PORT=8846
+free_port() {
+  python3 - <<'PY'
+import socket
+s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+s.bind(("127.0.0.1", 0))
+print(s.getsockname()[1])
+s.close()
+PY
+}
+
+DB="$(mktemp /tmp/goodman-smoke-XXXX.db)"
+PORT="${GOODMAN_SMOKE_PORT:-$(free_port)}"
 BASE="http://127.0.0.1:$PORT"
 LOG="$(mktemp /tmp/goodman-smoke-log-XXXX)"
 
-cleanup() { kill "${COLL_PID:-}" 2>/dev/null || true; rm -f "$DB" "$DB"-* "$LOG"; }
+cleanup() {
+  kill "${COLL_PID:-}" "${ENF_PID:-}" 2>/dev/null || true
+  rm -f "$DB" "$DB"-* "$LOG" "$LOG.enf"
+  if [[ -n "${ENF_DB:-}" ]]; then
+    rm -f "$ENF_DB" "$ENF_DB"-*
+  fi
+  if [[ -n "${ENF_RULES:-}" ]]; then
+    rm -f "$ENF_RULES"
+  fi
+}
 trap cleanup EXIT
 
 echo "== starting collector (learning window: 10 obs / 1ns) =="
@@ -50,8 +69,8 @@ PY
 echo "== SMOKE TEST PASSED =="
 
 echo "== enforcement pipeline (no kernel) =="
-ENF_DB="$(mktemp -u /tmp/goodman-enf-smoke-XXXX.db)"
-ENF_PORT=8847
+ENF_DB="$(mktemp /tmp/goodman-enf-smoke-XXXX.db)"
+ENF_PORT="${GOODMAN_ENFORCEMENT_SMOKE_PORT:-$(free_port)}"
 ENF_BASE="http://127.0.0.1:$ENF_PORT"
 ENF_RULES="$(mktemp /tmp/goodman-enf-rules-XXXX.json)"
 cat >"$ENF_RULES" <<'JSON'
@@ -61,7 +80,6 @@ JSON
 GOODMAN_DSN="$ENF_DB" GOODMAN_LEARN_OBS=2 GOODMAN_LEARN_MIN_AGE=1ns GOODMAN_LISTEN=":$ENF_PORT" \
   GOODMAN_ENFORCE_ENABLED=true ./bin/collector -rules="$ENF_RULES" >"$LOG.enf" 2>&1 &
 ENF_PID=$!
-trap 'kill "${COLL_PID:-}" "${ENF_PID:-}" 2>/dev/null || true; rm -f "$DB" "$DB"-* "$ENF_DB" "$ENF_DB"-* "$LOG" "$LOG.enf" "$ENF_RULES"' EXIT
 
 for i in $(seq 1 50); do curl -sf "$ENF_BASE/v1/healthz" >/dev/null 2>&1 && break; sleep 0.1; done
 

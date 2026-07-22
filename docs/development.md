@@ -14,6 +14,7 @@ make doctor                       # one-time: confirm your toolchain + kernel
 make build                        # compile eBPF + all binaries
 make test                         # unit tests
 make smoke                        # backend end-to-end, NO root
+make quality                      # static/dead/duplicate/complexity/vulnerability gates
 sudo make e2e                     # full live eBPF drift replay (needs root)
 ```
 
@@ -50,9 +51,11 @@ Goodman is testable at three levels, in order of how much they need:
    the pipeline actually produced. This is both the demo and the regression test
    for the capture + attribution path.
 
-CI (`.github/workflows/ci.yml`) runs levels 1–2 plus a dashboard build and a Helm
-lint/template on every push and PR. Level 3 needs a privileged runner and is run
-by maintainers.
+CI (`.github/workflows/ci.yml`) runs levels 1–2, replay/setup/cross-build checks,
+production complexity and duplicate/dead-code gates, `staticcheck`,
+`govulncheck`, dashboard and demo-workspace audits, Docker demo verification,
+and Helm lint/template on every push and PR. Level 3 needs a privileged runner
+and is run by maintainers.
 
 ## Invariants you must not break
 
