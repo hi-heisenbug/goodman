@@ -390,6 +390,7 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 | Doc | Purpose |
 |---|---|
 | [`docs/getting-started.md`](docs/getting-started.md) | Local setup, first run, first alert |
+| [`docs/devpost.md`](docs/devpost.md) | Hackathon / judge paste blocks (voice + verify steps) |
 | [`docs/architecture.md`](docs/architecture.md) | Components, data flow, design decisions |
 | [`docs/attribution.md`](docs/attribution.md) | Why npm/PyPI first; stack→package (Tier 1; Tier 2 PARK) |
 | [`docs/enforcement.md`](docs/enforcement.md) | Optional LSM block mode (fail-open, off by default) |
