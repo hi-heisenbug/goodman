@@ -26,7 +26,21 @@ Watch the product walkthrough:
 
 <video src="demo_build/goodman_demo.mp4" controls width="100%" title="Goodman product demo"></video>
 
-[Open the demo video](demo_build/goodman_demo.mp4)
+[Open the demo video](demo_build/goodman_demo.mp4) ·
+[Vimeo](https://vimeo.com/1211851029)
+
+## OpenClaw and agent runtimes
+
+OpenClaw runs as a Node.js process; ClawHub skills are npm packages. That is
+exactly what Goodman's Tier-1 npm attribution (V8 perf maps → `package.json`)
+was built for: not "a process read a credential file," but
+`skill-xyz@1.2.3` did.
+
+We are wiring a **one-command** path to attach Goodman to an OpenClaw host and
+showing that skill-level attribution in the demo. The same collector API works
+without our dashboard — point a SIEM, OpenClaw skill, or any client at
+[`/v1/*`](docs/api.md) (`/v1/alerts`, `/v1/stream`, `/v1/fingerprints`,
+ingest via `/v1/events`).
 
 ## What It Detects
 
@@ -182,6 +196,21 @@ Highest-severity invariant: `bpf/goodman.h` `struct event` and
 `internal/model/types.go` `RawEvent` stay byte-for-byte identical
 (`internal/model/types_test.go`). That contract includes `DirFD`, which lets
 the sensor resolve relative file paths inside the target mount namespace.
+
+## Built with Codex (GPT-5.6)
+
+I used Codex through the build, not as a one-shot scaffold. Concrete places it
+helped:
+
+- keeping `bpf/goodman.h` `struct event` locked to Go `RawEvent` (layout tests)
+- attribution edges: V8 perf maps, `/proc/<pid>/root`, path → `package.json`
+- collector fingerprint/diff rules, API auth classes, Helm/env surfaces
+- dashboard wired to live `/v1/*` (not mock data in production views)
+- demo / smoke / replay so you can verify the alert path without root:
+  `make demo`
+
+I still read and owned every change. The product rule stayed human: never
+misattribute — prefer `<unknown>` over a wrong package name.
 
 ## Status
 
