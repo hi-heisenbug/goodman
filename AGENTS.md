@@ -158,6 +158,7 @@ All targets are in the `Makefile`; run `make help` for the list.
 | `make bench` | Benchmark the collector ingest pipeline and canonicalization | **no** |
 | `make demo` | Five-minute product wow: seeded alerts, reachability 1,400/240, live Mini-Shai-Hulud replay | **no** |
 | `make demo-check` | Non-interactive demo DoD check (CI) | **no** |
+| `make observe PID=<pid>` | Trace a real Node/Python process; fail unless exact package attribution is proven | **yes** (or rootful Docker via `OBSERVE_ARGS='--live-backend docker'`) |
 | `make e2e` | **Real eBPF** drift replay: sensor + Node workload → alert | **yes** |
 | `make e2e-openclaw` | Real eBPF/V8 OpenClaw runtime-contract proof | **yes** |
 | `make docker-e2e` | Both real eBPF proofs in a privileged Linux container | Docker root |
@@ -370,6 +371,11 @@ replay` must stay green. See [`docs/replay-corpus.md`](docs/replay-corpus.md).
 - Do not claim live eBPF coverage unless `sudo make e2e` or `make docker-e2e`
   ran. The Docker path must retain host PID/cgroup namespaces and explicit
   tracefs, debugfs, and securityfs mounts; otherwise it is not the same proof.
+- `setup-everything.sh observe` is the fastest proof on a user's own process,
+  but it intentionally fails on zero traffic or only `<app>` / `<unknown>`
+  results. Start Node with both perf flags or Python with
+  `PYTHONPERFSUPPORT=1`, drive real traffic during the trace, and do not weaken
+  this verification into a successful empty run.
 - The local e2e sensor watches every supported Node/Python process on the host,
   so unrelated services can produce alerts during a run. Scope assertions to
   the workload service/package instead of requiring a globally empty collector.

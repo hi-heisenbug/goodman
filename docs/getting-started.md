@@ -107,7 +107,33 @@ Non-interactive verification (no browser):
 bash scripts/setup-everything.sh demo --check
 ```
 
-## 5. The full live demo with real eBPF (`sudo make e2e`)
+## 5. Prove attribution on your own process
+
+Before deploying the whole stack, trace one of your real Node/Python services.
+Start it with the Tier-1 runtime switch (no source change), then exercise normal
+traffic while Goodman traces for 20 seconds:
+
+```bash
+# Node
+NODE_OPTIONS="--perf-basic-prof-only-functions --interpreted-frames-native-stack" npm start
+
+# or Python 3.12+
+PYTHONPERFSUPPORT=1 python app.py
+```
+
+In another terminal:
+
+```bash
+bash scripts/setup-everything.sh observe
+```
+
+Goodman auto-selects the target only when exactly one supported runtime exists.
+Otherwise it prints the candidate list; rerun with `--pid <PID>`. The command
+shows unique package behaviors and fails unless at least one exact dependency
+identity was proven. Use `--live-backend docker` to avoid installing the host
+build toolchain.
+
+## 6. The full live demo with real eBPF (`sudo make e2e`)
 
 This is the real thing: the eBPF sensor captures actual syscalls from a running
 Node app and attributes them to the package that made them.
@@ -147,7 +173,7 @@ What it does (all benign — no real malware, no real exfiltration):
 > root. `make docker-e2e` is the disposable rootful-Docker alternative;
 > `make smoke` is the no-root backend alternative.
 
-## 6. Run the stack yourself and open the dashboard
+## 7. Run the stack yourself and open the dashboard
 
 Start the collector with a short, dev-friendly learning window:
 

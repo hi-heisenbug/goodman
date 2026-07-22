@@ -142,6 +142,10 @@ portable-demo-check: portable-build ## Verify the complete demo without eBPF/roo
 setup-everything: ## Auto-prepare and verify the portable demo
 	bash scripts/setup-everything.sh demo --check
 
+.PHONY: observe
+observe: ## Prove attribution on a real Node/Python process (PID=123 optional; needs root/Docker)
+	bash scripts/setup-everything.sh observe $(if $(PID),--pid $(PID),) $(OBSERVE_ARGS)
+
 .PHONY: e2e-openclaw
 e2e-openclaw: ## Real eBPF OpenClaw runtime-contract proof (run after make build; needs root)
 	bash test/e2e/openclaw_test.sh

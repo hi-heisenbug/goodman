@@ -17,6 +17,7 @@ working. It is written for both humans and coding agents.
 | Attack replay corpus | `make replay` | no | npm incident and integration fixtures raise the expected CRITICAL alerts. |
 | Product dashboard demo | `make demo` | no | OpenClaw skill drift, reachability, live Mini-Shai-Hulud replay. |
 | Demo DoD check | `make demo-check` | no | Non-interactive verification of the five-minute wow. |
+| Prove attribution on your app | `bash scripts/setup-everything.sh observe` | yes or Docker | Traces a real Node/Python PID and fails unless an exact dependency is attributed. |
 | HA ingest smoke | `make ha-smoke` | Docker | Two collectors vs Postgres: fingerprint parity + alert dedup (skips without Docker). |
 | Real local eBPF demo | `sudo make e2e` | yes | Sensor captures real syscalls and attributes package drift. |
 | Containerized real-kernel e2e | `make docker-e2e` | Docker | Runs OpenClaw attribution and drift/LSM enforcement against the Linux host kernel. |
@@ -127,6 +128,55 @@ http://127.0.0.1:8844/#alerts
 http://127.0.0.1:8844/#fingerprints
 http://127.0.0.1:8844/#reachability
 ```
+
+## Prove Goodman On Your Own Workload
+
+Use this before a full deployment when a user or judge wants proof against an
+existing service rather than a Goodman fixture. No collector or database is
+needed; this isolates the hardest claim, syscall-to-package attribution.
+
+Start or restart the workload with the relevant Tier-1 runtime switch:
+
+```bash
+# Node: applies to npm apps and OpenClaw Gateway
+NODE_OPTIONS="--perf-basic-prof-only-functions --interpreted-frames-native-stack" npm start
+
+# CPython 3.12+
+PYTHONPERFSUPPORT=1 python app.py
+```
+
+Then, from the Goodman checkout:
+
+```bash
+bash scripts/setup-everything.sh observe
+```
+
+When exactly one supported Node/Python runtime is running, Goodman selects it.
+When several are present, it prints their PID, comm, and command without
+guessing; choose one explicitly:
+
+```bash
+bash scripts/setup-everything.sh observe --pid 1234 --duration 30s
+```
+
+Send normal HTTP requests, jobs, or CLI actions to the service during the trace.
+The output shows each unique `service | package@version | behavior` once, then a
+deterministic proof summary. `-verify` is enabled by this setup path, so zero
+events or only `<app>` / `<unknown>` attribution returns a non-zero exit code
+with the exact runtime/traffic hint to fix it.
+
+Only the eBPF tracing process is elevated; Goodman never starts the target app
+as root. If the host lacks Go/clang/bpftool but has rootful Docker, keep the
+host toolchain untouched:
+
+```bash
+bash scripts/setup-everything.sh observe --pid 1234 --live-backend docker
+```
+
+This container still observes the selected host PID and runs eBPF against the
+host kernel (`--pid=host`, host cgroup/tracefs/debugfs/securityfs mounts). Add
+`--stacks` only when debugging attribution; the default deduplicated view is
+better for a first proof.
 
 ## Run The Collector Manually
 

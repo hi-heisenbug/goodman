@@ -32,8 +32,8 @@ Usage:
                                                             five-minute product wow (no root)
   goodmanctl enforce status|on|off [-collector URL] [-token T]
                                                             kernel enforcement runtime switch
-  goodmanctl attribute -pid N [-duration 15s] [-proc-root /proc]
-                                                            live-attribute one pid (needs root)
+  goodmanctl attribute [-pid N] [-duration 15s] [-dedupe] [-verify]
+                                                            prove attribution on a real process (needs root)
 
 All collector commands accept -token (or GOODMAN_API_TOKEN) when the
 collector's API requires authentication.

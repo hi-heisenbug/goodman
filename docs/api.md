@@ -484,7 +484,7 @@ being shed under load — investigate before trusting completeness.
 | `goodmanctl snapshot [-o FILE]` | `GET /v1/snapshot` |
 | `goodmanctl export [-o FILE]` | `GET /v1/export` |
 | `goodmanctl report -lockfile package-lock.json [-service S] [-osv] [-o FILE]` | `GET /v1/fingerprints` + OSV.dev (the dashboard Reachability tab uses `POST /v1/report`) |
-| `goodmanctl attribute -pid N [-stacks]` | loads eBPF directly (needs root) |
+| `goodmanctl attribute [-pid N] [-dedupe] [-verify] [-stacks]` | loads eBPF directly, auto-selects a lone runtime, and can require exact package proof (needs root) |
 
 ### `goodmanctl report`
 

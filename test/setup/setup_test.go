@@ -103,6 +103,64 @@ func TestAllSetupInstallsPrerequisitesOnce(t *testing.T) {
 	}
 }
 
+func TestObserveSetupDryRunTracesARealHostPID(t *testing.T) {
+	out := runSetup(t, "observe", "--pid", "4242", "--duration", "20s", "--stacks", "--live-backend", "host", "--dry-run")
+	for _, want := range []string{
+		"real workload attribution proof",
+		"make build",
+		"./bin/goodmanctl attribute",
+		"-pid 4242",
+		"-duration 20s",
+		"-dedupe",
+		"-verify",
+		"-stacks",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("observe host dry-run missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestObserveSetupDryRunCanUseDisposableDockerToolchain(t *testing.T) {
+	out := runSetup(t, "observe", "--pid", "4242", "--live-backend", "docker", "--dry-run")
+	for _, want := range []string{
+		"deploy/docker/e2e.Dockerfile",
+		"--privileged",
+		"--pid=host",
+		"--entrypoint /src/bin/goodmanctl",
+		"attribute -pid 4242",
+		"-dedupe",
+		"-verify",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("observe Docker dry-run missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestObserveSetupCanAutoDiscoverTarget(t *testing.T) {
+	out := runSetup(t, "observe", "--live-backend", "host", "--dry-run")
+	if strings.Contains(out, "-pid") {
+		t.Fatalf("auto-discovery dry-run unexpectedly supplied a pid:\n%s", out)
+	}
+	if !strings.Contains(out, "./bin/goodmanctl attribute") {
+		t.Fatalf("auto-discovery command missing:\n%s", out)
+	}
+}
+
+func TestObserveSetupRejectsInvalidPIDBeforeBuilding(t *testing.T) {
+	out, err := runSetupCommand(t, "observe", "--pid", "nope", "--dry-run")
+	if err == nil {
+		t.Fatal("invalid observe pid succeeded")
+	}
+	if !strings.Contains(out, "pid must be a positive integer") {
+		t.Fatalf("invalid pid error was not actionable:\n%s", out)
+	}
+	if strings.Contains(out, "make build") || strings.Contains(out, "docker build") {
+		t.Fatalf("invalid pid reached build steps:\n%s", out)
+	}
+}
+
 func TestSetupRejectsMissingOptionValueClearly(t *testing.T) {
 	out, err := runSetupCommand(t, "demo", "--backend")
 	if err == nil {

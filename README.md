@@ -77,6 +77,48 @@ bash scripts/setup-everything.sh all --live-backend docker
 If you are in a sandbox that cannot load BPF, use `make smoke` + `make demo`.
 That still exercises store → fingerprint → diff → API → dashboard.
 
+## Prove it on your own running app
+
+This is the fastest real-environment check of Goodman's core claim. Restart one
+Node or Python service with its runtime's native perf-map switch (no code
+change), then trace normal traffic for 20 seconds:
+
+```bash
+# Node
+NODE_OPTIONS="--perf-basic-prof-only-functions --interpreted-frames-native-stack" npm start
+
+# Python 3.12+
+PYTHONPERFSUPPORT=1 python app.py
+```
+
+From the Goodman checkout, in another terminal:
+
+```bash
+bash scripts/setup-everything.sh observe
+```
+
+If several supported runtimes are running, Goodman prints the candidate table;
+rerun with `--pid <PID>`. Generate normal requests/jobs while it traces. The
+command deduplicates repeated syscalls and exits successfully only after it has
+attributed real behavior to at least one exact `package@version`:
+
+```text
+checkout | axios@1.8.4 | CONNECT 203.0.113.10:443
+PASS: Goodman attributed real syscalls to 1 dependency identity.
+```
+
+The script builds locally and elevates only the eBPF trace. To leave the host
+toolchain untouched, use rootful Docker against the same host process and
+kernel:
+
+```bash
+bash scripts/setup-everything.sh observe --pid 1234 --live-backend docker
+```
+
+`make observe PID=1234` is the short Make equivalent. This proves attribution
+on your workload; `sudo make e2e` remains the deterministic full alert + block
+proof, and the Helm path below is the production-shaped deployment.
+
 ## OpenClaw / agent runtimes
 
 OpenClaw ships as an npm package and runs its Gateway on Node. Current ClawHub

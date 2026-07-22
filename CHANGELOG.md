@@ -32,6 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- One-command real-workload proof: `scripts/setup-everything.sh observe`
+  auto-selects a single supported Node/Python runtime or lists candidates,
+  traces through the host toolchain or a disposable privileged container,
+  deduplicates behavior output, and fails unless exact package attribution is
+  demonstrated.
 - Portable one-command setup: `scripts/setup-everything.sh` selects local Go or
   Docker for the no-root demo and can install supported Linux prerequisites,
   optionally install OpenClaw, configure its user systemd service, and run both
