@@ -3,7 +3,7 @@ import { COLORS, FONTS } from "../theme";
 export type TerminalLine = {
   readonly text: string;
   readonly at: number;
-  readonly kind: "command" | "output" | "alert";
+  readonly kind: "command" | "output" | "alert" | "success";
   readonly typed?: boolean;
 };
 
@@ -100,7 +100,9 @@ export const TerminalCard: React.FC<TerminalCardProps> = ({
               ? COLORS.white
               : line.kind === "alert"
                 ? COLORS.red
-                : COLORS.muted;
+                : line.kind === "success"
+                  ? COLORS.lime
+                  : COLORS.muted;
           return (
             <div key={`${line.at}-${line.text}`} style={{ color }}>
               {line.kind === "command" ? (

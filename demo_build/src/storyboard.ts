@@ -5,8 +5,8 @@ export type SceneId =
   | "turn"
   | "live-alert"
   | "kill-chain"
+  | "observe-proof"
   | "reachability"
-  | "trust"
   | "close";
 
 export type Cut = "master" | "x";
@@ -20,50 +20,42 @@ export type StoryScene = {
 // Hard cuts between scenes: tempo contrast comes from inside each scene, not
 // from crossfades. Scene boundaries land on score beats.
 export const SCENES: readonly StoryScene[] = [
-  { id: "cold-open", durationInFrames: 250 },
-  { id: "turn", durationInFrames: 95 },
+  { id: "cold-open", durationInFrames: 180 },
+  { id: "turn", durationInFrames: 90 },
   {
     id: "live-alert",
-    durationInFrames: 300,
-    recording: "goodman_walkthrough.mp4",
-  },
-  { id: "kill-chain", durationInFrames: 250 },
-  {
-    id: "reachability",
-    durationInFrames: 260,
-    recording: "goodman_walkthrough.mp4",
-  },
-  {
-    id: "trust",
-    durationInFrames: 245,
-    recording: "goodman_walkthrough.mp4",
-  },
-  { id: "close", durationInFrames: 240 },
-] as const;
-
-// The ~45s X/Twitter cut: same scenes, tightened beats. Walkthrough playback
-// rates in GoodmanDemo.tsx are chosen so each recording segment still covers
-// its scene.
-export const X_SCENES: readonly StoryScene[] = [
-  { id: "cold-open", durationInFrames: 190 },
-  { id: "turn", durationInFrames: 88 },
-  {
-    id: "live-alert",
-    durationInFrames: 264,
+    durationInFrames: 330,
     recording: "goodman_walkthrough.mp4",
   },
   { id: "kill-chain", durationInFrames: 210 },
+  { id: "observe-proof", durationInFrames: 240 },
   {
     id: "reachability",
-    durationInFrames: 210,
+    durationInFrames: 270,
     recording: "goodman_walkthrough.mp4",
   },
+  { id: "close", durationInFrames: 180 },
+] as const;
+
+// The 42s social cut: same scenes, tightened beats. Walkthrough playback
+// rates in GoodmanDemo.tsx are chosen so each recording segment still covers
+// its scene.
+export const X_SCENES: readonly StoryScene[] = [
+  { id: "cold-open", durationInFrames: 150 },
+  { id: "turn", durationInFrames: 75 },
   {
-    id: "trust",
-    durationInFrames: 200,
+    id: "live-alert",
+    durationInFrames: 270,
     recording: "goodman_walkthrough.mp4",
   },
-  { id: "close", durationInFrames: 200 },
+  { id: "kill-chain", durationInFrames: 180 },
+  { id: "observe-proof", durationInFrames: 210 },
+  {
+    id: "reachability",
+    durationInFrames: 225,
+    recording: "goodman_walkthrough.mp4",
+  },
+  { id: "close", durationInFrames: 150 },
 ] as const;
 
 export const scenesFor = (cut: Cut) => (cut === "x" ? X_SCENES : SCENES);

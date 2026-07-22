@@ -4,8 +4,8 @@ import { ClosingScene } from "./scenes/ClosingScene";
 import { ColdOpen } from "./scenes/ColdOpen";
 import { KillChainScene } from "./scenes/KillChainScene";
 import { LiveAlertScene } from "./scenes/LiveAlertScene";
+import { ObserveProofScene } from "./scenes/ObserveProofScene";
 import { ReachabilityScene } from "./scenes/ReachabilityScene";
-import { TrustScene } from "./scenes/TrustScene";
 import { TurnScene } from "./scenes/TurnScene";
 import {
   TOTAL_FRAMES,
@@ -23,19 +23,19 @@ const CUT_CONFIG = {
     total: TOTAL_FRAMES,
     audio: "audio/goodman-score.wav",
     compactColdOpen: false,
-    alertRate: 0.88,
-    verdictAt: 150,
-    reachRate: 0.4,
-    trustRate: 0.54,
+    alertRate: 1,
+    verdictAt: 120,
+    reachRate: 0.84,
+    coverageRate: 0.73,
   },
   x: {
     total: TOTAL_FRAMES_X,
     audio: "audio/goodman-score-x.wav",
     compactColdOpen: true,
-    alertRate: 0.98,
-    verdictAt: 130,
-    reachRate: 0.49,
-    trustRate: 0.66,
+    alertRate: 11 / 9,
+    verdictAt: 105,
+    reachRate: 0.84,
+    coverageRate: 1,
   },
 } as const;
 
@@ -82,11 +82,14 @@ export const GoodmanDemo: React.FC<GoodmanDemoProps> = ({
         <Series.Sequence durationInFrames={durationOf("kill-chain")}>
           <KillChainScene verdictAt={config.verdictAt} />
         </Series.Sequence>
-        <Series.Sequence durationInFrames={durationOf("reachability")}>
-          <ReachabilityScene playbackRate={config.reachRate} />
+        <Series.Sequence durationInFrames={durationOf("observe-proof")}>
+          <ObserveProofScene />
         </Series.Sequence>
-        <Series.Sequence durationInFrames={durationOf("trust")}>
-          <TrustScene playbackRate={config.trustRate} />
+        <Series.Sequence durationInFrames={durationOf("reachability")}>
+          <ReachabilityScene
+            reachPlaybackRate={config.reachRate}
+            coveragePlaybackRate={config.coverageRate}
+          />
         </Series.Sequence>
         <Series.Sequence durationInFrames={durationOf("close")}>
           <ClosingScene />

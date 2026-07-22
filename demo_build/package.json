@@ -6,6 +6,8 @@
   "license": "UNLICENSED",
   "scripts": {
     "capture": "python3 capture_walkthrough.py",
+    "capture:observe": "python3 capture_observe_proof.py",
+    "capture:all": "npm run capture && npm run capture:observe",
     "assets": "python3 prepare_assets.py",
     "dev": "npm run assets && remotion studio src/index.ts --no-open",
     "test": "vitest run",
@@ -14,7 +16,7 @@
     "check": "npm run test && npm run lint && npm run compositions",
     "render": "npm run assets && remotion render src/index.ts GoodmanDemo goodman_demo.mp4 --codec=h264 --audio-codec=aac --crf=16 --pixel-format=yuv420p --concurrency=50%",
     "render:x": "npm run assets && remotion render src/index.ts GoodmanDemoX goodman_demo_x.mp4 --codec=h264 --audio-codec=aac --crf=16 --pixel-format=yuv420p --concurrency=50%",
-    "poster": "npm run assets && remotion still src/index.ts GoodmanDemo poster.png --frame=600",
+    "poster": "npm run assets && remotion still src/index.ts GoodmanDemo poster.png --frame=470",
     "upgrade": "remotion upgrade"
   },
   "dependencies": {

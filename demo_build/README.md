@@ -3,57 +3,62 @@
 This directory is the self-contained generation workspace for the Goodman
 product demo. The canonical video is a Remotion composition built around a
 real, scripted Chromium walkthrough of the Goodman dashboard, deterministic
-motion graphics, and an original locally generated score. The cursor moves,
-the Mini-Shai-Hulud alert arrives live, the rollback command is copied, and the
-walkthrough clicks through Fingerprints, Reachability, and Coverage.
+motion graphics, and an original score generated on the build host. The walkthrough
+starts with a real OpenClaw skill alert, records a second alert arriving live,
+copies both rollback commands, and opens the Fingerprints, Reachability, and
+Coverage views. A separate host-kernel capture proves attribution against a
+real Node workload.
 
 Final output:
 
-- `goodman_demo.mp4` — 1920×1080, 30 fps, 54.7 seconds, H.264/AAC. The
-  founder-sales master cut.
-- `goodman_demo_x.mp4` — 1920×1080, 30 fps, 45.4 seconds, H.264/AAC. The
-  X/Twitter cut: same scenes, tightened beats, its own beat-matched score.
-- `recordings/goodman_walkthrough.mp4` — 20-second live dashboard interaction
+- `goodman_demo.mp4`: 1920×1080, 30 fps, 50 seconds, H.264/AAC. The
+  judge-facing master cut.
+- `goodman_demo_x.mp4`: 1920×1080, 30 fps, 42 seconds, H.264/AAC. The
+  social cut with the same proof in tighter beats.
+- `recordings/goodman_walkthrough.mp4`: 22-second live dashboard interaction
   used inside the Remotion scenes.
 
 Both cuts render from one component tree: the `GoodmanDemo` and
-`GoodmanDemoX` compositions differ only in per-scene durations and the
-walkthrough playback rates that keep every recording segment covering its
+`GoodmanDemoX` compositions use different per-scene durations and walkthrough
+playback rates that keep each recording segment covering its
 scene.
 
-The film follows the hook → turn → proof → trust → close arc used by
-premium dev-tool launch videos: a real-world Shai-Hulud cold open with no
-logo, a dip-to-black brand turn with 400 ms of silence, the live alert
-landing mid-recording with a synced screen flash, a kill-chain attribution
-cascade, animated reachability counters, one bento-grid trust recap, and a
-typed-terminal call to action. Motion uses critically damped springs for
-entrances and reserves the single overshoot spring for verdict moments; the
-canvas is a dark grid with film grain, vignette, and one radial glow per
-scene.
+The film opens on a clean npm install, then shows the kernel behavior that the
+package manager missed. Goodman identifies an OpenClaw skill drift and a live
+Mini-Shai-Hulud arrival, traces syscalls to the versioned package, and displays
+the real-workload observe proof. Reachability and coverage show the deployment
+view before the final command invites judges to repeat the proof on their own
+app.
 
 ## What is here
 
-- `src/` — Remotion composition, shared motion components, and seven scenes.
-- `interaction_plan.json` — recording dimensions, synchronized scene segments,
+- `src/`: Remotion composition, shared motion components, and seven scenes.
+- `interaction_plan.json`: recording dimensions, synchronized scene segments,
   and the cursor/click choreography.
-- `capture_walkthrough.py` — starts the real `goodmanctl demo` flow and records
+- `capture_walkthrough.py`: starts the real `goodmanctl demo` flow and records
   a deterministic Chromium session under Xvfb with FFmpeg and `xdotool`.
-- `browser_state.mjs` — reads the live page through Chrome DevTools so every
+- `browser_target.mjs`: finds alert controls from rendered card text so
+  capture actions survive layout changes.
+- `browser_state.mjs`: reads the live page through Chrome DevTools so each
   coordinate-driven click is verified against its route and rendered text.
-- `walkthrough.py` — shared plan loading and strict FFprobe validation used by
+- `capture_observe_proof.py`: runs the real host workload through the
+  privileged Docker observe path and writes sanitized attribution evidence.
+- `evidence/observe_proof.json`: checked-in package, behavior, and event counts
+  from that host-kernel capture.
+- `walkthrough.py`: shared plan loading and strict FFprobe validation used by
   both capture and asset preparation.
-- `recordings/` — canonical live product recording consumed by Remotion.
-- `prepare_assets.py` — validates and copies the walkthrough into Remotion's
+- `recordings/`: canonical live product recording consumed by Remotion.
+- `prepare_assets.py`: validates and copies the walkthrough into Remotion's
   generated `public/` directory.
-- `generate_audio.py` — creates the deterministic Goodman scores (56s master,
-  46s X cut) with Python's standard library; impacts land on each cut's scene
-  beats, the mix dips to near-silence under the brand turn, and the
+- `generate_audio.py`: creates the deterministic Goodman scores (51s master,
+  43s social cut) with Python's standard library; impacts land on each cut's
+  scene beats, the mix dips to near-silence under the brand turn, and the
   live-alert moment carries a heavier sub-bass hit. No downloaded music or
   remote render dependency.
-- `tests/` — protects scene order, timing math, interaction choreography,
+- `tests/`: protects scene order, timing math, interaction choreography,
   duration, and required proof assets.
-Generated scratch data (`node_modules/`, `public/`, and Python bytecode) is
-intentionally ignored. The final MP4 stays tracked.
+The repo ignores generated scratch data (`node_modules/`, `public/`, and Python
+bytecode). The final MP4 stays tracked.
 
 The tiny nested `go.mod` is intentional: it prevents the repository root's
 `go test ./...` from walking into npm packages that happen to ship Go sources.
@@ -69,8 +74,8 @@ npm run check
 npm run dev
 ```
 
-Remotion Studio prints a local preview URL and does not open a browser
-automatically. In a second terminal, render the canonical video:
+Remotion Studio prints a local preview URL and leaves browser launch to you. In
+a second terminal, render the canonical video:
 
 ```bash
 cd demo_build
@@ -81,7 +86,9 @@ Useful commands:
 
 ```bash
 npm run capture   # regenerate the live Chromium walkthrough
-npm run render:x  # render the 45s X/Twitter cut (goodman_demo_x.mp4)
+npm run capture:observe # refresh the host-kernel attribution evidence
+npm run capture:all     # refresh both proof sources
+npm run render:x  # render the 42s social cut (goodman_demo_x.mp4)
 npm test          # storyboard and asset contract
 npm run lint      # ESLint + strict TypeScript
 npm run compositions
@@ -90,7 +97,7 @@ npm run upgrade   # upgrade aligned Remotion packages
 ```
 
 Remotion packages must stay on the same exact version. The checked-in lockfile
-currently pins Remotion 4.0.489.
+pins Remotion 4.0.489.
 
 ## Refresh the interactive product proof
 
@@ -107,43 +114,42 @@ sudo apt-get install -y chromium xvfb ffmpeg xdotool
 make dashboard
 make build
 cd demo_build
-npm run capture
+npm run capture:all
 npm run check
 npm run render
+npm run render:x
 ```
 
-The capture script uses a fresh port, X display, Chromium profile, and SQLite
-database. It synchronizes the recording to the live attack timer, verifies the
-alert arrival, copied rollback state, routes, and page headings through Chrome
+The browser capture uses a fresh port, X display, Chromium profile, and SQLite
+database. It synchronizes the recording to the live attack timer, verifies both
+alert cards, copied rollback states, routes, and page headings through Chrome
 DevTools, then checks the output's codec, resolution, exact frame count, frame
-rate, duration, and size. Every process is stopped on exit. Adjust
-`interaction_plan.json` if dashboard navigation or layout changes; keep every
-action inside its intended segment and recapture before rendering.
+rate, duration, and size. The observe capture starts the repository's Node
+workload and runs `setup-everything.sh observe` through privileged Docker. It
+stores sanitized counts and the dependency identity in
+`evidence/observe_proof.json`. Both scripts stop their child processes on exit.
+Adjust `interaction_plan.json` if dashboard navigation or layout changes. Keep
+each action inside its intended segment and recapture before rendering.
 
 ## Storyboard
 
-1. Cold open (8.3s): the real September 2025 Shai-Hulud hook, a typed
-   `npm install` that reports zero vulnerabilities, and the red kernel-event
-   cascade that followed. No logo yet.
-2. Turn (3.2s): dip to black, 400 ms of silence, then the first green frame —
-   "Goodman watches what your code actually does."
-3. Live alert (10s): the alerts segment of the real recording plays at 0.88×
-   so it exactly covers the scene; the Mini-Shai-Hulud alert lands on frame
-   150 with a synced screen flash and a border-beam verdict card, then the
-   cursor copies the rollback command.
-4. Kill chain (8.3s): package update card → four escalating behavior events →
-   ATTRIBUTED verdict bar with the film's one overshoot spring.
-5. Reachability (8.7s): 1,400 declared counts down to 240 executed with
-   tabular numerals while the walkthrough clicks into the live report.
-6. Trust (8.2s): a single bento grid — live coverage view plus fingerprint,
-   coverage, and attribution counters.
-7. Close (8s): typed `goodmanctl demo`, the repository URL, and a 2-second
-   hold on the final frame.
+1. Cold open (6s): `npm install` reports zero vulnerabilities before kernel
+   behavior appears.
+2. Turn (3s): Goodman enters after a short black-frame pause.
+3. Live alert (11s): the real dashboard shows OpenClaw skill drift, copies its
+   rollback command, then receives and handles Mini-Shai-Hulud live.
+4. Kill chain (7s): syscall events resolve to the exact package and version.
+5. Observe proof (8s): a host-kernel capture attributes 99 real events to
+   `good-pkg@1.0.0`.
+6. Reachability (9s): the live report moves from 1,400 declared packages to 240
+   observed at runtime, then opens coverage.
+7. Close (6s): `goodmanctl demo`, the repository URL, and the invitation to
+   prove the result on another workload.
 
 ## Interactive five-minute product demo
 
-The recorded walkthrough uses the same live Goodman demo flow that can also be
-run manually for a longer presentation:
+The recorded walkthrough uses the same live Goodman demo flow that you can run
+by hand for a longer presentation:
 
 ```bash
 make demo

@@ -32,35 +32,43 @@ class ScoreProfile:
         self.silence = silence
 
 
-# 54.7s master: kernel events, logo reveal, alert lands (weighted),
-# kill-chain verdict, reachability counter, trust bento, closing headline.
+# 50s master: clean-install hook, kernel turn, OpenClaw proof, live attack,
+# package verdict, real-workload proof, reachability/coverage, close.
 MASTER = ScoreProfile(
-    duration_seconds=56.0,
+    duration_seconds=51.0,
     impacts=(
-        (4.7, 1.0),
-        (8.85, 1.0),
-        (16.8, 1.9),
-        (26.5, 1.2),
-        (31.0, 1.0),
-        (39.5, 1.0),
-        (47.1, 1.1),
+        (1.7, 0.9),
+        (4.2, 1.2),
+        (6.2, 1.0),
+        (10.5, 1.2),
+        (15.05, 1.9),
+        (24.0, 1.4),
+        (29.0, 1.0),
+        (33.4, 1.6),
+        (38.0, 1.0),
+        (42.2, 1.1),
+        (45.0, 1.2),
     ),
-    silence=(8.15, 8.72),
+    silence=(5.85, 6.35),
 )
 
-# 45.4s X cut: same beats on the tightened storyboard.
+# 42s X cut: the same proof beats on the tightened storyboard.
 XCUT = ScoreProfile(
-    duration_seconds=46.0,
+    duration_seconds=43.0,
     impacts=(
-        (3.75, 1.0),
-        (6.8, 1.0),
-        (13.77, 1.9),
-        (22.4, 1.2),
-        (26.2, 1.0),
-        (33.1, 1.0),
-        (39.2, 1.1),
+        (1.3, 0.9),
+        (3.5, 1.2),
+        (5.2, 1.0),
+        (8.8, 1.2),
+        (12.4, 1.9),
+        (20.0, 1.4),
+        (24.0, 1.0),
+        (28.0, 1.6),
+        (32.0, 1.0),
+        (36.2, 1.1),
+        (37.5, 1.2),
     ),
-    silence=(6.18, 6.7),
+    silence=(4.85, 5.25),
 )
 
 

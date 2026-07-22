@@ -17,8 +17,8 @@ const SCENE_ORDER = [
   "turn",
   "live-alert",
   "kill-chain",
+  "observe-proof",
   "reachability",
-  "trust",
   "close",
 ];
 
@@ -33,15 +33,15 @@ const CUTS: readonly {
     cut: "master",
     scenes: SCENES,
     total: TOTAL_FRAMES,
-    minSeconds: 48,
-    maxSeconds: 60,
+    minSeconds: 49,
+    maxSeconds: 52,
   },
   {
     cut: "x",
     scenes: X_SCENES,
     total: TOTAL_FRAMES_X,
-    minSeconds: 40,
-    maxSeconds: 48,
+    minSeconds: 41,
+    maxSeconds: 44,
   },
 ];
 

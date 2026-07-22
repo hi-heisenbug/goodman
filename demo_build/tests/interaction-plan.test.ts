@@ -39,6 +39,7 @@ describe("interactive Goodman walkthrough", () => {
 
   it("clicks and verifies every dashboard section", () => {
     expect(plan.actions.filter((action) => action.click).map((action) => action.label)).toEqual([
+      "copy-openclaw",
       "copy-rollback",
       "fingerprints",
       "reachability",
@@ -56,12 +57,21 @@ describe("interactive Goodman walkthrough", () => {
     }
   });
 
+  it("targets alert controls by DOM evidence instead of stale coordinates", () => {
+    const openClaw = plan.actions.find((action) => action.label === "copy-openclaw");
+    const miniShai = plan.actions.find((action) => action.label === "copy-rollback");
+    expect(openClaw?.target_text).toBe("@goodman-demo/calendar-sync");
+    expect(openClaw?.control_text).toBe("Copy rollback template");
+    expect(miniShai?.target_text).toBe("mini-shai-hulud-loader");
+    expect(miniShai?.control_text).toBe("Copy rollback template");
+  });
+
   it("records a 1080p 30 fps canonical asset", () => {
     expect(plan.output).toBe("goodman_walkthrough.mp4");
     expect(plan.width).toBe(1920);
     expect(plan.height).toBe(1080);
     expect(plan.fps).toBe(30);
-    expect(plan.duration_seconds).toBeGreaterThanOrEqual(18);
+    expect(plan.duration_seconds).toBeGreaterThanOrEqual(21);
     expect(plan.duration_seconds).toBeLessThanOrEqual(24);
   });
 

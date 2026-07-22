@@ -7,17 +7,19 @@ import { progress, springIn } from "../motion";
 import { COLORS, FONTS } from "../theme";
 
 const CTA_LINES: readonly TerminalLine[] = [
-  { text: "goodmanctl demo", at: 74, kind: "command" },
-  { text: "Goodman demo is ready → http://127.0.0.1:8844", at: 104, kind: "output", typed: false },
+  { text: "bash scripts/setup-everything.sh demo", at: 52, kind: "command" },
+  { text: "dashboard + live replay ready → http://127.0.0.1:8844", at: 78, kind: "output", typed: false },
+  { text: "bash scripts/setup-everything.sh observe --pid <PID>", at: 88, kind: "command" },
+  { text: "PASS · exact package@version on your workload", at: 118, kind: "success", typed: false },
 ];
 
 export const ClosingScene: React.FC = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const logo = springIn(frame, fps, 4);
-  const terminal = springIn(frame, fps, 66);
-  const pill = springIn(frame, fps, 128);
-  const tagline = progress(frame, 148, 16);
+  const logo = springIn(frame, fps, 2);
+  const terminal = springIn(frame, fps, 46);
+  const pill = springIn(frame, fps, 112);
+  const tagline = progress(frame, 124, 14);
 
   return (
     <AbsoluteFill>
@@ -30,20 +32,20 @@ export const ClosingScene: React.FC = () => {
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
-          gap: 44,
+          gap: 36,
         }}
       >
         <div style={{ opacity: Math.min(1, logo * 1.3), scale: 0.94 + logo * 0.06 }}>
           <BrandMark glow />
         </div>
         <KineticHeadline
-          text="See which dependency actually did it."
+          text="Demo anywhere. Prove it on yours."
           frame={frame}
-          startAt={14}
-          fontSize={92}
+          startAt={8}
+          fontSize={96}
           align="center"
           maxWidth={1380}
-          accentWords={["actually"]}
+          accentWords={["Prove", "yours"]}
           accentColor={COLORS.lime}
         />
         <div
@@ -55,10 +57,10 @@ export const ClosingScene: React.FC = () => {
           <TerminalCard
             lines={CTA_LINES}
             frame={frame}
-            width={880}
-            title="one afternoon to a running pilot"
-            fontSize={25}
-            minHeight={130}
+            width={1120}
+            title="two commands · zero fake UI"
+            fontSize={22}
+            minHeight={180}
           />
         </div>
         <div
@@ -71,12 +73,12 @@ export const ClosingScene: React.FC = () => {
         >
           <div
             style={{
-              padding: "16px 28px",
+              padding: "14px 26px",
               borderRadius: 10,
               backgroundColor: COLORS.mint,
               color: "#0a0a0c",
               fontFamily: FONTS.mono,
-              fontSize: 24,
+              fontSize: 22,
               fontWeight: 700,
               opacity: Math.min(1, pill * 1.3),
               scale: 0.95 + pill * 0.05,
@@ -89,12 +91,12 @@ export const ClosingScene: React.FC = () => {
             style={{
               color: COLORS.muted,
               fontFamily: FONTS.mono,
-              fontSize: 19,
+              fontSize: 17,
               letterSpacing: 2.5,
               opacity: tagline,
             }}
           >
-            RUNTIME DEPENDENCY SECURITY AT PACKAGE PRECISION
+            GOODMAN BY HEISENBUG · PACKAGE-PRECISE RUNTIME SECURITY
           </div>
         </div>
       </div>

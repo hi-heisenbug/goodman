@@ -233,6 +233,26 @@ def browser_state(debug_port: int) -> dict[str, str]:
     return json.loads(result.stdout)
 
 
+def browser_target(
+    debug_port: int,
+    target_text: str,
+    control_text: str | None = None,
+) -> tuple[int, int]:
+    command = [
+        "node",
+        str(BUILD / "browser_target.mjs"),
+        str(debug_port),
+        target_text,
+    ]
+    if control_text:
+        command.append(control_text)
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "browser target helper failed")
+    target = json.loads(result.stdout)
+    return int(target["x"]), int(target["y"])
+
+
 def wait_for_browser_state(
     debug_port: int,
     *,
@@ -338,6 +358,17 @@ def run_actions(
     run_xdotool(environment, "mousemove", str(pointer[0]), str(pointer[1]))
     for action in PLAN["actions"]:
         sleep_until(started_at + float(action["at"]))
+        if action["label"] == "copy-openclaw":
+            wait_for_json(
+                base_url,
+                "/v1/alerts?limit=500",
+                lambda alerts: any(
+                    alert.get("package") == "@goodman-demo/calendar-sync"
+                    and alert.get("new_version") == "1.2.3"
+                    for alert in alerts
+                ),
+                timeout=4,
+            )
         if action["label"] in {"new-alert", "copy-rollback"}:
             wait_for_json(
                 base_url,
@@ -349,10 +380,17 @@ def run_actions(
                 ),
                 timeout=4,
             )
+        target = (int(action["x"]), int(action["y"]))
+        if action.get("target_text"):
+            target = browser_target(
+                debug_port,
+                action["target_text"],
+                action.get("control_text"),
+            )
         pointer = move_pointer(
             environment,
             pointer,
-            (int(action["x"]), int(action["y"])),
+            target,
             float(action["duration"]),
         )
         if action["click"]:
@@ -398,11 +436,25 @@ def main() -> None:
                 "/v1/report",
                 lambda payload: payload.get("report", {}).get("declared_count") == 1400,
             )
+            wait_for_json(
+                base_url,
+                "/v1/alerts?limit=500",
+                lambda alerts: any(
+                    alert.get("package") == "@goodman-demo/calendar-sync"
+                    and alert.get("new_version") == "1.2.3"
+                    for alert in alerts
+                ),
+            )
             if not timer_ready.wait(timeout=10):
                 raise RuntimeError("demo attack timer was not announced")
 
             xvfb_process = start_xvfb(display)
             chromium_process = start_chromium(base_url, profile, environment, debug_port)
+            wait_for_browser_state(
+                debug_port,
+                expected_hash="#alerts",
+                expected_text="@goodman-demo/calendar-sync",
+            )
 
             target_start = (
                 timing["attack_timer_started"]

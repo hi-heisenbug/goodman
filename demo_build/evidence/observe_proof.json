@@ -1,0 +1,13 @@
+{
+  "schema": "goodman.demo.observe-proof/v1",
+  "captured_at": "2026-07-22T07:37:01.023929+00:00",
+  "source": "live host process via privileged Docker and host kernel",
+  "command": "bash scripts/setup-everything.sh observe --pid <PID> --duration 8s --live-backend docker",
+  "package": "good-pkg",
+  "version": "1.0.0",
+  "behavior": "READ \u2026/node_modules/good-pkg/**",
+  "events": 99,
+  "unique_behaviors": 1,
+  "exact_dependency_events": 99,
+  "pass": "PASS: Goodman attributed real syscalls to 1 dependency identity."
+}
